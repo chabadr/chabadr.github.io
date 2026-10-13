@@ -3733,6 +3733,9 @@ async function initApp(){
     removeEmptyPlaceholderDays();
     render();
     renderFrequentFlyerView();
+    if (new URLSearchParams(location.search).get('view') === 'metivta'){
+      showMetivta();
+    }
     setStatus('');
     checkAutoReset();
     scheduleNextAutoResetCheck();
