@@ -825,13 +825,75 @@ function studentName(id){
 }
 
 // Display-only names used in the Metivta board/archive, editable in-app and
-// stored in state.metivtaNames (keyed by id). Same id as STUDENT_NAMES, so
-// the underlying linkage to every other page (main board, "הנוסע המתמיד",
-// the parent-update log) stays correct - only how the name is shown inside
+// stored in state.metivtaNames / state.metivtaExtraNames (keyed by id, main
+// vs extra group). Same id as STUDENT_NAMES/METIVTA_EXTRA_NAMES, so the
+// underlying linkage to every other page (main board, "הנוסע המתמיד", the
+// parent-update log) stays correct - only how the name is shown inside
 // Metivta's own views changes.
+//
+// Each entry is a { family, first } pair. Older saved data (and real
+// production data from before this split existed) stored a single plain
+// string here instead - normalizeMetivtaNameEntry treats that legacy string
+// as the first name, so no previously-entered custom name is lost.
+function normalizeMetivtaNameEntry(raw){
+  if (typeof raw === 'string') return { family: '', first: raw };
+  if (raw && typeof raw === 'object') return { family: raw.family || '', first: raw.first || '' };
+  return { family: '', first: '' };
+}
+
+function metivtaNameEntry(id, isExtra){
+  const map = isExtra ? state.metivtaExtraNames : state.metivtaNames;
+  return normalizeMetivtaNameEntry(map && map[id]);
+}
+
+function metivtaFirstName(id, isExtra){
+  const entry = metivtaNameEntry(id, isExtra);
+  if (entry.first) return entry.first;
+  return isExtra ? (METIVTA_EXTRA_NAMES[id - 1] || String(id)) : studentName(id);
+}
+
+function metivtaFamilyName(id, isExtra){
+  return metivtaNameEntry(id, isExtra).family;
+}
+
+function metivtaFullName(id, isExtra){
+  const first = metivtaFirstName(id, isExtra);
+  const family = metivtaFamilyName(id, isExtra);
+  return family ? (first + ' ' + family) : first;
+}
+
+function setMetivtaNamePart(id, isExtra, part, value){
+  if (isExtra){
+    if (!state.metivtaExtraNames || typeof state.metivtaExtraNames !== 'object') state.metivtaExtraNames = {};
+  } else if (!state.metivtaNames || typeof state.metivtaNames !== 'object'){
+    state.metivtaNames = {};
+  }
+  const map = isExtra ? state.metivtaExtraNames : state.metivtaNames;
+  const entry = normalizeMetivtaNameEntry(map[id]);
+  entry[part] = value;
+  map[id] = entry;
+}
+
+// "כיתה" (class) per student, main group defaults to 2 and the extra group
+// to 1 - distinct defaults, both overridable per student.
+function metivtaClassValue(id, isExtra){
+  const map = isExtra ? state.metivtaExtraClass : state.metivtaClass;
+  const raw = map && map[id];
+  return (raw === undefined || raw === null || raw === '') ? (isExtra ? 1 : 2) : raw;
+}
+
+function setMetivtaClassValue(id, isExtra, value){
+  if (isExtra){
+    if (!state.metivtaExtraClass || typeof state.metivtaExtraClass !== 'object') state.metivtaExtraClass = {};
+    state.metivtaExtraClass[id] = value;
+  } else {
+    if (!state.metivtaClass || typeof state.metivtaClass !== 'object') state.metivtaClass = {};
+    state.metivtaClass[id] = value;
+  }
+}
+
 function metivtaStudentName(id){
-  const custom = state.metivtaNames && state.metivtaNames[id];
-  return custom || studentName(id);
+  return metivtaFullName(id, false);
 }
 
 const TOTAL_STUDENTS = 23;
@@ -992,7 +1054,7 @@ const METIVTA_EXTRA_NAMES = [
 ];
 
 function metivtaExtraName(id){
-  return METIVTA_EXTRA_NAMES[id - 1] || String(id);
+  return metivtaFullName(id, true);
 }
 
 function defaultState(){
@@ -1004,7 +1066,7 @@ function defaultState(){
   for (let i = 1; i <= 23; i++){
     metivtaExtra.push({ id: i, metivta: { attendance: 0, behavior: 0 }, metivtaFrozen: { attendance: 0, behavior: 0 }, metivtaFlags: { ok: false, late: false, leftEarly: false, disturbCount: 0 } });
   }
-  return { students, metivtaExtra, mergedActive: MERGE_GROUPS.map(g => g[0]), minusShopActive: 'minus', archive: [], lastActivityDate: null, lastAutoResetDate: null, metivtaNames: {} };
+  return { students, metivtaExtra, mergedActive: MERGE_GROUPS.map(g => g[0]), minusShopActive: 'minus', archive: [], lastActivityDate: null, lastAutoResetDate: null, metivtaNames: {}, metivtaExtraNames: {}, metivtaClass: {}, metivtaExtraClass: {} };
 }
 
 function setStatus(msg){
@@ -1084,6 +1146,9 @@ async function loadState(){
       if (typeof parsed.lastActivityDate === 'undefined') parsed.lastActivityDate = null;
       if (typeof parsed.lastAutoResetDate === 'undefined') parsed.lastAutoResetDate = null;
       if (!parsed.metivtaNames || typeof parsed.metivtaNames !== 'object') parsed.metivtaNames = {};
+      if (!parsed.metivtaExtraNames || typeof parsed.metivtaExtraNames !== 'object') parsed.metivtaExtraNames = {};
+      if (!parsed.metivtaClass || typeof parsed.metivtaClass !== 'object') parsed.metivtaClass = {};
+      if (!parsed.metivtaExtraClass || typeof parsed.metivtaExtraClass !== 'object') parsed.metivtaExtraClass = {};
       state = parsed;
       return;
     }
@@ -1610,7 +1675,7 @@ function armExpandedGroupTimer(){
   }, 10000);
 }
 
-function buildNameDropdown(){
+function buildNameDropdown(toggleLabel){
   const list = document.createElement('div');
   list.className = 'merged-dropdown-list merged-dropdown-list-right';
   [['כיתה', showMain], ['מתיבתא', showMetivta]].forEach(([label, action]) => {
@@ -1628,7 +1693,7 @@ function buildNameDropdown(){
   const toggle = document.createElement('button');
   toggle.type = 'button';
   toggle.className = 'merged-dropdown-toggle';
-  toggle.textContent = 'שם';
+  toggle.textContent = toggleLabel || 'שם';
   toggle.addEventListener('click', (e) => {
     e.stopPropagation();
     document.querySelectorAll('.merged-dropdown-list.open').forEach(l => {
@@ -2033,8 +2098,13 @@ function metivtaStatusLabel(f){
 }
 
 function metivtaDayScore(f){
+  // A day with no record at all must always sort below an attended day, no
+  // matter how many exceptions that attended day racked up - otherwise a
+  // heavily-penalized but present student (e.g. disturbed twice, clamped to
+  // 0) becomes indistinguishable from a student with no record for that day
+  // at all, and the two get shuffled together when sorting by that column.
   const attended = f.ok || f.late || f.leftEarly || f.disturbCount > 0;
-  if (!attended) return 0;
+  if (!attended) return -1;
   let score = 4 - (f.late ? 2 : 0) - (f.leftEarly ? 2 : 0) - 2 * (f.disturbCount || 0);
   if (score < 0) score = 0;
   return score;
@@ -2058,9 +2128,14 @@ function metivtaDayLabelLegacyAware(s){
 }
 
 function metivtaDayScoreLegacyAware(s){
-  if (!s) return 0;
+  if (!s) return -1;
   if (metivtaRecordHasFlags(s)) return metivtaDayScore(s.metivtaFlags);
-  return (s.metivtaAttendance || 0) + (s.metivtaBehavior || 0);
+  // No flags recorded. A real pre-flags legacy record can still carry a
+  // meaningful positive attendance/behavior score; a record with none of
+  // that either is simply "no record for this day", which must rank below
+  // every attended day the same way metivtaDayScore's own sentinel does.
+  const legacyScore = (s.metivtaAttendance || 0) + (s.metivtaBehavior || 0);
+  return legacyScore > 0 ? legacyScore : -1;
 }
 
 function toggleMetivtaOk(studentId, isExtra){
@@ -2166,35 +2241,64 @@ function showMetivtaStatusExceptionsModal(studentId, isExtra){
   document.body.appendChild(overlay);
 }
 
+function buildMetivtaEditableCell(initialValue, promptLabel, onSave){
+  const td = document.createElement('td');
+  td.className = 'num-cell';
+  const span = document.createElement('span');
+  span.className = 'cell-text';
+  span.textContent = initialValue;
+  td.appendChild(span);
+  td.style.cursor = 'pointer';
+  td.addEventListener('click', () => {
+    requireArchiveEditAccess(() => {
+      const next = prompt(promptLabel + ':', initialValue);
+      if (next === null) return;
+      onSave(next.trim());
+      saveState();
+      renderMetivtaView();
+    });
+  });
+  return td;
+}
+
 function buildMetivtaBoard(students, isExtra){
   const wrap = document.createElement('div');
   wrap.className = 'board-wrap';
 
   const table = document.createElement('table');
-  table.style.width = 'max(100%, 260px)';
-
-  const colgroup = document.createElement('colgroup');
-  ['60%', '40%'].forEach(w => {
-    const col = document.createElement('col');
-    col.style.width = w;
-    colgroup.appendChild(col);
-  });
-  table.appendChild(colgroup);
+  table.style.width = 'max-content';
 
   const thead = document.createElement('thead');
   const trh = document.createElement('tr');
-  ['שם', 'דיווח'].forEach(label => {
-    const th = document.createElement('th');
-    const inner = document.createElement('div');
-    inner.className = 'th-inner';
-    if (label === 'שם'){
-      inner.appendChild(buildNameDropdown());
-    } else {
-      inner.textContent = label;
-    }
-    th.appendChild(inner);
-    trh.appendChild(th);
-  });
+
+  const familyTh = document.createElement('th');
+  const familyInner = document.createElement('div');
+  familyInner.className = 'th-inner';
+  familyInner.textContent = 'משפחה';
+  familyTh.appendChild(familyInner);
+  trh.appendChild(familyTh);
+
+  const firstTh = document.createElement('th');
+  const firstInner = document.createElement('div');
+  firstInner.className = 'th-inner';
+  firstInner.appendChild(buildNameDropdown('פרטי'));
+  firstTh.appendChild(firstInner);
+  trh.appendChild(firstTh);
+
+  const classTh = document.createElement('th');
+  const classInner = document.createElement('div');
+  classInner.className = 'th-inner';
+  classInner.textContent = 'כיתה';
+  classTh.appendChild(classInner);
+  trh.appendChild(classTh);
+
+  const reportTh = document.createElement('th');
+  const reportInner = document.createElement('div');
+  reportInner.className = 'th-inner';
+  reportInner.textContent = 'דיווח';
+  reportTh.appendChild(reportInner);
+  trh.appendChild(reportTh);
+
   thead.appendChild(trh);
   table.appendChild(thead);
 
@@ -2203,32 +2307,23 @@ function buildMetivtaBoard(students, isExtra){
     const tr = document.createElement('tr');
     tr.dataset.studentId = student.id;
 
-    const numTd = document.createElement('td');
-    numTd.className = 'num-cell';
-    const numSpan = document.createElement('span');
-    numSpan.className = 'cell-text';
-    numSpan.textContent = isExtra ? metivtaExtraName(student.id) : metivtaStudentName(student.id);
-    numTd.appendChild(numSpan);
-    if (!isExtra){
-      numTd.style.cursor = 'pointer';
-      numTd.addEventListener('click', () => {
-        requireArchiveEditAccess(() => {
-          const current = metivtaStudentName(student.id);
-          const next = prompt('שם לתצוגה בלוח מתיבתא:', current);
-          if (next === null) return;
-          const trimmed = next.trim();
-          if (!state.metivtaNames || typeof state.metivtaNames !== 'object') state.metivtaNames = {};
-          if (trimmed && trimmed !== studentName(student.id)){
-            state.metivtaNames[student.id] = trimmed;
-          } else {
-            delete state.metivtaNames[student.id];
-          }
-          saveState();
-          renderMetivtaView();
-        });
-      });
-    }
-    tr.appendChild(numTd);
+    tr.appendChild(buildMetivtaEditableCell(
+      metivtaFamilyName(student.id, isExtra),
+      'שם משפחה',
+      (value) => setMetivtaNamePart(student.id, isExtra, 'family', value)
+    ));
+
+    tr.appendChild(buildMetivtaEditableCell(
+      metivtaFirstName(student.id, isExtra),
+      'שם פרטי',
+      (value) => setMetivtaNamePart(student.id, isExtra, 'first', value)
+    ));
+
+    tr.appendChild(buildMetivtaEditableCell(
+      String(metivtaClassValue(student.id, isExtra)),
+      'כיתה',
+      (value) => setMetivtaClassValue(student.id, isExtra, value)
+    ));
 
     const statusTd = document.createElement('td');
     const flags = ensureMetivtaFlags(student);
@@ -2286,12 +2381,51 @@ function renderMetivtaView(){
 
   el.appendChild(boardsWrap);
 
+  document.querySelectorAll('.metivta-board-col table').forEach(fitTableColumnsToContent);
+
   const metivtaHistoryEl = document.createElement('div');
   metivtaHistoryEl.style.marginTop = '24px';
   el.appendChild(metivtaHistoryEl);
   renderMetivtaHistoryTable(metivtaHistoryEl);
 
   fitAllTextCells();
+}
+
+// Sizes every column of a table to exactly fit its widest cell (header
+// included) - no column ends up wider than the content it actually needs.
+// Must be called after the table is connected to the document, since it
+// reads computed font metrics.
+function fitTableColumnsToContent(table){
+  const headRow = table.querySelector('thead tr');
+  if (!headRow || !table.isConnected) return;
+  const ths = [...headRow.children];
+  const span = document.createElement('span');
+  span.style.position = 'fixed';
+  span.style.top = '-9999px';
+  span.style.whiteSpace = 'nowrap';
+  document.body.appendChild(span);
+  ths.forEach((th, colIndex) => {
+    const cs = getComputedStyle(th);
+    const sampleTd = table.querySelector('tbody tr td:nth-child(' + (colIndex + 1) + ')');
+    const tdCs = sampleTd ? getComputedStyle(sampleTd) : cs;
+    span.style.fontFamily = tdCs.fontFamily;
+    span.style.fontWeight = tdCs.fontWeight;
+    span.style.fontSize = tdCs.fontSize;
+    let maxWidth = 0;
+    const texts = [th.textContent];
+    table.querySelectorAll('tbody tr').forEach(tr => {
+      const cell = tr.children[colIndex];
+      if (cell) texts.push(cell.textContent);
+    });
+    texts.forEach(text => {
+      span.textContent = text;
+      maxWidth = Math.max(maxWidth, span.getBoundingClientRect().width);
+    });
+    const padding = (parseFloat(cs.paddingLeft) || 0) + (parseFloat(cs.paddingRight) || 0);
+    const border = (parseFloat(cs.borderLeftWidth) || 0) + (parseFloat(cs.borderRightWidth) || 0);
+    th.style.width = Math.ceil(maxWidth + padding + border + 4) + 'px';
+  });
+  span.remove();
 }
 
 async function exportMetivtaArchiveCSV(days){
@@ -2331,15 +2465,9 @@ async function exportMetivtaArchiveCSV(days){
 }
 
 let metivtaArchiveSortIndex = null;
-let metivtaSummaryDayCount = 7;
+let metivtaSummaryDayCount = 5;
 let metivtaSummaryField = 'total';
-const METIVTA_SUMMARY_DAY_OPTIONS = (() => {
-  const opts = [];
-  for (let i = 1; i <= 15; i++) opts.push({ key: i, label: i === 1 ? 'יום אחד' : i + ' ימים' });
-  opts.push({ key: 30, label: '30 ימים' });
-  opts.push({ key: null, label: 'הכל' });
-  return opts;
-})();
+const METIVTA_SUMMARY_DAY_OPTIONS = [5, 10, 15].map(n => ({ key: n, label: n + ' ימים' }));
 const METIVTA_SUMMARY_FIELD_OPTIONS = [
   { key: 'total', label: 'סה״כ' },
   { key: 'onTime', label: 'בזמן' },
@@ -2362,15 +2490,11 @@ function computeMetivtaStats(row, days, dayCount){
   return { onTime, late, leftEarly, disturbed };
 }
 
+// "סה״כ" counts every day the student was present at all - even a day
+// marked late/left-early/disturbed still counts as attendance here, unlike
+// the other fields which isolate one specific exception type.
 function metivtaSummaryText(stats, field){
-  if (field === 'total'){
-    const parts = [];
-    if (stats.onTime) parts.push(stats.onTime + ' בזמן');
-    if (stats.late) parts.push(stats.late + ' איחור');
-    if (stats.leftEarly) parts.push(stats.leftEarly + ' מוקדם');
-    if (stats.disturbed) parts.push(stats.disturbed + ' הפרעות');
-    return parts.length ? parts.join(' · ') : '—';
-  }
+  if (field === 'total') return String(stats.onTime + stats.late);
   return String(stats[field] || 0);
 }
 
@@ -2473,11 +2597,11 @@ function renderMetivtaHistoryTable(container){
   summaryTh.style.whiteSpace = 'nowrap';
   const summaryControls = document.createElement('div');
   summaryControls.style.display = 'flex';
+  summaryControls.style.flexDirection = 'column';
   summaryControls.style.alignItems = 'center';
-  summaryControls.style.justifyContent = 'center';
-  summaryControls.style.gap = '2px';
-  summaryControls.appendChild(buildMetivtaSummaryFieldDropdown(container));
+  summaryControls.style.gap = '0px';
   summaryControls.appendChild(buildMetivtaSummaryDaysDropdown(container));
+  summaryControls.appendChild(buildMetivtaSummaryFieldDropdown(container));
   summaryTh.appendChild(summaryControls);
   trh.appendChild(summaryTh);
   days.forEach((entry, dayIndex) => {

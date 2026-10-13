@@ -320,13 +320,7 @@ const FIELD_LABELS = {
 const FIELD_ORDER = ['chitas', 'shema', 'netilatYadaim', 'minchaMaariv', 'mikveh', 'dvarTorah'];
 const LEAD_COL_WIDTHS = { student: 72, week: 80, when: 105 };
 
-const DAY_COUNT_OPTIONS = (() => {
-  const opts = [];
-  for (let i = 1; i <= 15; i++) opts.push({ value: String(i), label: i === 1 ? 'יום אחרון' : i + ' ימים אחרונים' });
-  opts.push({ value: '30', label: '30 ימים אחרונים' });
-  opts.push({ value: 'all', label: 'כל הימים הארכיוניים' });
-  return opts;
-})();
+const DAY_COUNT_OPTIONS = [5, 10, 15].map(n => ({ value: String(n), label: n + ' ימים אחרונים' }));
 
 const DEFAULT_TEMPLATE = 'שלום,\nעדכון שבועי עבור {שם} מהמתיבתא:\n{סיכום}\n\nלעדכון נתונים: {קישור}';
 
@@ -682,6 +676,19 @@ async function renderPhonesTab(container){
 }
 
 // ---------- Tab: שליחת SMS - מתיבתא ----------
+
+// Metivta custom names are stored as { family, first } (older saved data -
+// from before the family/first split existed - stored a single plain
+// string instead, which this treats as the first name).
+function decodeMetivtaNameEntry(raw, fallback){
+  if (typeof raw === 'string') return { family: '', first: raw || fallback };
+  if (raw && typeof raw === 'object') return { family: raw.family || '', first: raw.first || fallback };
+  return { family: '', first: fallback };
+}
+function metivtaFullNameFromEntry(entry){
+  return entry.family ? (entry.first + ' ' + entry.family) : entry.first;
+}
+
 function computeDefaultStats(student, days, dayCountVal){
   const dayCount = dayCountVal === 'all' ? null : parseInt(dayCountVal, 10);
   const relevantDays = dayCount === null ? days : days.slice(0, dayCount);
@@ -721,6 +728,7 @@ async function renderSmsTab(container){
     if (!mainSnap.exists()) throw new Error('לא נמצאו נתוני כיתה');
     const mainData = mainSnap.data();
     const metivtaNames = mainData.metivtaNames || {};
+    const metivtaExtraNames = mainData.metivtaExtraNames || {};
     const days = (archiveSnap.exists() && Array.isArray(archiveSnap.data().days)) ? archiveSnap.data().days.slice() : [];
     days.sort((a, b) => new Date(b.date) - new Date(a.date));
     const phonesData = phonesSnap.exists() ? phonesSnap.data() : {};
@@ -732,9 +740,11 @@ async function renderSmsTab(container){
     const students = [];
     STUDENT_NAMES.forEach((name, idx) => {
       const id = idx + 1;
+      const entry = decodeMetivtaNameEntry(metivtaNames[id], name);
       students.push({
         key: 'main-' + id, id, isExtra: false,
-        name: metivtaNames[id] || name,
+        name: metivtaFullNameFromEntry(entry),
+        firstName: entry.first,
         link: new URL('parent-update.html?id=' + id, location.href).href,
         father: (mainPhones[id] && mainPhones[id].father) || '',
         mother: (mainPhones[id] && mainPhones[id].mother) || '',
@@ -743,9 +753,11 @@ async function renderSmsTab(container){
     });
     METIVTA_EXTRA_NAMES.forEach((name, idx) => {
       const id = idx + 1;
+      const entry = decodeMetivtaNameEntry(metivtaExtraNames[id], name);
       students.push({
         key: 'extra-' + id, id, isExtra: true,
-        name: name,
+        name: metivtaFullNameFromEntry(entry),
+        firstName: entry.first,
         link: '',
         father: (extraPhones[id] && extraPhones[id].father) || '',
         mother: (extraPhones[id] && extraPhones[id].mother) || '',
@@ -762,7 +774,7 @@ async function renderSmsTab(container){
     templateCard.appendChild(templateLabel);
     const hint = document.createElement('div');
     hint.className = 'hint';
-    hint.innerHTML = 'שדות משתנים זמינים: <b>{שם}</b>, <b>{קישור}</b> (קיים רק לתלמידים הרגילים), <b>{סיכום}</b> (כל הנתונים יחד), או כל נתון בנפרד: <b>{בזמן}</b>, <b>{איחור}</b>, <b>{מוקדם}</b>, <b>{הפרעות}</b>.';
+    hint.innerHTML = 'שדות משתנים זמינים: <b>{שם}</b> (השם הפרטי), <b>{קישור}</b> (קיים רק לתלמידים הרגילים), <b>{סיכום}</b> (כל הנתונים יחד), <b>{סה״כ}</b> (כמה פעמים נוכח, כולל ימים עם איחור/מוקדם/הפרעה), או כל נתון בנפרד: <b>{בזמן}</b>, <b>{איחור}</b>, <b>{מוקדם}</b>, <b>{הפרעות}</b>.';
     templateCard.appendChild(hint);
     const templateTextarea = document.createElement('textarea');
     templateTextarea.id = 'template';
@@ -796,7 +808,7 @@ async function renderSmsTab(container){
       o.textContent = opt.label;
       dayCountSelect.appendChild(o);
     });
-    dayCountSelect.value = '7';
+    dayCountSelect.value = '5';
     dayCountWrap.appendChild(dayCountSelect);
     rowInline.appendChild(dayCountWrap);
     templateCard.appendChild(rowInline);
@@ -984,14 +996,16 @@ async function renderSmsTab(container){
     function resolveMessage(student){
       const stats = getStatsForStudent(student.key);
       const summaryText = summaryTextFromStats(stats);
+      const total = stats.onTime + stats.late;
       return templateTextarea.value
-        .split('{שם}').join(student.name)
+        .split('{שם}').join(student.firstName)
         .split('{סיכום}').join(summaryText)
         .split('{קישור}').join(student.link || '')
         .split('{בזמן}').join(String(stats.onTime))
         .split('{איחור}').join(String(stats.late))
         .split('{מוקדם}').join(String(stats.leftEarly))
-        .split('{הפרעות}').join(String(stats.disturbed));
+        .split('{הפרעות}').join(String(stats.disturbed))
+        .split('{סה״כ}').join(String(total));
     }
 
     // --- Preview + send card ---
