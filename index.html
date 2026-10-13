@@ -91,6 +91,9 @@
   .metivta-board-col td{
     padding: 5px 4px;
   }
+  .metivta-board-col .cell-text{
+    text-overflow: ellipsis;
+  }
   .metivta-board-col .cell-text,
   .metivta-board-col .point-val,
   .metivta-board-col .status-val,
@@ -336,6 +339,9 @@
   }
   .archive-date .merged-dropdown-toggle{
     color: var(--paper);
+  }
+  table.archive-table thead th .merged-dropdown-toggle{
+    font-size: clamp(11px, 4vw, 20px);
   }
   .parent-log-link{
     color: var(--gold);
@@ -674,6 +680,7 @@
     .archive-view{ max-width: min(96vw, 1800px); }
     .archive-date{ font-size: 17px; padding: 12px 18px; }
     table.archive-table th{ font-size: 18px; padding: 12px 10px; }
+    table.archive-table thead th .merged-dropdown-toggle{ font-size: 18px; }
     table.archive-table td{ font-size: 17px; padding: 12px 10px; }
   }
 
@@ -2381,7 +2388,7 @@ function renderMetivtaView(){
 
   el.appendChild(boardsWrap);
 
-  document.querySelectorAll('.metivta-board-col table').forEach(fitTableColumnsToContent);
+  document.querySelectorAll('.metivta-board-col table').forEach(fitMetivtaBoardColumns);
 
   const metivtaHistoryEl = document.createElement('div');
   metivtaHistoryEl.style.marginTop = '24px';
@@ -2391,11 +2398,14 @@ function renderMetivtaView(){
   fitAllTextCells();
 }
 
-// Sizes every column of a table to exactly fit its widest cell (header
-// included) - no column ends up wider than the content it actually needs.
-// Must be called after the table is connected to the document, since it
-// reads computed font metrics.
-function fitTableColumnsToContent(table){
+// Sizes the Metivta day board's columns: משפחה/כיתה fit their content
+// exactly, פרטי is deliberately capped narrower than its content (long
+// names clip instead of widening the column), and דיווח - the column that
+// actually needs the room - is left unset so it absorbs whatever space is
+// left. The table itself is kept at least 100% wide so it still fills the
+// screen on narrow devices, instead of shrinking to only as wide as its
+// (now intentionally tight) columns add up to.
+function fitMetivtaBoardColumns(table){
   const headRow = table.querySelector('thead tr');
   if (!headRow || !table.isConnected) return;
   const ths = [...headRow.children];
@@ -2404,7 +2414,9 @@ function fitTableColumnsToContent(table){
   span.style.top = '-9999px';
   span.style.whiteSpace = 'nowrap';
   document.body.appendChild(span);
-  ths.forEach((th, colIndex) => {
+
+  function measure(colIndex){
+    const th = ths[colIndex];
     const cs = getComputedStyle(th);
     const sampleTd = table.querySelector('tbody tr td:nth-child(' + (colIndex + 1) + ')');
     const tdCs = sampleTd ? getComputedStyle(sampleTd) : cs;
@@ -2423,8 +2435,22 @@ function fitTableColumnsToContent(table){
     });
     const padding = (parseFloat(cs.paddingLeft) || 0) + (parseFloat(cs.paddingRight) || 0);
     const border = (parseFloat(cs.borderLeftWidth) || 0) + (parseFloat(cs.borderRightWidth) || 0);
-    th.style.width = Math.ceil(maxWidth + padding + border + 4) + 'px';
-  });
+    return Math.ceil(maxWidth + padding + border + 4);
+  }
+
+  const FIRST_NAME_MAX = 80;
+  const REPORT_MIN = 90;
+
+  const familyWidth = measure(0);
+  const firstWidth = Math.min(measure(1), FIRST_NAME_MAX);
+  const classWidth = measure(2);
+
+  ths[0].style.width = familyWidth + 'px';
+  ths[1].style.width = firstWidth + 'px';
+  ths[2].style.width = classWidth + 'px';
+  ths[3].style.width = '';
+
+  table.style.width = 'max(100%, ' + (familyWidth + firstWidth + classWidth + REPORT_MIN) + 'px)';
   span.remove();
 }
 
@@ -2469,7 +2495,7 @@ let metivtaSummaryDayCount = 5;
 let metivtaSummaryField = 'total';
 const METIVTA_SUMMARY_DAY_OPTIONS = [5, 10, 15].map(n => ({ key: n, label: n + ' ימים' }));
 const METIVTA_SUMMARY_FIELD_OPTIONS = [
-  { key: 'total', label: 'סה״כ' },
+  { key: 'total', label: 'נוכחות' },
   { key: 'onTime', label: 'בזמן' },
   { key: 'late', label: 'איחור' },
   { key: 'leftEarly', label: 'מוקדם' },
@@ -2490,7 +2516,7 @@ function computeMetivtaStats(row, days, dayCount){
   return { onTime, late, leftEarly, disturbed };
 }
 
-// "סה״כ" counts every day the student was present at all - even a day
+// "נוכחות" counts every day the student was present at all - even a day
 // marked late/left-early/disturbed still counts as attendance here, unlike
 // the other fields which isolate one specific exception type.
 function metivtaSummaryText(stats, field){
@@ -2508,6 +2534,7 @@ function buildMetivtaSummaryDaysDropdown(container){
     optEl.addEventListener('click', (e) => {
       e.stopPropagation();
       metivtaSummaryDayCount = opt.key;
+      metivtaArchiveSortIndex = 'summary';
       list.classList.remove('open');
       renderMetivtaHistoryTable(container);
     });
@@ -2516,7 +2543,7 @@ function buildMetivtaSummaryDaysDropdown(container){
   const activeOpt = METIVTA_SUMMARY_DAY_OPTIONS.find(o => o.key === metivtaSummaryDayCount) || METIVTA_SUMMARY_DAY_OPTIONS[0];
   const toggle = document.createElement('button');
   toggle.type = 'button';
-  toggle.className = 'merged-dropdown-toggle';
+  toggle.className = 'merged-dropdown-toggle metivta-summary-toggle';
   toggle.textContent = activeOpt.label;
   toggle.addEventListener('click', (e) => {
     e.stopPropagation();
@@ -2540,6 +2567,7 @@ function buildMetivtaSummaryFieldDropdown(container){
     optEl.addEventListener('click', (e) => {
       e.stopPropagation();
       metivtaSummaryField = opt.key;
+      metivtaArchiveSortIndex = 'summary';
       list.classList.remove('open');
       renderMetivtaHistoryTable(container);
     });
@@ -2548,8 +2576,8 @@ function buildMetivtaSummaryFieldDropdown(container){
   const activeOpt = METIVTA_SUMMARY_FIELD_OPTIONS.find(o => o.key === metivtaSummaryField) || METIVTA_SUMMARY_FIELD_OPTIONS[0];
   const toggle = document.createElement('button');
   toggle.type = 'button';
-  toggle.className = 'merged-dropdown-toggle';
-  toggle.textContent = activeOpt.label;
+  toggle.className = 'merged-dropdown-toggle metivta-summary-toggle';
+  toggle.textContent = activeOpt.label + (metivtaArchiveSortIndex === 'summary' ? ' ▼' : '');
   toggle.addEventListener('click', (e) => {
     e.stopPropagation();
     document.querySelectorAll('.merged-dropdown-list.open').forEach(l => { if (l !== list) l.classList.remove('open'); });
@@ -2586,15 +2614,19 @@ function renderMetivtaHistoryTable(container){
 
   const table = document.createElement('table');
   table.className = 'archive-table';
-  table.style.width = 'max(100%, ' + (210 + days.length * 40) + 'px)';
+  table.style.width = 'max(100%, ' + (280 + days.length * 40) + 'px)';
 
   const thead = document.createElement('thead');
   const trh = document.createElement('tr');
-  const nameTh = document.createElement('th');
-  nameTh.textContent = 'שם';
-  trh.appendChild(nameTh);
+  const familyTh = document.createElement('th');
+  familyTh.textContent = 'משפחה';
+  trh.appendChild(familyTh);
+  const firstTh = document.createElement('th');
+  firstTh.textContent = 'פרטי';
+  trh.appendChild(firstTh);
   const summaryTh = document.createElement('th');
   summaryTh.style.whiteSpace = 'nowrap';
+  summaryTh.style.cursor = 'pointer';
   const summaryControls = document.createElement('div');
   summaryControls.style.display = 'flex';
   summaryControls.style.flexDirection = 'column';
@@ -2603,6 +2635,11 @@ function renderMetivtaHistoryTable(container){
   summaryControls.appendChild(buildMetivtaSummaryDaysDropdown(container));
   summaryControls.appendChild(buildMetivtaSummaryFieldDropdown(container));
   summaryTh.appendChild(summaryControls);
+  summaryTh.title = 'ללחוץ כדי למיין לפי הטור הזה';
+  summaryTh.addEventListener('click', () => {
+    metivtaArchiveSortIndex = 'summary';
+    renderMetivtaHistoryTable(container);
+  });
   trh.appendChild(summaryTh);
   days.forEach((entry, dayIndex) => {
     const th = document.createElement('th');
@@ -2631,14 +2668,16 @@ function renderMetivtaHistoryTable(container){
   const mainRows = state.students.map(student => ({
     id: student.id,
     isExtra: false,
-    name: metivtaStudentName(student.id),
+    family: metivtaFamilyName(student.id, false),
+    first: metivtaFirstName(student.id, false),
     getRecord: (entry) => entry.students.find(x => x.id === student.id) || null,
     ensureRecord: (entry) => entry.students.find(x => x.id === student.id) || null
   }));
   const extraRows = (state.metivtaExtra || []).map(student => ({
     id: student.id,
     isExtra: true,
-    name: metivtaExtraName(student.id),
+    family: metivtaFamilyName(student.id, true),
+    first: metivtaFirstName(student.id, true),
     getRecord: (entry) => (entry.metivtaExtraStudents || []).find(x => x.id === student.id) || null,
     ensureRecord: (entry) => {
       if (!Array.isArray(entry.metivtaExtraStudents)) entry.metivtaExtraStudents = [];
@@ -2649,7 +2688,13 @@ function renderMetivtaHistoryTable(container){
   }));
 
   let allRows = mainRows.concat(extraRows);
-  if (metivtaArchiveSortIndex !== null && days[metivtaArchiveSortIndex]){
+  if (metivtaArchiveSortIndex === 'summary'){
+    allRows = allRows.slice().sort((a, b) => {
+      const bVal = Number(metivtaSummaryText(computeMetivtaStats(b, days, metivtaSummaryDayCount), metivtaSummaryField)) || 0;
+      const aVal = Number(metivtaSummaryText(computeMetivtaStats(a, days, metivtaSummaryDayCount), metivtaSummaryField)) || 0;
+      return bVal - aVal;
+    });
+  } else if (metivtaArchiveSortIndex !== null && days[metivtaArchiveSortIndex]){
     const sortEntry = days[metivtaArchiveSortIndex];
     allRows = allRows.slice().sort((a, b) => {
       return metivtaDayScoreLegacyAware(b.getRecord(sortEntry)) - metivtaDayScoreLegacyAware(a.getRecord(sortEntry));
@@ -2658,9 +2703,12 @@ function renderMetivtaHistoryTable(container){
 
   allRows.forEach(row => {
     const tr = document.createElement('tr');
-    const nameTd = document.createElement('td');
-    nameTd.textContent = row.name;
-    tr.appendChild(nameTd);
+    const familyTd = document.createElement('td');
+    familyTd.textContent = row.family;
+    tr.appendChild(familyTd);
+    const firstTd = document.createElement('td');
+    firstTd.textContent = row.first;
+    tr.appendChild(firstTd);
 
     const summaryTd = document.createElement('td');
     summaryTd.textContent = metivtaSummaryText(computeMetivtaStats(row, days, metivtaSummaryDayCount), metivtaSummaryField);
@@ -3416,7 +3464,11 @@ function fitAllTextCells(){
   });
 
   const headerGroups = new Map();
-  document.querySelectorAll('thead .col-reset-btn, thead .merged-dropdown-toggle').forEach(el => {
+  // .metivta-summary-toggle is excluded here on purpose - it relies on its
+  // own CSS clamp() (matched to the archive table's day headers) instead of
+  // this JS auto-shrink, which would otherwise size it independently of
+  // those headers and end up visibly mismatched from them.
+  document.querySelectorAll('thead .col-reset-btn, thead .merged-dropdown-toggle:not(.metivta-summary-toggle)').forEach(el => {
     el.style.fontSize = '';
     const container = el.closest('th');
     const table = el.closest('table');
