@@ -229,6 +229,14 @@
   .btn-secondary{ background: #fff; border: 1px solid var(--gold) !important; color: var(--ink); }
   .btn-primary{ background: var(--gold); color: #fff; }
   .action-bar button:disabled{ opacity: 0.5; cursor: default; }
+  input#scheduleAt{
+    padding: 8px 10px;
+    border-radius: 8px;
+    border: 1px solid var(--line);
+    font-family: 'Rubik', sans-serif;
+    font-size: 14px;
+  }
+  table.log-table button.btn-secondary{ padding: 5px 14px; font-size: 12.5px; border-radius: 8px; cursor: pointer; }
   .preview-list{ margin-top: 14px; }
   .preview-item{
     border: 1px solid var(--line);
@@ -294,7 +302,7 @@
 
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-app.js";
-import { getFirestore, doc, getDoc, setDoc, collection, query, orderBy, limit, getDocs } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
+import { getFirestore, doc, getDoc, setDoc, addDoc, deleteDoc, collection, query, orderBy, limit, getDocs } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
 import { firebaseConfig, isFirebaseConfigured } from "./firebase-config.js";
 import { sms4freeConfig } from "./sms-config.js";
 
@@ -814,6 +822,79 @@ async function renderSmsTab(container){
     templateCard.appendChild(rowInline);
     container.appendChild(templateCard);
 
+    // --- Pending scheduled messages card ---
+    const pendingCard = document.createElement('div');
+    pendingCard.className = 'card';
+    const pendingTitle = document.createElement('div');
+    pendingTitle.className = 'section-title';
+    pendingTitle.textContent = 'הודעות מתוזמנות שעדיין לא נשלחו';
+    pendingCard.appendChild(pendingTitle);
+    const pendingHint = document.createElement('div');
+    pendingHint.className = 'hint';
+    pendingHint.textContent = 'השליחה בפועל בזמן שנקבע מתבצעת על ידי פונקציית שרת מתוזמנת (Cloud Function) שבודקת כל דקה אם הגיע הזמן - היא פועלת ברקע גם אם העמוד הזה סגור, בתנאי שהוגדרה ונפרסה בפרויקט (ראו functions/README.md בקוד).';
+    pendingCard.appendChild(pendingHint);
+    const pendingBody = document.createElement('div');
+    pendingCard.appendChild(pendingBody);
+    container.appendChild(pendingCard);
+
+    const scheduledSmsCollection = collection(db, FIRESTORE_COLLECTION, STORAGE_KEY, 'scheduledSms');
+
+    async function renderPendingList(){
+      pendingBody.textContent = 'טוען…';
+      const snap = await getDocs(scheduledSmsCollection);
+      const pending = [];
+      snap.forEach(d => {
+        const data = d.data();
+        if (data.status === 'pending') pending.push({ id: d.id, ...data });
+      });
+      pending.sort((a, b) => new Date(a.sendAt) - new Date(b.sendAt));
+      pendingBody.innerHTML = '';
+      if (pending.length === 0){
+        pendingBody.textContent = 'אין הודעות מתוזמנות כרגע.';
+        return;
+      }
+      const table = document.createElement('table');
+      table.className = 'log-table';
+      const thead = document.createElement('thead');
+      const trh = document.createElement('tr');
+      ['נמען', 'זמן שליחה', 'הודעה', ''].forEach(label => {
+        const th = document.createElement('th');
+        th.textContent = label;
+        trh.appendChild(th);
+      });
+      thead.appendChild(trh);
+      table.appendChild(thead);
+      const tbody = document.createElement('tbody');
+      pending.forEach(p => {
+        const tr = document.createElement('tr');
+        const labelTd = document.createElement('td');
+        labelTd.textContent = p.label || p.phone;
+        tr.appendChild(labelTd);
+        const timeTd = document.createElement('td');
+        timeTd.textContent = new Date(p.sendAt).toLocaleString('he-IL');
+        tr.appendChild(timeTd);
+        const msgTd = document.createElement('td');
+        msgTd.textContent = p.msg.length > 60 ? p.msg.slice(0, 60) + '…' : p.msg;
+        tr.appendChild(msgTd);
+        const cancelTd = document.createElement('td');
+        const cancelBtn = document.createElement('button');
+        cancelBtn.type = 'button';
+        cancelBtn.className = 'btn-secondary';
+        cancelBtn.textContent = 'בטל';
+        cancelBtn.addEventListener('click', async () => {
+          if (!confirm('לבטל את ההודעה המתוזמנת הזו?')) return;
+          cancelBtn.disabled = true;
+          await deleteDoc(doc(db, FIRESTORE_COLLECTION, STORAGE_KEY, 'scheduledSms', p.id));
+          await renderPendingList();
+        });
+        cancelTd.appendChild(cancelBtn);
+        tr.appendChild(cancelTd);
+        tbody.appendChild(tr);
+      });
+      table.appendChild(tbody);
+      pendingBody.appendChild(table);
+    }
+
     // --- Recipients card ---
     const recipientsCard = document.createElement('div');
     recipientsCard.className = 'card';
@@ -1024,9 +1105,29 @@ async function renderSmsTab(container){
     const sendBtn = document.createElement('button');
     sendBtn.className = 'btn-primary';
     sendBtn.type = 'button';
-    sendBtn.textContent = 'שלח הודעות';
+    sendBtn.textContent = 'שלח הודעות עכשיו';
     sendAction.appendChild(sendBtn);
     sendCard.appendChild(sendAction);
+
+    const scheduleRow = document.createElement('div');
+    scheduleRow.className = 'action-bar';
+    const scheduleLabel = document.createElement('label');
+    scheduleLabel.className = 'field-label';
+    scheduleLabel.textContent = 'או תזמון לשליחה אוטומטית בזמן:';
+    scheduleRow.appendChild(scheduleLabel);
+    const scheduleInput = document.createElement('input');
+    scheduleInput.type = 'datetime-local';
+    scheduleInput.id = 'scheduleAt';
+    const minDate = new Date(Date.now() - new Date().getTimezoneOffset() * 60000);
+    scheduleInput.min = minDate.toISOString().slice(0, 16);
+    scheduleRow.appendChild(scheduleInput);
+    const scheduleBtn = document.createElement('button');
+    scheduleBtn.className = 'btn-secondary';
+    scheduleBtn.type = 'button';
+    scheduleBtn.textContent = 'תזמן שליחה';
+    scheduleRow.appendChild(scheduleBtn);
+    sendCard.appendChild(scheduleRow);
+
     const summaryBar = document.createElement('div');
     summaryBar.className = 'summary-bar';
     sendCard.appendChild(summaryBar);
@@ -1123,6 +1224,51 @@ async function renderSmsTab(container){
       sendBtn.disabled = false;
       dataTableBtn.disabled = false;
     });
+
+    scheduleBtn.addEventListener('click', async () => {
+      const sender = senderInput.value.trim();
+      if (!sender){
+        alert('יש להזין שם/מספר שולח לפני התזמון.');
+        return;
+      }
+      const whenVal = scheduleInput.value;
+      const sendAtDate = whenVal ? new Date(whenVal) : null;
+      if (!sendAtDate || isNaN(sendAtDate.getTime()) || sendAtDate.getTime() <= Date.now()){
+        alert('יש לבחור תאריך ושעה בעתיד לשליחה.');
+        return;
+      }
+      const items = Array.from(previewList.querySelectorAll('.preview-item'));
+      if (items.length === 0) return;
+      const whenLabel = sendAtDate.toLocaleString('he-IL');
+      if (!confirm('לתזמן ' + items.length + ' הודעות SMS לשליחה אוטומטית ב-' + whenLabel + '?')) return;
+
+      scheduleBtn.disabled = true;
+      sendBtn.disabled = true;
+      try{
+        for (const item of items){
+          const studentKey = item.dataset.studentKey;
+          const role = item.dataset.role;
+          const student = students.find(s => s.key === studentKey);
+          const phone = normalizePhone(student[role]);
+          const msg = item.querySelector('textarea').value;
+          const label = student.name + ' - ' + (role === 'father' ? 'אבא' : 'אמא');
+          await addDoc(scheduledSmsCollection, {
+            phone, msg, sender, label,
+            status: 'pending',
+            sendAt: sendAtDate.toISOString(),
+            createdAt: new Date().toISOString()
+          });
+        }
+        summaryBar.textContent = 'תוזמנו ' + items.length + ' הודעות לשליחה אוטומטית ב-' + whenLabel + '.';
+        await renderPendingList();
+      } catch(e){
+        alert('שגיאה בתזמון: ' + (e && e.message ? e.message : String(e)));
+      }
+      scheduleBtn.disabled = false;
+      sendBtn.disabled = false;
+    });
+
+    await renderPendingList();
 
   } catch(e){
     status.className = 'err';

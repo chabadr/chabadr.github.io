@@ -1,0 +1,13 @@
+{
+  "name": "functions",
+  "description": "Scheduled Cloud Function that sends pending SMS messages from admin.html's \"תזמון שליחה\" feature at their scheduled time.",
+  "private": true,
+  "engines": {
+    "node": "20"
+  },
+  "main": "index.js",
+  "dependencies": {
+    "firebase-admin": "^12.1.0",
+    "firebase-functions": "^5.0.0"
+  }
+}
