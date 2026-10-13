@@ -1,0 +1,710 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>שליחת SMS להורי המתיבתא</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Frank+Ruhl+Libre:wght@500;700;900&family=Rubik:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --paper:#F6F3EA;
+    --ink:#22304A;
+    --ink-soft:#4B5C79;
+    --line:#D9D2BC;
+    --gold:#B8902E;
+    --gold-bg:#FBF1D9;
+    --danger:#9C3B3B;
+    --ok:#2F6B3A;
+    --radius:10px;
+  }
+  * { box-sizing: border-box; }
+  html, body{
+    margin: 0; padding: 0;
+    background: var(--paper);
+    color: var(--ink);
+    font-family: 'Rubik', sans-serif;
+  }
+  .wrap{
+    max-width: 960px;
+    margin: 0 auto;
+    padding: 20px 16px 80px;
+  }
+  h1{
+    font-family: 'Frank Ruhl Libre', serif;
+    font-size: 20px;
+    margin: 0 0 16px;
+  }
+  .section-title{
+    font-family: 'Frank Ruhl Libre', serif;
+    font-size: 17px;
+    margin: 28px 0 10px;
+  }
+  .section-title:first-of-type{ margin-top: 0; }
+  .code-box{
+    text-align: center;
+    padding: 40px 16px;
+  }
+  .code-box input{
+    display: block;
+    margin: 14px auto 0;
+    width: 160px;
+    padding: 10px;
+    text-align: center;
+    font-size: 18px;
+    border-radius: var(--radius);
+    border: 1px solid var(--line);
+  }
+  .code-box button{
+    display: block;
+    margin: 12px auto 0;
+    padding: 10px 24px;
+    border: none;
+    border-radius: var(--radius);
+    background: var(--gold);
+    color: #fff;
+    font-weight: 700;
+    cursor: pointer;
+  }
+  .code-error{
+    color: var(--danger);
+    font-size: 13px;
+    margin-top: 8px;
+    min-height: 18px;
+  }
+  .card{
+    background: #fff;
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    padding: 16px;
+    margin-bottom: 20px;
+    box-shadow: 0 2px 0 var(--line), 0 8px 24px rgba(34,48,74,0.06);
+  }
+  .field-label{
+    font-weight: 700;
+    font-size: 14px;
+    margin-bottom: 6px;
+    display: block;
+  }
+  .hint{
+    font-size: 12.5px;
+    color: var(--ink-soft);
+    margin: 4px 0 10px;
+    line-height: 1.5;
+  }
+  textarea#template{
+    width: 100%;
+    min-height: 110px;
+    padding: 10px;
+    border-radius: 8px;
+    border: 1px solid var(--line);
+    font-family: 'Rubik', sans-serif;
+    font-size: 14px;
+    resize: vertical;
+  }
+  .row-inline{
+    display: flex;
+    flex-wrap: wrap;
+    gap: 16px;
+    margin-top: 14px;
+  }
+  .row-inline > div{ flex: 1; min-width: 180px; }
+  input#sender{
+    width: 100%;
+    padding: 9px 10px;
+    border-radius: 8px;
+    border: 1px solid var(--line);
+    font-family: 'Rubik', sans-serif;
+    font-size: 14px;
+  }
+  select#dayCount{
+    width: 100%;
+    padding: 9px 10px;
+    border-radius: 8px;
+    border: 1px solid var(--line);
+    font-family: 'Rubik', sans-serif;
+    font-size: 14px;
+    background: #fff;
+  }
+  .table-scroll{
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  table.recipients-table{
+    border-collapse: collapse;
+    width: 100%;
+  }
+  table.recipients-table th{
+    background: var(--gold-bg);
+    font-size: 13px;
+    font-weight: 700;
+    padding: 8px 10px;
+    border-bottom: 2px solid var(--gold);
+    text-align: center;
+  }
+  table.recipients-table th:first-child{ text-align: right; }
+  table.recipients-table td{
+    font-size: 13.5px;
+    padding: 6px 10px;
+    border-bottom: 1px solid var(--line);
+    text-align: center;
+  }
+  table.recipients-table td:first-child{ text-align: right; }
+  table.recipients-table tr:nth-child(even){ background: #FCFBF6; }
+  .parent-cell{
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+  }
+  .parent-cell .phone{
+    font-size: 12px;
+    color: var(--ink-soft);
+    direction: ltr;
+  }
+  .parent-cell .missing{
+    font-size: 12px;
+    color: var(--ink-soft);
+  }
+  .select-all-row{
+    display: flex;
+    gap: 10px;
+    margin-bottom: 10px;
+    font-size: 13px;
+  }
+  .select-all-row button{
+    padding: 5px 12px;
+    border-radius: 8px;
+    border: 1px solid var(--line);
+    background: #fff;
+    cursor: pointer;
+    font-size: 12.5px;
+  }
+  .action-bar{
+    display: flex;
+    gap: 12px;
+    margin-top: 16px;
+    flex-wrap: wrap;
+  }
+  .action-bar button{
+    padding: 10px 24px;
+    border: none;
+    border-radius: var(--radius);
+    font-weight: 700;
+    font-size: 14px;
+    cursor: pointer;
+  }
+  #previewBtn{ background: #fff; border: 1px solid var(--gold); color: var(--ink); }
+  #sendBtn{ background: var(--gold); color: #fff; }
+  #sendBtn:disabled, #previewBtn:disabled{ opacity: 0.5; cursor: default; }
+  .preview-list{
+    margin-top: 14px;
+  }
+  .preview-item{
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 10px 12px;
+    margin-bottom: 8px;
+    font-size: 13.5px;
+    white-space: pre-wrap;
+  }
+  .preview-item .preview-head{
+    font-weight: 700;
+    margin-bottom: 4px;
+    display: flex;
+    justify-content: space-between;
+    gap: 8px;
+  }
+  .preview-item .preview-phone{
+    color: var(--ink-soft);
+    font-weight: 400;
+    direction: ltr;
+  }
+  .preview-item .preview-status{
+    font-size: 12.5px;
+    margin-top: 6px;
+    font-weight: 700;
+  }
+  .status-ok{ color: var(--ok); }
+  .status-err{ color: var(--danger); }
+  .summary-bar{
+    margin-top: 12px;
+    font-size: 13.5px;
+    font-weight: 700;
+  }
+  .loading, .err{
+    text-align: center;
+    color: var(--ink-soft);
+    padding: 20px 0;
+  }
+  .err{ color: var(--danger); }
+</style>
+</head>
+<body>
+  <div class="wrap" id="app"></div>
+
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-app.js";
+import { getFirestore, doc, getDoc } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
+import { firebaseConfig, isFirebaseConfigured } from "./firebase-config.js";
+import { sms4freeConfig } from "./sms-config.js";
+
+const STORAGE_KEY = 'classroom-points-v1';
+const FIRESTORE_COLLECTION = 'classroom_points';
+const ACCESS_CODE = '963';
+
+// Keep in sync with STUDENT_NAMES in index.html.
+const STUDENT_NAMES = [
+  'צאלי', 'ישרוליק', 'נתנאל', 'מענדי ה.', 'מענדי ח.', 'אלעאי', 'יהונתן', 'איתן', 'מענדי ל.', 'שלוימי', 'מוישלה', 'לוי ס.',
+  'שמוליק ע.', 'מולי', 'שלום', 'חננאל', 'שמוליק צ.', 'אושר', 'שמעון', 'מוטי', 'לוי ק.', 'נועם', 'משה'
+];
+// Keep in sync with METIVTA_EXTRA_NAMES in index.html.
+const METIVTA_EXTRA_NAMES = [
+  'יהונתן', 'נריה', 'יהודה', 'חסדיאל', 'אוריאל', 'מענדל', 'שניאור', 'מענדי דר.', 'מענדי זכ.', 'עוזי', 'מענדי יא.',
+  'אופיר', 'לוי', 'מענדי מז.', 'מענדי מע.', 'אברמי', 'שמואל', 'מענדי סמ.', 'ברוכי', 'איזיק', 'בער', 'רמי', 'ניתאי'
+];
+
+const DAY_COUNT_OPTIONS = [
+  { value: '7', label: '7 ימים אחרונים' },
+  { value: '14', label: '14 ימים אחרונים' },
+  { value: '30', label: '30 ימים אחרונים' },
+  { value: 'all', label: 'כל הימים הארכיוניים' }
+];
+
+const DEFAULT_TEMPLATE = 'שלום,\nעדכון שבועי עבור {שם} מהמתיבתא:\n{סיכום}\n\nלעדכון נתונים: {קישור}';
+
+const SMS4FREE_ERROR_MESSAGES = {
+  0: 'שגיאה כללית',
+  '-1': 'מפתח, שם משתמש או סיסמה שגויים',
+  '-2': 'שם או מספר שולח ההודעה שגוי',
+  '-3': 'לא נמצאו נמענים',
+  '-4': 'לא ניתן לשלוח הודעה, יתרת הודעות פנויות נמוכה',
+  '-5': 'הודעה לא מתאימה',
+  '-6': 'צריך לאמת מספר שולח'
+};
+
+const app = document.getElementById('app');
+
+function metivtaRecordHasFlags(s){
+  const f = s && s.metivtaFlags;
+  return !!(f && (f.ok || f.late || f.leftEarly || (f.disturbCount || 0) > 0));
+}
+
+function computeSummaryText(records, dayCountOpt){
+  // records: array of {date, flags} sorted newest-first, already limited to
+  // the relevant window by the caller.
+  let onTime = 0, late = 0, leftEarly = 0, disturbed = 0;
+  records.forEach(r => {
+    if (!r.flags) return;
+    const f = r.flags;
+    const attended = !!(f.ok || f.late || f.leftEarly || (f.disturbCount || 0) > 0);
+    if (!attended) return;
+    if (f.late) late++; else onTime++;
+    if (f.leftEarly) leftEarly++;
+    if (f.disturbCount > 0) disturbed += f.disturbCount;
+  });
+  const parts = [];
+  parts.push('הגיע בזמן: ' + onTime + ' פעמים');
+  if (late) parts.push('איחר: ' + late + ' פעמים');
+  if (leftEarly) parts.push('יצא מוקדם: ' + leftEarly + ' פעמים');
+  if (disturbed) parts.push('הפריע: ' + disturbed + ' פעמים');
+  return parts.join(', ');
+}
+
+function normalizePhone(v){
+  return (v || '').replace(/[\s-]/g, '').trim();
+}
+
+function showCodePrompt(){
+  app.innerHTML = '';
+  const h1 = document.createElement('h1');
+  h1.textContent = 'שליחת SMS להורי המתיבתא';
+  app.appendChild(h1);
+
+  const box = document.createElement('div');
+  box.className = 'code-box';
+  const msg = document.createElement('div');
+  msg.textContent = 'הזן קוד לצפייה:';
+  box.appendChild(msg);
+  const input = document.createElement('input');
+  input.type = 'password';
+  input.inputMode = 'numeric';
+  box.appendChild(input);
+  const errorEl = document.createElement('div');
+  errorEl.className = 'code-error';
+  box.appendChild(errorEl);
+  const btn = document.createElement('button');
+  btn.textContent = 'כניסה';
+  box.appendChild(btn);
+  app.appendChild(box);
+
+  function trySubmit(){
+    if (input.value.trim() === ACCESS_CODE){
+      renderPage();
+    } else {
+      errorEl.textContent = 'קוד שגוי, נסה שוב';
+      input.value = '';
+      input.focus();
+    }
+  }
+  btn.addEventListener('click', trySubmit);
+  input.addEventListener('keydown', (e) => { if (e.key === 'Enter') trySubmit(); });
+  setTimeout(() => input.focus(), 50);
+}
+
+async function renderPage(){
+  app.innerHTML = '';
+  const h1 = document.createElement('h1');
+  h1.textContent = 'שליחת SMS להורי המתיבתא';
+  app.appendChild(h1);
+
+  const status = document.createElement('div');
+  status.className = 'loading';
+  status.textContent = 'טוען…';
+  app.appendChild(status);
+
+  try{
+    const firebaseApp = initializeApp(firebaseConfig);
+    const db = getFirestore(firebaseApp);
+
+    const [mainSnap, archiveSnap, phonesSnap] = await Promise.all([
+      getDoc(doc(db, FIRESTORE_COLLECTION, STORAGE_KEY)),
+      getDoc(doc(db, FIRESTORE_COLLECTION, STORAGE_KEY, 'meta', 'dailyArchive')),
+      getDoc(doc(db, FIRESTORE_COLLECTION, STORAGE_KEY, 'meta', 'metivtaPhones'))
+    ]);
+
+    if (!mainSnap.exists()) throw new Error('לא נמצאו נתוני כיתה');
+    const mainData = mainSnap.data();
+    const metivtaNames = mainData.metivtaNames || {};
+    const days = (archiveSnap.exists() && Array.isArray(archiveSnap.data().days)) ? archiveSnap.data().days.slice() : [];
+    days.sort((a, b) => new Date(b.date) - new Date(a.date));
+    const phonesData = phonesSnap.exists() ? phonesSnap.data() : {};
+    const mainPhones = phonesData.main || {};
+    const extraPhones = phonesData.extra || {};
+
+    status.remove();
+
+    // Build the unified recipient list: main (with parent-update link) + extra (no link).
+    const students = [];
+    STUDENT_NAMES.forEach((name, idx) => {
+      const id = idx + 1;
+      students.push({
+        key: 'main-' + id,
+        id, isExtra: false,
+        name: metivtaNames[id] || name,
+        link: new URL('parent-update.html?id=' + id, location.href).href,
+        father: (mainPhones[id] && mainPhones[id].father) || '',
+        mother: (mainPhones[id] && mainPhones[id].mother) || '',
+        getRecord: (entry) => (entry.students || []).find(x => x.id === id) || null
+      });
+    });
+    METIVTA_EXTRA_NAMES.forEach((name, idx) => {
+      const id = idx + 1;
+      students.push({
+        key: 'extra-' + id,
+        id, isExtra: true,
+        name: name,
+        link: '',
+        father: (extraPhones[id] && extraPhones[id].father) || '',
+        mother: (extraPhones[id] && extraPhones[id].mother) || '',
+        getRecord: (entry) => (entry.metivtaExtraStudents || []).find(x => x.id === id) || null
+      });
+    });
+
+    // --- Message template card ---
+    const templateCard = document.createElement('div');
+    templateCard.className = 'card';
+    const templateLabel = document.createElement('label');
+    templateLabel.className = 'field-label';
+    templateLabel.textContent = 'תבנית ההודעה';
+    templateCard.appendChild(templateLabel);
+    const hint = document.createElement('div');
+    hint.className = 'hint';
+    hint.innerHTML = 'אפשר להשתמש בשדות משתנים: <b>{שם}</b> (שם התלמיד), <b>{סיכום}</b> (סיכום הנוכחות לפי מספר הימים שנבחר למטה), <b>{קישור}</b> (קישור אישי לעדכון הורים - קיים רק לתלמידים הרגילים, לתלמידים הנוספים זה יישאר ריק).';
+    templateCard.appendChild(hint);
+    const templateTextarea = document.createElement('textarea');
+    templateTextarea.id = 'template';
+    templateTextarea.value = DEFAULT_TEMPLATE;
+    templateCard.appendChild(templateTextarea);
+
+    const rowInline = document.createElement('div');
+    rowInline.className = 'row-inline';
+
+    const senderWrap = document.createElement('div');
+    const senderLabel = document.createElement('label');
+    senderLabel.className = 'field-label';
+    senderLabel.textContent = 'שם/מספר השולח (כפי שמאושר בחשבון ה-sms4free)';
+    senderWrap.appendChild(senderLabel);
+    const senderInput = document.createElement('input');
+    senderInput.id = 'sender';
+    senderInput.type = 'text';
+    senderWrap.appendChild(senderInput);
+    rowInline.appendChild(senderWrap);
+
+    const dayCountWrap = document.createElement('div');
+    const dayCountLabel = document.createElement('label');
+    dayCountLabel.className = 'field-label';
+    dayCountLabel.textContent = 'טווח הסיכום';
+    dayCountWrap.appendChild(dayCountLabel);
+    const dayCountSelect = document.createElement('select');
+    dayCountSelect.id = 'dayCount';
+    DAY_COUNT_OPTIONS.forEach(opt => {
+      const o = document.createElement('option');
+      o.value = opt.value;
+      o.textContent = opt.label;
+      dayCountSelect.appendChild(o);
+    });
+    dayCountWrap.appendChild(dayCountSelect);
+    rowInline.appendChild(dayCountWrap);
+
+    templateCard.appendChild(rowInline);
+    app.appendChild(templateCard);
+
+    // --- Recipients card ---
+    const recipientsCard = document.createElement('div');
+    recipientsCard.className = 'card';
+    const recipientsTitle = document.createElement('div');
+    recipientsTitle.className = 'section-title';
+    recipientsTitle.textContent = 'נמענים';
+    recipientsCard.appendChild(recipientsTitle);
+
+    const selectAllRow = document.createElement('div');
+    selectAllRow.className = 'select-all-row';
+    const selectAllBtn = document.createElement('button');
+    selectAllBtn.type = 'button';
+    selectAllBtn.textContent = 'בחר הכל';
+    const clearAllBtn = document.createElement('button');
+    clearAllBtn.type = 'button';
+    clearAllBtn.textContent = 'בטל הכל';
+    selectAllRow.appendChild(selectAllBtn);
+    selectAllRow.appendChild(clearAllBtn);
+    recipientsCard.appendChild(selectAllRow);
+
+    const tableScroll = document.createElement('div');
+    tableScroll.className = 'table-scroll';
+    const table = document.createElement('table');
+    table.className = 'recipients-table';
+    const thead = document.createElement('thead');
+    const trh = document.createElement('tr');
+    ['תלמיד', 'אבא', 'אמא'].forEach(label => {
+      const th = document.createElement('th');
+      th.textContent = label;
+      trh.appendChild(th);
+    });
+    thead.appendChild(trh);
+    table.appendChild(thead);
+
+    const tbody = document.createElement('tbody');
+    students.forEach(s => {
+      const tr = document.createElement('tr');
+      const nameTd = document.createElement('td');
+      nameTd.textContent = s.name + (s.isExtra ? ' (נוסף)' : '');
+      tr.appendChild(nameTd);
+
+      ['father', 'mother'].forEach(role => {
+        const td = document.createElement('td');
+        const phone = s[role];
+        if (phone){
+          const cell = document.createElement('div');
+          cell.className = 'parent-cell';
+          const cb = document.createElement('input');
+          cb.type = 'checkbox';
+          cb.dataset.studentKey = s.key;
+          cb.dataset.role = role;
+          cell.appendChild(cb);
+          const phoneSpan = document.createElement('span');
+          phoneSpan.className = 'phone';
+          phoneSpan.textContent = phone;
+          cell.appendChild(phoneSpan);
+          td.appendChild(cell);
+        } else {
+          const missing = document.createElement('span');
+          missing.className = 'missing';
+          missing.textContent = 'אין מספר';
+          td.appendChild(missing);
+        }
+        tr.appendChild(td);
+      });
+
+      tbody.appendChild(tr);
+    });
+    table.appendChild(tbody);
+    tableScroll.appendChild(table);
+    recipientsCard.appendChild(tableScroll);
+    app.appendChild(recipientsCard);
+
+    selectAllBtn.addEventListener('click', () => {
+      recipientsCard.querySelectorAll('input[type="checkbox"]').forEach(cb => { cb.checked = true; });
+    });
+    clearAllBtn.addEventListener('click', () => {
+      recipientsCard.querySelectorAll('input[type="checkbox"]').forEach(cb => { cb.checked = false; });
+    });
+
+    // --- Actions + preview ---
+    const actionCard = document.createElement('div');
+    actionCard.className = 'card';
+    const actionBar = document.createElement('div');
+    actionBar.className = 'action-bar';
+    const previewBtn = document.createElement('button');
+    previewBtn.id = 'previewBtn';
+    previewBtn.type = 'button';
+    previewBtn.textContent = 'הצג תצוגה מקדימה';
+    const sendBtn = document.createElement('button');
+    sendBtn.id = 'sendBtn';
+    sendBtn.type = 'button';
+    sendBtn.textContent = 'שלח הודעות';
+    sendBtn.disabled = true;
+    actionBar.appendChild(previewBtn);
+    actionBar.appendChild(sendBtn);
+    actionCard.appendChild(actionBar);
+    const previewList = document.createElement('div');
+    previewList.className = 'preview-list';
+    actionCard.appendChild(previewList);
+    const summaryBar = document.createElement('div');
+    summaryBar.className = 'summary-bar';
+    actionCard.appendChild(summaryBar);
+    app.appendChild(actionCard);
+
+    function getSelectedRecipients(){
+      const selected = [];
+      recipientsCard.querySelectorAll('input[type="checkbox"]:checked').forEach(cb => {
+        const student = students.find(s => s.key === cb.dataset.studentKey);
+        if (!student) return;
+        const phone = student[cb.dataset.role];
+        if (!phone) return;
+        selected.push({ student, role: cb.dataset.role, phone });
+      });
+      return selected;
+    }
+
+    function resolveMessage(student){
+      const dayCountVal = dayCountSelect.value;
+      const dayCount = dayCountVal === 'all' ? null : parseInt(dayCountVal, 10);
+      const relevantDays = dayCount === null ? days : days.slice(0, dayCount);
+      const records = relevantDays.map(entry => ({ date: entry.date, flags: (student.getRecord(entry) || {}).metivtaFlags }));
+      const summaryText = computeSummaryText(records, dayCountVal);
+      return templateTextarea.value
+        .split('{שם}').join(student.name)
+        .split('{סיכום}').join(summaryText)
+        .split('{קישור}').join(student.link || '');
+    }
+
+    function buildPreview(){
+      const selected = getSelectedRecipients();
+      previewList.innerHTML = '';
+      if (selected.length === 0){
+        const empty = document.createElement('div');
+        empty.className = 'hint';
+        empty.textContent = 'לא נבחרו נמענים.';
+        previewList.appendChild(empty);
+        sendBtn.disabled = true;
+        return selected;
+      }
+      selected.forEach(r => {
+        const item = document.createElement('div');
+        item.className = 'preview-item';
+        item.dataset.studentKey = r.student.key;
+        item.dataset.role = r.role;
+        const head = document.createElement('div');
+        head.className = 'preview-head';
+        const nameSpan = document.createElement('span');
+        nameSpan.textContent = r.student.name + ' - ' + (r.role === 'father' ? 'אבא' : 'אמא');
+        const phoneSpan = document.createElement('span');
+        phoneSpan.className = 'preview-phone';
+        phoneSpan.textContent = r.phone;
+        head.appendChild(nameSpan);
+        head.appendChild(phoneSpan);
+        item.appendChild(head);
+        const body = document.createElement('div');
+        body.textContent = resolveMessage(r.student);
+        item.appendChild(body);
+        const statusEl = document.createElement('div');
+        statusEl.className = 'preview-status';
+        item.appendChild(statusEl);
+        previewList.appendChild(item);
+      });
+      sendBtn.disabled = false;
+      summaryBar.textContent = '';
+      return selected;
+    }
+
+    previewBtn.addEventListener('click', buildPreview);
+
+    async function sendOne(sender, recipientPhone, msg){
+      const res = await fetch('https://api.sms4free.co.il/ApiSMS/SendSMS', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json; charset=utf-8' },
+        body: JSON.stringify({
+          key: sms4freeConfig.key,
+          user: sms4freeConfig.user,
+          pass: sms4freeConfig.pass,
+          sender,
+          recipient: recipientPhone,
+          msg
+        })
+      });
+      const text = (await res.text()).trim();
+      const code = parseInt(text, 10);
+      return code;
+    }
+
+    sendBtn.addEventListener('click', async () => {
+      const sender = senderInput.value.trim();
+      if (!sender){
+        alert('יש להזין שם/מספר שולח לפני השליחה.');
+        return;
+      }
+      const items = Array.from(previewList.querySelectorAll('.preview-item'));
+      if (items.length === 0) return;
+      if (!confirm('לשלוח ' + items.length + ' הודעות SMS בפועל (בתשלום)?')) return;
+
+      sendBtn.disabled = true;
+      previewBtn.disabled = true;
+      let okCount = 0, failCount = 0;
+
+      for (const item of items){
+        const studentKey = item.dataset.studentKey;
+        const role = item.dataset.role;
+        const student = students.find(s => s.key === studentKey);
+        const phone = normalizePhone(student[role]);
+        const msg = resolveMessage(student);
+        const statusEl = item.querySelector('.preview-status');
+        statusEl.textContent = 'שולח…';
+        try{
+          const code = await sendOne(sender, phone, msg);
+          if (!isNaN(code) && code > 0){
+            statusEl.textContent = 'נשלח בהצלחה ✓';
+            statusEl.className = 'preview-status status-ok';
+            okCount++;
+          } else {
+            const errMsg = SMS4FREE_ERROR_MESSAGES[String(code)] || ('קוד שגיאה: ' + code);
+            statusEl.textContent = 'נכשל: ' + errMsg;
+            statusEl.className = 'preview-status status-err';
+            failCount++;
+          }
+        } catch(e){
+          statusEl.textContent = 'נכשל: שגיאת רשת (' + (e && e.message ? e.message : String(e)) + ') - ייתכן שזה חסימת CORS של שרת ה-SMS';
+          statusEl.className = 'preview-status status-err';
+          failCount++;
+        }
+      }
+
+      summaryBar.textContent = 'נשלחו בהצלחה: ' + okCount + ' · נכשלו: ' + failCount;
+      previewBtn.disabled = false;
+      sendBtn.disabled = false;
+    });
+
+  } catch(e){
+    status.className = 'err';
+    status.textContent = 'שגיאה בטעינה: ' + (e && e.message ? e.message : String(e));
+  }
+}
+
+if (!isFirebaseConfigured){
+  app.innerHTML = '<div class="err">האתר לא מוגדר עדיין.</div>';
+} else {
+  showCodePrompt();
+}
+</script>
+</body>
+</html>

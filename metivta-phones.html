@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>מספרי טלפון הורים - מתיבתא</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Frank+Ruhl+Libre:wght@500;700;900&family=Rubik:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --paper:#F6F3EA;
+    --ink:#22304A;
+    --ink-soft:#4B5C79;
+    --line:#D9D2BC;
+    --gold:#B8902E;
+    --gold-bg:#FBF1D9;
+    --danger:#9C3B3B;
+    --radius:10px;
+  }
+  * { box-sizing: border-box; }
+  html, body{
+    margin: 0; padding: 0;
+    background: var(--paper);
+    color: var(--ink);
+    font-family: 'Rubik', sans-serif;
+  }
+  .wrap{
+    max-width: 900px;
+    margin: 0 auto;
+    padding: 20px 16px 80px;
+  }
+  h1{
+    font-family: 'Frank Ruhl Libre', serif;
+    font-size: 20px;
+    margin: 0 0 16px;
+  }
+  .section-title{
+    font-family: 'Frank Ruhl Libre', serif;
+    font-size: 17px;
+    margin: 28px 0 10px;
+  }
+  .section-title:first-of-type{ margin-top: 0; }
+  .code-box{
+    text-align: center;
+    padding: 40px 16px;
+  }
+  .code-box input{
+    display: block;
+    margin: 14px auto 0;
+    width: 160px;
+    padding: 10px;
+    text-align: center;
+    font-size: 18px;
+    border-radius: var(--radius);
+    border: 1px solid var(--line);
+  }
+  .code-box button{
+    display: block;
+    margin: 12px auto 0;
+    padding: 10px 24px;
+    border: none;
+    border-radius: var(--radius);
+    background: var(--gold);
+    color: #fff;
+    font-weight: 700;
+    cursor: pointer;
+  }
+  .code-error{
+    color: var(--danger);
+    font-size: 13px;
+    margin-top: 8px;
+    min-height: 18px;
+  }
+  .table-scroll{
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  table.phones-table{
+    border-collapse: collapse;
+    width: 100%;
+  }
+  table.phones-table th{
+    background: var(--gold-bg);
+    font-size: 13px;
+    font-weight: 700;
+    padding: 8px 10px;
+    border-bottom: 2px solid var(--gold);
+    text-align: right;
+  }
+  table.phones-table td{
+    font-size: 14px;
+    padding: 6px 10px;
+    border-bottom: 1px solid var(--line);
+  }
+  table.phones-table tr:nth-child(even){ background: #FCFBF6; }
+  table.phones-table input{
+    width: 100%;
+    min-width: 110px;
+    padding: 7px 8px;
+    border-radius: 8px;
+    border: 1px solid var(--line);
+    font-family: 'Rubik', sans-serif;
+    font-size: 14px;
+    direction: ltr;
+    text-align: center;
+  }
+  .save-bar{
+    position: sticky;
+    bottom: 0;
+    background: var(--paper);
+    padding: 12px 0;
+    border-top: 1px solid var(--line);
+    margin-top: 16px;
+    display: flex;
+    align-items: center;
+    gap: 14px;
+  }
+  .save-bar button{
+    padding: 10px 28px;
+    border: none;
+    border-radius: var(--radius);
+    background: var(--gold);
+    color: #fff;
+    font-weight: 700;
+    font-size: 15px;
+    cursor: pointer;
+  }
+  .save-status{
+    font-size: 13px;
+    color: var(--ink-soft);
+  }
+  .loading, .err{
+    text-align: center;
+    color: var(--ink-soft);
+    padding: 20px 0;
+  }
+  .err{ color: var(--danger); }
+</style>
+</head>
+<body>
+  <div class="wrap" id="app"></div>
+
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-app.js";
+import { getFirestore, doc, getDoc, setDoc } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
+import { firebaseConfig, isFirebaseConfigured } from "./firebase-config.js";
+
+const STORAGE_KEY = 'classroom-points-v1';
+const FIRESTORE_COLLECTION = 'classroom_points';
+const ACCESS_CODE = '963';
+
+// Keep in sync with STUDENT_NAMES in index.html.
+const STUDENT_NAMES = [
+  'צאלי', 'ישרוליק', 'נתנאל', 'מענדי ה.', 'מענדי ח.', 'אלעאי', 'יהונתן', 'איתן', 'מענדי ל.', 'שלוימי', 'מוישלה', 'לוי ס.',
+  'שמוליק ע.', 'מולי', 'שלום', 'חננאל', 'שמוליק צ.', 'אושר', 'שמעון', 'מוטי', 'לוי ק.', 'נועם', 'משה'
+];
+// Keep in sync with METIVTA_EXTRA_NAMES in index.html.
+const METIVTA_EXTRA_NAMES = [
+  'יהונתן', 'נריה', 'יהודה', 'חסדיאל', 'אוריאל', 'מענדל', 'שניאור', 'מענדי דר.', 'מענדי זכ.', 'עוזי', 'מענדי יא.',
+  'אופיר', 'לוי', 'מענדי מז.', 'מענדי מע.', 'אברמי', 'שמואל', 'מענדי סמ.', 'ברוכי', 'איזיק', 'בער', 'רמי', 'ניתאי'
+];
+
+const app = document.getElementById('app');
+let firestoreDb = null;
+let phonesDocRef = null;
+
+function normalizePhone(v){
+  return (v || '').replace(/[\s-]/g, '').trim();
+}
+
+function showCodePrompt(){
+  app.innerHTML = '';
+  const h1 = document.createElement('h1');
+  h1.textContent = 'מספרי טלפון הורים - מתיבתא';
+  app.appendChild(h1);
+
+  const box = document.createElement('div');
+  box.className = 'code-box';
+  const msg = document.createElement('div');
+  msg.textContent = 'הזן קוד לצפייה:';
+  box.appendChild(msg);
+  const input = document.createElement('input');
+  input.type = 'password';
+  input.inputMode = 'numeric';
+  box.appendChild(input);
+  const errorEl = document.createElement('div');
+  errorEl.className = 'code-error';
+  box.appendChild(errorEl);
+  const btn = document.createElement('button');
+  btn.textContent = 'כניסה';
+  box.appendChild(btn);
+  app.appendChild(box);
+
+  function trySubmit(){
+    if (input.value.trim() === ACCESS_CODE){
+      renderPage();
+    } else {
+      errorEl.textContent = 'קוד שגוי, נסה שוב';
+      input.value = '';
+      input.focus();
+    }
+  }
+  btn.addEventListener('click', trySubmit);
+  input.addEventListener('keydown', (e) => { if (e.key === 'Enter') trySubmit(); });
+  setTimeout(() => input.focus(), 50);
+}
+
+function buildGroupTable(names, groupKey, phonesData){
+  const scrollWrap = document.createElement('div');
+  scrollWrap.className = 'table-scroll';
+  const table = document.createElement('table');
+  table.className = 'phones-table';
+
+  const thead = document.createElement('thead');
+  const trh = document.createElement('tr');
+  ['תלמיד', 'טלפון אבא', 'טלפון אמא'].forEach(label => {
+    const th = document.createElement('th');
+    th.textContent = label;
+    trh.appendChild(th);
+  });
+  thead.appendChild(trh);
+  table.appendChild(thead);
+
+  const tbody = document.createElement('tbody');
+  names.forEach((name, idx) => {
+    const id = idx + 1;
+    const existing = (phonesData[groupKey] && phonesData[groupKey][id]) || {};
+    const tr = document.createElement('tr');
+    const nameTd = document.createElement('td');
+    nameTd.textContent = name;
+    tr.appendChild(nameTd);
+
+    const fatherTd = document.createElement('td');
+    const fatherInput = document.createElement('input');
+    fatherInput.type = 'tel';
+    fatherInput.value = existing.father || '';
+    fatherInput.dataset.group = groupKey;
+    fatherInput.dataset.id = id;
+    fatherInput.dataset.role = 'father';
+    fatherTd.appendChild(fatherInput);
+    tr.appendChild(fatherTd);
+
+    const motherTd = document.createElement('td');
+    const motherInput = document.createElement('input');
+    motherInput.type = 'tel';
+    motherInput.value = existing.mother || '';
+    motherInput.dataset.group = groupKey;
+    motherInput.dataset.id = id;
+    motherInput.dataset.role = 'mother';
+    motherTd.appendChild(motherInput);
+    tr.appendChild(motherTd);
+
+    tbody.appendChild(tr);
+  });
+  table.appendChild(tbody);
+  scrollWrap.appendChild(table);
+  return scrollWrap;
+}
+
+async function renderPage(){
+  app.innerHTML = '';
+  const h1 = document.createElement('h1');
+  h1.textContent = 'מספרי טלפון הורים - מתיבתא';
+  app.appendChild(h1);
+
+  const status = document.createElement('div');
+  status.className = 'loading';
+  status.textContent = 'טוען…';
+  app.appendChild(status);
+
+  try{
+    const firebaseApp = initializeApp(firebaseConfig);
+    firestoreDb = getFirestore(firebaseApp);
+    phonesDocRef = doc(firestoreDb, FIRESTORE_COLLECTION, STORAGE_KEY, 'meta', 'metivtaPhones');
+    const snap = await getDoc(phonesDocRef);
+    const phonesData = snap.exists() ? snap.data() : {};
+    if (!phonesData.main) phonesData.main = {};
+    if (!phonesData.extra) phonesData.extra = {};
+
+    status.remove();
+
+    const mainTitle = document.createElement('div');
+    mainTitle.className = 'section-title';
+    mainTitle.textContent = 'תלמידים';
+    app.appendChild(mainTitle);
+    app.appendChild(buildGroupTable(STUDENT_NAMES, 'main', phonesData));
+
+    const extraTitle = document.createElement('div');
+    extraTitle.className = 'section-title';
+    extraTitle.textContent = 'תלמידים נוספים (מתיבתא בלבד)';
+    app.appendChild(extraTitle);
+    app.appendChild(buildGroupTable(METIVTA_EXTRA_NAMES, 'extra', phonesData));
+
+    const saveBar = document.createElement('div');
+    saveBar.className = 'save-bar';
+    const saveBtn = document.createElement('button');
+    saveBtn.textContent = 'שמירה';
+    saveBar.appendChild(saveBtn);
+    const saveStatus = document.createElement('span');
+    saveStatus.className = 'save-status';
+    saveBar.appendChild(saveStatus);
+    app.appendChild(saveBar);
+
+    saveBtn.addEventListener('click', async () => {
+      saveStatus.textContent = 'שומר…';
+      const newData = { main: {}, extra: {} };
+      app.querySelectorAll('table.phones-table input').forEach(input => {
+        const group = input.dataset.group;
+        const id = input.dataset.id;
+        const role = input.dataset.role;
+        if (!newData[group][id]) newData[group][id] = {};
+        newData[group][id][role] = normalizePhone(input.value);
+      });
+      try{
+        await setDoc(phonesDocRef, newData);
+        saveStatus.textContent = 'נשמר ✓';
+        setTimeout(() => { saveStatus.textContent = ''; }, 2500);
+      } catch(e){
+        saveStatus.textContent = 'שמירה נכשלה: ' + (e && e.message ? e.message : String(e));
+      }
+    });
+  } catch(e){
+    status.className = 'err';
+    status.textContent = 'שגיאה בטעינה: ' + (e && e.message ? e.message : String(e));
+  }
+}
+
+if (!isFirebaseConfigured){
+  app.innerHTML = '<div class="err">האתר לא מוגדר עדיין.</div>';
+} else {
+  showCodePrompt();
+}
+</script>
+</body>
+</html>

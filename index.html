@@ -2331,6 +2331,64 @@ async function exportMetivtaArchiveCSV(days){
 }
 
 let metivtaArchiveSortIndex = null;
+let metivtaSummaryDayCount = 7;
+const METIVTA_SUMMARY_DAY_OPTIONS = [
+  { key: 7, label: '7 ימים' },
+  { key: 14, label: '14 ימים' },
+  { key: 30, label: '30 ימים' },
+  { key: null, label: 'הכל' }
+];
+
+function computeMetivtaSummary(row, days, dayCount){
+  const relevantDays = dayCount === null ? days : days.slice(0, dayCount);
+  let onTime = 0, late = 0, leftEarly = 0, disturbed = 0;
+  relevantDays.forEach(entry => {
+    const rec = row.getRecord(entry);
+    if (!rec || !metivtaRecordHasFlags(rec)) return;
+    const f = rec.metivtaFlags;
+    if (f.late) late++; else onTime++;
+    if (f.leftEarly) leftEarly++;
+    if (f.disturbCount > 0) disturbed += f.disturbCount;
+  });
+  const parts = [];
+  if (onTime) parts.push(onTime + ' בזמן');
+  if (late) parts.push(late + ' איחור');
+  if (leftEarly) parts.push(leftEarly + ' מוקדם');
+  if (disturbed) parts.push(disturbed + ' הפרעות');
+  return parts.length ? parts.join(' · ') : '—';
+}
+
+function buildMetivtaSummaryDaysDropdown(container){
+  const list = document.createElement('div');
+  list.className = 'merged-dropdown-list merged-dropdown-list-right';
+  METIVTA_SUMMARY_DAY_OPTIONS.forEach(opt => {
+    const optEl = document.createElement('div');
+    optEl.className = 'merged-dropdown-option' + (opt.key === metivtaSummaryDayCount ? ' merged-dropdown-option-active' : '');
+    optEl.textContent = opt.label;
+    optEl.addEventListener('click', (e) => {
+      e.stopPropagation();
+      metivtaSummaryDayCount = opt.key;
+      list.classList.remove('open');
+      renderMetivtaHistoryTable(container);
+    });
+    list.appendChild(optEl);
+  });
+  const activeOpt = METIVTA_SUMMARY_DAY_OPTIONS.find(o => o.key === metivtaSummaryDayCount) || METIVTA_SUMMARY_DAY_OPTIONS[0];
+  const toggle = document.createElement('button');
+  toggle.type = 'button';
+  toggle.className = 'merged-dropdown-toggle';
+  toggle.textContent = 'סיכום · ' + activeOpt.label;
+  toggle.addEventListener('click', (e) => {
+    e.stopPropagation();
+    document.querySelectorAll('.merged-dropdown-list.open').forEach(l => { if (l !== list) l.classList.remove('open'); });
+    list.classList.toggle('open');
+  });
+  const dropdown = document.createElement('div');
+  dropdown.className = 'merged-dropdown';
+  dropdown.appendChild(toggle);
+  dropdown.appendChild(list);
+  return dropdown;
+}
 
 function renderMetivtaHistoryTable(container){
   container.innerHTML = '';
@@ -2363,9 +2421,10 @@ function renderMetivtaHistoryTable(container){
   const nameTh = document.createElement('th');
   nameTh.textContent = 'שם';
   trh.appendChild(nameTh);
-  const sevenTh = document.createElement('th');
-  sevenTh.textContent = '7';
-  trh.appendChild(sevenTh);
+  const summaryTh = document.createElement('th');
+  summaryTh.style.whiteSpace = 'nowrap';
+  summaryTh.appendChild(buildMetivtaSummaryDaysDropdown(container));
+  trh.appendChild(summaryTh);
   days.forEach((entry, dayIndex) => {
     const th = document.createElement('th');
     th.style.cursor = 'pointer';
@@ -2424,12 +2483,11 @@ function renderMetivtaHistoryTable(container){
     nameTd.textContent = row.name;
     tr.appendChild(nameTd);
 
-    const last7 = days.slice(0, 7);
-    const sevenCount = last7.filter(entry => metivtaDayLabelLegacyAware(row.getRecord(entry)) !== '').length;
-    const sevenTd = document.createElement('td');
-    sevenTd.textContent = sevenCount || '';
-    sevenTd.style.fontWeight = '700';
-    tr.appendChild(sevenTd);
+    const summaryTd = document.createElement('td');
+    summaryTd.textContent = computeMetivtaSummary(row, days, metivtaSummaryDayCount);
+    summaryTd.style.fontWeight = '700';
+    summaryTd.style.whiteSpace = 'nowrap';
+    tr.appendChild(summaryTd);
 
     days.forEach(entry => {
       const rec = row.getRecord(entry);
