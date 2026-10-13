@@ -2830,6 +2830,28 @@ function dayLabelWithinWeek(weekStartD, dayKeyStr){
 // One dropdown, nested: the outer list is the parshas/weeks; clicking a
 // parsha expands a sub-list of that week's days (or "total") right under it,
 // instead of opening a second, separate dropdown.
+// The one-line הנוסע המתמיד title bar scrolls sideways on narrow screens
+// (overflow-x: auto), which also clips anything hanging below it - so its
+// dropdown list is positioned relative to the viewport instead, escaping
+// that clip. It closes on any outside scroll, since it would otherwise stay
+// put while the toggle it belongs to scrolls away.
+function placeDropdownListFixed(toggle, list){
+  const r = toggle.getBoundingClientRect();
+  list.classList.add('dropdown-fixed');
+  list.style.position = 'fixed';
+  list.style.top = r.bottom + 'px';
+  list.style.right = Math.max(window.innerWidth - r.right, 4) + 'px';
+  list.style.left = 'auto';
+  list.style.maxHeight = Math.max(window.innerHeight - r.bottom - 8, 160) + 'px';
+  list.style.overflowY = 'auto';
+}
+
+document.addEventListener('scroll', (e) => {
+  document.querySelectorAll('.merged-dropdown-list.open.dropdown-fixed').forEach(l => {
+    if (!l.contains(e.target)) l.classList.remove('open');
+  });
+}, true);
+
 function buildWeekDaySelectDropdown(allWeeklyEntries, selectedEntry){
   const currentMode = weeklyArchiveViewMode[selectedEntry.weekKey] || 'total';
 
@@ -2909,6 +2931,7 @@ function buildWeekDaySelectDropdown(allWeeklyEntries, selectedEntry){
       if (l !== list) l.classList.remove('open');
     });
     list.classList.toggle('open');
+    if (list.classList.contains('open')) placeDropdownListFixed(toggle, list);
   });
 
   const dropdown = document.createElement('div');
