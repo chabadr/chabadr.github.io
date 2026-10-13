@@ -328,9 +328,19 @@ const FIELD_LABELS = {
 const FIELD_ORDER = ['chitas', 'shema', 'netilatYadaim', 'minchaMaariv', 'mikveh', 'dvarTorah'];
 const LEAD_COL_WIDTHS = { student: 72, week: 80, when: 105 };
 
-const DAY_COUNT_OPTIONS = [5, 10, 15].map(n => ({ value: String(n), label: n + ' ימים אחרונים' }));
+const DAY_COUNT_OPTIONS = Array.from({ length: 15 }, (_, i) => i + 1).map(n => ({ value: String(n), label: n === 1 ? 'יום אחרון' : n + ' ימים אחרונים' }));
 
-const DEFAULT_TEMPLATE = 'שלום,\nעדכון שבועי עבור {שם} מהמתיבתא:\n{סיכום}\n\nלעדכון נתונים: {קישור}';
+const DEFAULT_TEMPLATE = 'שלום,\nעדכון שבועי עבור {שם} מהמתיבתא:\nנוכחות: {נוכחות}\n\nלעדכון נתונים: {קישור}';
+
+// "נוכחות" counts every day present at all, including late/left-early/
+// disturbed days - matching the "נוכחות" column in index.html's archive.
+const STAT_FIELDS = [
+  { key: 'attendance', label: 'נוכחות', placeholder: '{נוכחות}' },
+  { key: 'onTime', label: 'בזמן', placeholder: '{בזמן}' },
+  { key: 'late', label: 'איחור', placeholder: '{איחור}' },
+  { key: 'leftEarly', label: 'מוקדם', placeholder: '{מוקדם}' },
+  { key: 'disturbed', label: 'הפרעות', placeholder: '{הפרעות}' }
+];
 
 const SMS4FREE_ERROR_MESSAGES = {
   0: 'שגיאה כללית',
@@ -709,16 +719,7 @@ function computeDefaultStats(student, days, dayCountVal){
     if (f.leftEarly) leftEarly++;
     if (f.disturbCount > 0) disturbed += f.disturbCount;
   });
-  return { onTime, late, leftEarly, disturbed };
-}
-
-function summaryTextFromStats(stats){
-  const parts = [];
-  parts.push('הגיע בזמן: ' + stats.onTime + ' פעמים');
-  if (stats.late) parts.push('איחר: ' + stats.late + ' פעמים');
-  if (stats.leftEarly) parts.push('יצא מוקדם: ' + stats.leftEarly + ' פעמים');
-  if (stats.disturbed) parts.push('הפריע: ' + stats.disturbed + ' פעמים');
-  return parts.join(', ');
+  return { attendance: onTime + late, onTime, late, leftEarly, disturbed };
 }
 
 async function renderSmsTab(container){
@@ -782,7 +783,7 @@ async function renderSmsTab(container){
     templateCard.appendChild(templateLabel);
     const hint = document.createElement('div');
     hint.className = 'hint';
-    hint.innerHTML = 'שדות משתנים זמינים: <b>{שם}</b> (השם הפרטי), <b>{קישור}</b> (קיים רק לתלמידים הרגילים), <b>{סיכום}</b> (כל הנתונים יחד), <b>{סה״כ}</b> (כמה פעמים נוכח, כולל ימים עם איחור/מוקדם/הפרעה), או כל נתון בנפרד: <b>{בזמן}</b>, <b>{איחור}</b>, <b>{מוקדם}</b>, <b>{הפרעות}</b>.';
+    hint.innerHTML = 'שדות משתנים זמינים: <b>{שם}</b> (השם הפרטי), <b>{קישור}</b> (קיים רק לתלמידים הרגילים), <b>{נוכחות}</b> (כמה ימים נוכח, כולל ימים עם איחור/מוקדם/הפרעה), <b>{בזמן}</b>, <b>{איחור}</b>, <b>{מוקדם}</b>, <b>{הפרעות}</b>. בטבלת הנתונים לשליחה יופיעו רק הנתונים שנמצאים בהודעה.';
     templateCard.appendChild(hint);
     const templateTextarea = document.createElement('textarea');
     templateTextarea.id = 'template';
@@ -1017,7 +1018,11 @@ async function renderSmsTab(container){
     dataCard.appendChild(dataAction);
     container.appendChild(dataCard);
 
-    function buildDataTable(){
+    let defaultStatsByKey = {};
+
+    // keepEdits: rebuild after a template change without throwing away
+    // values already edited by hand in the table.
+    function buildDataTable(keepEdits){
       const selected = getSelectedRecipients();
       const uniqueStudents = [];
       const seen = new Set();
@@ -1030,11 +1035,20 @@ async function renderSmsTab(container){
         dataCard.style.display = 'none';
         return;
       }
+      const previous = {};
+      if (keepEdits === true){
+        dataTable.querySelectorAll('tbody tr').forEach(tr => {
+          const vals = {};
+          tr.querySelectorAll('input[data-field]').forEach(i => { vals[i.dataset.field] = i.value; });
+          previous[tr.dataset.studentKey] = vals;
+        });
+      }
+      const usedFields = STAT_FIELDS.filter(f => templateTextarea.value.includes(f.placeholder));
       dataCard.style.display = '';
       dataTable.innerHTML = '';
       const theadD = document.createElement('thead');
       const trhD = document.createElement('tr');
-      ['תלמיד', 'בזמן', 'איחור', 'מוקדם', 'הפרעות'].forEach(label => {
+      ['תלמיד', ...usedFields.map(f => f.label)].forEach(label => {
         const th = document.createElement('th');
         th.textContent = label;
         trhD.appendChild(th);
@@ -1043,20 +1057,23 @@ async function renderSmsTab(container){
       dataTable.appendChild(theadD);
       const tbodyD = document.createElement('tbody');
       const dayCountVal = dayCountSelect.value;
+      defaultStatsByKey = {};
       uniqueStudents.forEach(student => {
         const stats = computeDefaultStats(student, days, dayCountVal);
+        defaultStatsByKey[student.key] = stats;
+        const kept = previous[student.key] || {};
         const tr = document.createElement('tr');
         tr.dataset.studentKey = student.key;
         const nameTd = document.createElement('td');
         nameTd.textContent = student.name;
         tr.appendChild(nameTd);
-        ['onTime', 'late', 'leftEarly', 'disturbed'].forEach(field => {
+        usedFields.forEach(f => {
           const td = document.createElement('td');
           const input = document.createElement('input');
           input.type = 'number';
           input.min = '0';
-          input.value = stats[field];
-          input.dataset.field = field;
+          input.value = f.key in kept ? kept[f.key] : stats[f.key];
+          input.dataset.field = f.key;
           td.appendChild(input);
           tr.appendChild(td);
         });
@@ -1065,28 +1082,32 @@ async function renderSmsTab(container){
       dataTable.appendChild(tbodyD);
     }
 
-    dataTableBtn.addEventListener('click', buildDataTable);
+    dataTableBtn.addEventListener('click', () => buildDataTable(false));
+    templateTextarea.addEventListener('input', () => {
+      if (dataCard.style.display !== 'none') buildDataTable(true);
+    });
+    dayCountSelect.addEventListener('change', () => {
+      if (dataCard.style.display !== 'none') buildDataTable(false);
+    });
 
     function getStatsForStudent(studentKey){
+      const stats = { ...(defaultStatsByKey[studentKey] || { attendance: 0, onTime: 0, late: 0, leftEarly: 0, disturbed: 0 }) };
       const row = dataTable.querySelector('tr[data-student-key="' + CSS.escape(studentKey) + '"]');
-      if (!row) return { onTime: 0, late: 0, leftEarly: 0, disturbed: 0 };
-      const get = (field) => parseInt(row.querySelector('input[data-field="' + field + '"]').value, 10) || 0;
-      return { onTime: get('onTime'), late: get('late'), leftEarly: get('leftEarly'), disturbed: get('disturbed') };
+      if (row){
+        row.querySelectorAll('input[data-field]').forEach(input => {
+          stats[input.dataset.field] = parseInt(input.value, 10) || 0;
+        });
+      }
+      return stats;
     }
 
     function resolveMessage(student){
       const stats = getStatsForStudent(student.key);
-      const summaryText = summaryTextFromStats(stats);
-      const total = stats.onTime + stats.late;
-      return templateTextarea.value
+      let text = templateTextarea.value
         .split('{שם}').join(student.firstName)
-        .split('{סיכום}').join(summaryText)
-        .split('{קישור}').join(student.link || '')
-        .split('{בזמן}').join(String(stats.onTime))
-        .split('{איחור}').join(String(stats.late))
-        .split('{מוקדם}').join(String(stats.leftEarly))
-        .split('{הפרעות}').join(String(stats.disturbed))
-        .split('{סה״כ}').join(String(total));
+        .split('{קישור}').join(student.link || '');
+      STAT_FIELDS.forEach(f => { text = text.split(f.placeholder).join(String(stats[f.key])); });
+      return text;
     }
 
     // --- Preview + send card ---

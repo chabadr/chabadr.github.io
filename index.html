@@ -340,8 +340,17 @@
   .archive-date .merged-dropdown-toggle{
     color: var(--paper);
   }
-  table.archive-table thead th .merged-dropdown-toggle{
-    font-size: clamp(11px, 4vw, 20px);
+  table.archive-table thead th .metivta-summary-toggle{
+    font-size: inherit;
+    font-family: inherit;
+  }
+  .metivta-sort-btn{
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    color: var(--ink);
+    font-weight: 700;
+    padding: 2px;
   }
   .parent-log-link{
     color: var(--gold);
@@ -374,10 +383,6 @@
   .merged-dropdown-list-right{
     left: auto;
     right: 0;
-  }
-  .merged-dropdown-list-up{
-    top: auto;
-    bottom: 100%;
   }
 
   .merged-dropdown-option{
@@ -680,7 +685,6 @@
     .archive-view{ max-width: min(96vw, 1800px); }
     .archive-date{ font-size: 17px; padding: 12px 18px; }
     table.archive-table th{ font-size: 18px; padding: 12px 10px; }
-    table.archive-table thead th .merged-dropdown-toggle{ font-size: 18px; }
     table.archive-table td{ font-size: 17px; padding: 12px 10px; }
   }
 
@@ -2094,7 +2098,7 @@ function metivtaStatusParts(f){
     const parts = [];
     if (f.late) parts.push('איחור');
     if (f.leftEarly) parts.push('מוקדם');
-    if (f.disturbCount > 0) parts.push('הפריע' + (f.disturbCount > 1 ? ' ×' + f.disturbCount : ''));
+    if (f.disturbCount > 0) parts.push('הפרעה' + (f.disturbCount > 1 ? ' ×' + f.disturbCount : ''));
     return parts;
   }
   return f.ok ? ['✓'] : [];
@@ -2281,14 +2285,14 @@ function buildMetivtaBoard(students, isExtra){
   const familyTh = document.createElement('th');
   const familyInner = document.createElement('div');
   familyInner.className = 'th-inner';
-  familyInner.textContent = 'משפחה';
+  familyInner.appendChild(buildNameDropdown('משפחה'));
   familyTh.appendChild(familyInner);
   trh.appendChild(familyTh);
 
   const firstTh = document.createElement('th');
   const firstInner = document.createElement('div');
   firstInner.className = 'th-inner';
-  firstInner.appendChild(buildNameDropdown('פרטי'));
+  firstInner.textContent = 'פרטי';
   firstTh.appendChild(firstInner);
   trh.appendChild(firstTh);
 
@@ -2424,7 +2428,10 @@ function fitMetivtaBoardColumns(table){
     span.style.fontWeight = tdCs.fontWeight;
     span.style.fontSize = tdCs.fontSize;
     let maxWidth = 0;
-    const texts = [th.textContent];
+    // a header holding the page-switch dropdown also contains its (hidden)
+    // option labels - measure only the visible toggle text.
+    const headerToggle = th.querySelector('.merged-dropdown-toggle');
+    const texts = [headerToggle ? headerToggle.textContent : th.textContent];
     table.querySelectorAll('tbody tr').forEach(tr => {
       const cell = tr.children[colIndex];
       if (cell) texts.push(cell.textContent);
@@ -2493,7 +2500,7 @@ async function exportMetivtaArchiveCSV(days){
 let metivtaArchiveSortIndex = null;
 let metivtaSummaryDayCount = 5;
 let metivtaSummaryField = 'total';
-const METIVTA_SUMMARY_DAY_OPTIONS = [5, 10, 15].map(n => ({ key: n, label: n + ' ימים' }));
+const METIVTA_SUMMARY_DAY_OPTIONS = Array.from({ length: 15 }, (_, i) => i + 1).map(n => ({ key: n, label: n === 1 ? 'יום אחד' : n + ' ימים' }));
 const METIVTA_SUMMARY_FIELD_OPTIONS = [
   { key: 'total', label: 'נוכחות' },
   { key: 'onTime', label: 'בזמן' },
@@ -2534,7 +2541,6 @@ function buildMetivtaSummaryDaysDropdown(container){
     optEl.addEventListener('click', (e) => {
       e.stopPropagation();
       metivtaSummaryDayCount = opt.key;
-      metivtaArchiveSortIndex = 'summary';
       list.classList.remove('open');
       renderMetivtaHistoryTable(container);
     });
@@ -2567,7 +2573,6 @@ function buildMetivtaSummaryFieldDropdown(container){
     optEl.addEventListener('click', (e) => {
       e.stopPropagation();
       metivtaSummaryField = opt.key;
-      metivtaArchiveSortIndex = 'summary';
       list.classList.remove('open');
       renderMetivtaHistoryTable(container);
     });
@@ -2577,7 +2582,7 @@ function buildMetivtaSummaryFieldDropdown(container){
   const toggle = document.createElement('button');
   toggle.type = 'button';
   toggle.className = 'merged-dropdown-toggle metivta-summary-toggle';
-  toggle.textContent = activeOpt.label + (metivtaArchiveSortIndex === 'summary' ? ' ▼' : '');
+  toggle.textContent = activeOpt.label;
   toggle.addEventListener('click', (e) => {
     e.stopPropagation();
     document.querySelectorAll('.merged-dropdown-list.open').forEach(l => { if (l !== list) l.classList.remove('open'); });
@@ -2626,20 +2631,29 @@ function renderMetivtaHistoryTable(container){
   trh.appendChild(firstTh);
   const summaryTh = document.createElement('th');
   summaryTh.style.whiteSpace = 'nowrap';
-  summaryTh.style.cursor = 'pointer';
   const summaryControls = document.createElement('div');
   summaryControls.style.display = 'flex';
   summaryControls.style.flexDirection = 'column';
   summaryControls.style.alignItems = 'center';
   summaryControls.style.gap = '0px';
   summaryControls.appendChild(buildMetivtaSummaryDaysDropdown(container));
-  summaryControls.appendChild(buildMetivtaSummaryFieldDropdown(container));
-  summaryTh.appendChild(summaryControls);
-  summaryTh.title = 'ללחוץ כדי למיין לפי הטור הזה';
-  summaryTh.addEventListener('click', () => {
+  const fieldRow = document.createElement('div');
+  fieldRow.style.display = 'flex';
+  fieldRow.style.alignItems = 'center';
+  fieldRow.appendChild(buildMetivtaSummaryFieldDropdown(container));
+  const summarySortBtn = document.createElement('button');
+  summarySortBtn.type = 'button';
+  summarySortBtn.className = 'metivta-summary-toggle metivta-sort-btn';
+  summarySortBtn.textContent = metivtaArchiveSortIndex === 'summary' ? '▼' : '⇅';
+  summarySortBtn.title = 'מיון לפי הטור הזה';
+  summarySortBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
     metivtaArchiveSortIndex = 'summary';
     renderMetivtaHistoryTable(container);
   });
+  fieldRow.appendChild(summarySortBtn);
+  summaryControls.appendChild(fieldRow);
+  summaryTh.appendChild(summaryControls);
   trh.appendChild(summaryTh);
   days.forEach((entry, dayIndex) => {
     const th = document.createElement('th');
@@ -3162,11 +3176,11 @@ function setHistoryActive(dayKey, groupType, key){
   if (todayHistoryContainerEl) renderTodayHistoryTable(todayHistoryContainerEl);
 }
 
-function buildHistoryDropdown(dayKey, groupType, options, openUp){
+function buildHistoryDropdown(dayKey, groupType, options){
   const activeKey = getHistoryActive(dayKey, groupType, options[0].key);
 
   const list = document.createElement('div');
-  list.className = 'merged-dropdown-list merged-dropdown-list-right' + (openUp ? ' merged-dropdown-list-up' : '');
+  list.className = 'merged-dropdown-list merged-dropdown-list-right';
   options.forEach(opt => {
     const optEl = document.createElement('div');
     optEl.className = 'merged-dropdown-option';
@@ -3276,7 +3290,7 @@ function renderTodayHistoryTable(container){
   titleSep.textContent = '·';
   dateEl.appendChild(titleSep);
 
-  dateEl.appendChild(buildHistoryDropdown('archive_shared', groupType, allOptions, true));
+  dateEl.appendChild(buildHistoryDropdown('archive_shared', groupType, allOptions));
 
   const exportBtn = document.createElement('button');
   exportBtn.className = 'export-btn';
