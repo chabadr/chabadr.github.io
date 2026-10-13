@@ -1,0 +1,1126 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ניהול</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Frank+Ruhl+Libre:wght@500;700;900&family=Rubik:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --paper:#F6F3EA;
+    --ink:#22304A;
+    --ink-soft:#4B5C79;
+    --line:#D9D2BC;
+    --gold:#B8902E;
+    --gold-bg:#FBF1D9;
+    --danger:#9C3B3B;
+    --ok:#2F6B3A;
+    --radius:10px;
+  }
+  * { box-sizing: border-box; }
+  html, body{
+    margin: 0; padding: 0;
+    background: var(--paper);
+    color: var(--ink);
+    font-family: 'Rubik', sans-serif;
+  }
+  .wrap{
+    max-width: 1000px;
+    margin: 0 auto;
+    padding: 20px 16px 80px;
+  }
+  h1{
+    font-family: 'Frank Ruhl Libre', serif;
+    font-size: 20px;
+    margin: 0 0 16px;
+  }
+  .section-title{
+    font-family: 'Frank Ruhl Libre', serif;
+    font-size: 17px;
+    margin: 20px 0 10px;
+  }
+  .code-box{
+    text-align: center;
+    padding: 40px 16px;
+  }
+  .code-box input{
+    display: block;
+    margin: 14px auto 0;
+    width: 160px;
+    padding: 10px;
+    text-align: center;
+    font-size: 18px;
+    border-radius: var(--radius);
+    border: 1px solid var(--line);
+  }
+  .code-box button{
+    display: block;
+    margin: 12px auto 0;
+    padding: 10px 24px;
+    border: none;
+    border-radius: var(--radius);
+    background: var(--gold);
+    color: #fff;
+    font-weight: 700;
+    cursor: pointer;
+  }
+  .code-error{
+    color: var(--danger);
+    font-size: 13px;
+    margin-top: 8px;
+    min-height: 18px;
+  }
+  .tab-nav{
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    border-bottom: 2px solid var(--line);
+    margin-bottom: 20px;
+  }
+  .tab-btn{
+    padding: 10px 16px;
+    border: none;
+    background: transparent;
+    color: var(--ink-soft);
+    font-family: 'Rubik', sans-serif;
+    font-weight: 600;
+    font-size: 14px;
+    cursor: pointer;
+    border-bottom: 3px solid transparent;
+    margin-bottom: -2px;
+  }
+  .tab-btn.active{
+    color: var(--ink);
+    border-bottom-color: var(--gold);
+  }
+  .card{
+    background: #fff;
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    padding: 16px;
+    margin-bottom: 20px;
+    box-shadow: 0 2px 0 var(--line), 0 8px 24px rgba(34,48,74,0.06);
+  }
+  .field-label{
+    font-weight: 700;
+    font-size: 14px;
+    margin-bottom: 6px;
+    display: block;
+  }
+  .hint{
+    font-size: 12.5px;
+    color: var(--ink-soft);
+    margin: 4px 0 10px;
+    line-height: 1.5;
+  }
+  textarea#template{
+    width: 100%;
+    min-height: 110px;
+    padding: 10px;
+    border-radius: 8px;
+    border: 1px solid var(--line);
+    font-family: 'Rubik', sans-serif;
+    font-size: 14px;
+    resize: vertical;
+  }
+  .row-inline{
+    display: flex;
+    flex-wrap: wrap;
+    gap: 16px;
+    margin-top: 14px;
+  }
+  .row-inline > div{ flex: 1; min-width: 180px; }
+  input#sender{
+    width: 100%;
+    padding: 9px 10px;
+    border-radius: 8px;
+    border: 1px solid var(--line);
+    font-family: 'Rubik', sans-serif;
+    font-size: 14px;
+  }
+  select.day-count-select{
+    width: 100%;
+    padding: 9px 10px;
+    border-radius: 8px;
+    border: 1px solid var(--line);
+    font-family: 'Rubik', sans-serif;
+    font-size: 14px;
+    background: #fff;
+  }
+  .table-scroll{
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  table.data-table, table.recipients-table, table.phones-table, table.links-table, table.log-table{
+    border-collapse: collapse;
+    width: 100%;
+  }
+  table.data-table th, table.recipients-table th, table.phones-table th, table.links-table th, table.log-table th{
+    background: var(--gold-bg);
+    font-size: 13px;
+    font-weight: 700;
+    padding: 8px 10px;
+    border-bottom: 2px solid var(--gold);
+    text-align: center;
+  }
+  table.log-table th{ font-size: 11.5px; padding: 6px 4px; border-left: 1px solid var(--line); white-space: normal; line-height: 1.2; }
+  table.log-table th:first-child, table.log-table td:first-child{ border-left: none; }
+  table.links-table th{ text-align: right; }
+  table.data-table th:first-child, table.recipients-table th:first-child, table.phones-table th:first-child{ text-align: right; }
+  table.data-table td, table.recipients-table td, table.phones-table td, table.links-table td{
+    font-size: 13.5px;
+    padding: 6px 10px;
+    border-bottom: 1px solid var(--line);
+    text-align: center;
+  }
+  table.log-table td{ font-size: 13px; padding: 8px 4px; border-left: 1px solid var(--line); overflow-wrap: break-word; }
+  table.links-table td{ text-align: right; font-size: 13px; }
+  table.links-table a{ color: var(--ink); word-break: break-all; }
+  table.data-table td:first-child, table.recipients-table td:first-child, table.phones-table td:first-child{ text-align: right; }
+  table.data-table tr:nth-child(even), table.recipients-table tr:nth-child(even), table.phones-table tr:nth-child(even), table.links-table tr:nth-child(even), table.log-table tr:nth-child(even){ background: #FCFBF6; }
+  table.phones-table input, table.data-table input{
+    width: 100%;
+    min-width: 70px;
+    padding: 7px 8px;
+    border-radius: 8px;
+    border: 1px solid var(--line);
+    font-family: 'Rubik', sans-serif;
+    font-size: 14px;
+    text-align: center;
+  }
+  table.phones-table input{ min-width: 110px; direction: ltr; }
+  .parent-cell{
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+  }
+  .parent-cell .phone{ font-size: 12px; color: var(--ink-soft); direction: ltr; }
+  .parent-cell .missing{ font-size: 12px; color: var(--ink-soft); }
+  .select-all-row{
+    display: flex;
+    gap: 10px;
+    margin-bottom: 10px;
+    font-size: 13px;
+  }
+  .select-all-row button{
+    padding: 5px 12px;
+    border-radius: 8px;
+    border: 1px solid var(--line);
+    background: #fff;
+    cursor: pointer;
+    font-size: 12.5px;
+  }
+  .action-bar{
+    display: flex;
+    gap: 12px;
+    margin-top: 16px;
+    flex-wrap: wrap;
+  }
+  .action-bar button{
+    padding: 10px 24px;
+    border: none;
+    border-radius: var(--radius);
+    font-weight: 700;
+    font-size: 14px;
+    cursor: pointer;
+  }
+  .btn-secondary{ background: #fff; border: 1px solid var(--gold) !important; color: var(--ink); }
+  .btn-primary{ background: var(--gold); color: #fff; }
+  .action-bar button:disabled{ opacity: 0.5; cursor: default; }
+  .preview-list{ margin-top: 14px; }
+  .preview-item{
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 10px 12px;
+    margin-bottom: 10px;
+    font-size: 13.5px;
+  }
+  .preview-item .preview-head{
+    font-weight: 700;
+    margin-bottom: 6px;
+    display: flex;
+    justify-content: space-between;
+    gap: 8px;
+  }
+  .preview-item .preview-phone{ color: var(--ink-soft); font-weight: 400; direction: ltr; }
+  .preview-item textarea{
+    width: 100%;
+    min-height: 90px;
+    padding: 8px;
+    border-radius: 8px;
+    border: 1px solid var(--line);
+    font-family: 'Rubik', sans-serif;
+    font-size: 13.5px;
+    resize: vertical;
+  }
+  .preview-item .preview-status{ font-size: 12.5px; margin-top: 6px; font-weight: 700; }
+  .status-ok{ color: var(--ok); }
+  .status-err{ color: var(--danger); }
+  .summary-bar{ margin-top: 12px; font-size: 13.5px; font-weight: 700; }
+  .save-bar{
+    position: sticky;
+    bottom: 0;
+    background: var(--paper);
+    padding: 12px 0;
+    border-top: 1px solid var(--line);
+    margin-top: 16px;
+    display: flex;
+    align-items: center;
+    gap: 14px;
+  }
+  .save-bar button{
+    padding: 10px 28px;
+    border: none;
+    border-radius: var(--radius);
+    background: var(--gold);
+    color: #fff;
+    font-weight: 700;
+    font-size: 15px;
+    cursor: pointer;
+  }
+  .save-status{ font-size: 13px; color: var(--ink-soft); }
+  .loading, .empty, .err{
+    text-align: center;
+    color: var(--ink-soft);
+    padding: 20px 0;
+  }
+  .err{ color: var(--danger); }
+</style>
+</head>
+<body>
+  <div class="wrap" id="app"></div>
+
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-app.js";
+import { getFirestore, doc, getDoc, setDoc, collection, query, orderBy, limit, getDocs } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
+import { firebaseConfig, isFirebaseConfigured } from "./firebase-config.js";
+import { sms4freeConfig } from "./sms-config.js";
+
+const STORAGE_KEY = 'classroom-points-v1';
+const FIRESTORE_COLLECTION = 'classroom_points';
+const ACCESS_CODE = '963';
+
+// Keep in sync with STUDENT_NAMES in index.html.
+const STUDENT_NAMES = [
+  'צאלי', 'ישרוליק', 'נתנאל', 'מענדי ה.', 'מענדי ח.', 'אלעאי', 'יהונתן', 'איתן', 'מענדי ל.', 'שלוימי', 'מוישלה', 'לוי ס.',
+  'שמוליק ע.', 'מולי', 'שלום', 'חננאל', 'שמוליק צ.', 'אושר', 'שמעון', 'מוטי', 'לוי ק.', 'נועם', 'משה'
+];
+// Keep in sync with METIVTA_EXTRA_NAMES in index.html.
+const METIVTA_EXTRA_NAMES = [
+  'יהונתן', 'נריה', 'יהודה', 'חסדיאל', 'אוריאל', 'מענדל', 'שניאור', 'מענדי דר.', 'מענדי זכ.', 'עוזי', 'מענדי יא.',
+  'אופיר', 'לוי', 'מענדי מז.', 'מענדי מע.', 'אברמי', 'שמואל', 'מענדי סמ.', 'ברוכי', 'איזיק', 'בער', 'רמי', 'ניתאי'
+];
+// Keep in sync with WEEKLY_PARENT_FIELD_DEFS in index.html.
+const FIELD_LABELS = {
+  chitas: 'חת"ת', shema: 'קריאת שמע', netilatYadaim: 'נטילת ידיים',
+  minchaMaariv: 'מנחה מעריב', mikveh: 'מקווה שישי', dvarTorah: 'שיחה'
+};
+const FIELD_ORDER = ['chitas', 'shema', 'netilatYadaim', 'minchaMaariv', 'mikveh', 'dvarTorah'];
+const LEAD_COL_WIDTHS = { student: 72, week: 80, when: 105 };
+
+const DAY_COUNT_OPTIONS = [
+  { value: '7', label: '7 ימים אחרונים' },
+  { value: '14', label: '14 ימים אחרונים' },
+  { value: '30', label: '30 ימים אחרונים' },
+  { value: 'all', label: 'כל הימים הארכיוניים' }
+];
+
+const DEFAULT_TEMPLATE = 'שלום,\nעדכון שבועי עבור {שם} מהמתיבתא:\n{סיכום}\n\nלעדכון נתונים: {קישור}';
+
+const SMS4FREE_ERROR_MESSAGES = {
+  0: 'שגיאה כללית',
+  '-1': 'מפתח, שם משתמש או סיסמה שגויים',
+  '-2': 'שם או מספר שולח ההודעה שגוי',
+  '-3': 'לא נמצאו נמענים',
+  '-4': 'לא ניתן לשלוח הודעה, יתרת הודעות פנויות נמוכה',
+  '-5': 'הודעה לא מתאימה',
+  '-6': 'צריך לאמת מספר שולח'
+};
+
+const TABS = [
+  { key: 'links', label: 'קישורי הורים' },
+  { key: 'history', label: 'היסטוריית עדכונים' },
+  { key: 'phones', label: 'טלפוני הורים - מתיבתא' },
+  { key: 'sms', label: 'שליחת SMS - מתיבתא' }
+];
+
+const app = document.getElementById('app');
+let db = null;
+let activeTab = 'links';
+const tabLoaded = {};
+
+function normalizePhone(v){
+  return (v || '').replace(/[\s-]/g, '').trim();
+}
+
+function metivtaRecordHasFlags(s){
+  const f = s && s.metivtaFlags;
+  return !!(f && (f.ok || f.late || f.leftEarly || (f.disturbCount || 0) > 0));
+}
+
+function showCodePrompt(){
+  app.innerHTML = '';
+  const h1 = document.createElement('h1');
+  h1.textContent = 'ניהול';
+  app.appendChild(h1);
+
+  const box = document.createElement('div');
+  box.className = 'code-box';
+  const msg = document.createElement('div');
+  msg.textContent = 'הזן קוד לצפייה:';
+  box.appendChild(msg);
+  const input = document.createElement('input');
+  input.type = 'password';
+  input.inputMode = 'numeric';
+  box.appendChild(input);
+  const errorEl = document.createElement('div');
+  errorEl.className = 'code-error';
+  box.appendChild(errorEl);
+  const btn = document.createElement('button');
+  btn.textContent = 'כניסה';
+  box.appendChild(btn);
+  app.appendChild(box);
+
+  function trySubmit(){
+    if (input.value.trim() === ACCESS_CODE){
+      renderShell();
+    } else {
+      errorEl.textContent = 'קוד שגוי, נסה שוב';
+      input.value = '';
+      input.focus();
+    }
+  }
+  btn.addEventListener('click', trySubmit);
+  input.addEventListener('keydown', (e) => { if (e.key === 'Enter') trySubmit(); });
+  setTimeout(() => input.focus(), 50);
+}
+
+function renderShell(){
+  app.innerHTML = '';
+  const h1 = document.createElement('h1');
+  h1.textContent = 'ניהול';
+  app.appendChild(h1);
+
+  const nav = document.createElement('div');
+  nav.className = 'tab-nav';
+  TABS.forEach(tab => {
+    const btn = document.createElement('button');
+    btn.className = 'tab-btn' + (tab.key === activeTab ? ' active' : '');
+    btn.textContent = tab.label;
+    btn.dataset.tabKey = tab.key;
+    btn.addEventListener('click', () => switchTab(tab.key));
+    nav.appendChild(btn);
+  });
+  app.appendChild(nav);
+
+  const content = document.createElement('div');
+  content.id = 'tabContent';
+  app.appendChild(content);
+
+  renderActiveTab();
+}
+
+function switchTab(key){
+  activeTab = key;
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b.dataset.tabKey === key));
+  renderActiveTab();
+}
+
+function renderActiveTab(){
+  const content = document.getElementById('tabContent');
+  content.innerHTML = '';
+  if (activeTab === 'links') renderLinksTab(content);
+  else if (activeTab === 'history') renderHistoryTab(content);
+  else if (activeTab === 'phones') renderPhonesTab(content);
+  else if (activeTab === 'sms') renderSmsTab(content);
+}
+
+// ---------- Tab: קישורי הורים ----------
+function renderLinksTab(container){
+  const table = document.createElement('table');
+  table.className = 'links-table';
+  const thead = document.createElement('thead');
+  const trh = document.createElement('tr');
+  ['תלמיד', 'קישור אישי'].forEach(label => {
+    const th = document.createElement('th');
+    th.textContent = label;
+    trh.appendChild(th);
+  });
+  thead.appendChild(trh);
+  table.appendChild(thead);
+
+  const tbody = document.createElement('tbody');
+  STUDENT_NAMES.forEach((name, idx) => {
+    const id = idx + 1;
+    const url = new URL('parent-update.html?id=' + id, location.href).href;
+    const tr = document.createElement('tr');
+    const nameTd = document.createElement('td');
+    nameTd.textContent = name;
+    tr.appendChild(nameTd);
+    const linkTd = document.createElement('td');
+    const a = document.createElement('a');
+    a.href = url;
+    a.textContent = url;
+    a.target = '_blank';
+    linkTd.appendChild(a);
+    tr.appendChild(linkTd);
+    tbody.appendChild(tr);
+  });
+  table.appendChild(tbody);
+  container.appendChild(table);
+}
+
+// ---------- Tab: היסטוריית עדכונים ----------
+function fitHeaderCellToWidestWord(th){
+  const label = th.dataset.fitLabel;
+  if (!label) return;
+  const words = label.split(' ');
+  const cs = getComputedStyle(th);
+  const span = document.createElement('span');
+  span.style.position = 'fixed';
+  span.style.top = '-9999px';
+  span.style.whiteSpace = 'nowrap';
+  span.style.fontFamily = cs.fontFamily;
+  span.style.fontWeight = cs.fontWeight;
+  span.style.fontSize = cs.fontSize;
+  document.body.appendChild(span);
+  let maxWordWidth = 0;
+  words.forEach(w => {
+    span.textContent = w;
+    maxWordWidth = Math.max(maxWordWidth, span.getBoundingClientRect().width);
+  });
+  span.remove();
+  const padding = (parseFloat(cs.paddingLeft) || 0) + (parseFloat(cs.paddingRight) || 0);
+  const border = (parseFloat(cs.borderLeftWidth) || 0) + (parseFloat(cs.borderRightWidth) || 0);
+  th.style.width = Math.ceil(maxWordWidth + padding + border + 4) + 'px';
+}
+
+function buildLogTable(entries){
+  const scrollWrap = document.createElement('div');
+  scrollWrap.className = 'table-scroll';
+  const table = document.createElement('table');
+  table.className = 'log-table';
+  table.style.tableLayout = 'fixed';
+
+  const thead = document.createElement('thead');
+  const trh = document.createElement('tr');
+  [
+    { label: 'תלמיד', width: LEAD_COL_WIDTHS.student },
+    { label: 'שבוע', width: LEAD_COL_WIDTHS.week },
+    { label: 'תאריך ושעה', width: LEAD_COL_WIDTHS.when }
+  ].forEach(({ label, width }) => {
+    const th = document.createElement('th');
+    th.style.width = width + 'px';
+    th.textContent = label;
+    trh.appendChild(th);
+  });
+  FIELD_ORDER.forEach(key => {
+    const th = document.createElement('th');
+    th.dataset.fitLabel = FIELD_LABELS[key] || key;
+    th.textContent = FIELD_LABELS[key] || key;
+    trh.appendChild(th);
+  });
+  thead.appendChild(trh);
+  table.appendChild(thead);
+
+  const tbody = document.createElement('tbody');
+  entries.forEach(entry => {
+    const when = new Date(entry.submittedAt);
+    const whenStr = when.toLocaleDateString('he-IL') + ' ' + when.toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit' });
+    const v = entry.values || {};
+    const tr = document.createElement('tr');
+    const weekText = (entry.weekLabel || '').replace(/^פרשת\s+/, '');
+    [entry.studentName || '', weekText, whenStr].forEach(text => {
+      const td = document.createElement('td');
+      td.textContent = text;
+      tr.appendChild(td);
+    });
+    FIELD_ORDER.forEach(key => {
+      const td = document.createElement('td');
+      const val = v[key];
+      td.textContent = typeof val === 'boolean' ? (val ? '✓' : '—') : (val !== undefined ? val : '');
+      tr.appendChild(td);
+    });
+    tbody.appendChild(tr);
+  });
+  table.appendChild(tbody);
+  scrollWrap.appendChild(table);
+  return scrollWrap;
+}
+
+async function renderHistoryTab(container){
+  const status = document.createElement('div');
+  status.className = 'loading';
+  status.textContent = 'טוען…';
+  container.appendChild(status);
+  try{
+    const logCollectionRef = collection(db, FIRESTORE_COLLECTION, STORAGE_KEY, 'parentUpdateLog');
+    const q = query(logCollectionRef, orderBy('submittedAt', 'desc'), limit(200));
+    const snaps = await getDocs(q);
+    status.remove();
+    if (snaps.empty){
+      const empty = document.createElement('div');
+      empty.className = 'empty';
+      empty.textContent = 'אין עדיין תשובות שהתקבלו.';
+      container.appendChild(empty);
+      return;
+    }
+    const entries = [];
+    snaps.forEach(s => entries.push(s.data()));
+    const logTableWrap = buildLogTable(entries);
+    container.appendChild(logTableWrap);
+    logTableWrap.querySelectorAll('th[data-fit-label]').forEach(fitHeaderCellToWidestWord);
+  } catch(e){
+    status.className = 'err';
+    status.textContent = 'שגיאה בטעינת היסטוריית התשובות: ' + (e && e.message ? e.message : String(e));
+  }
+}
+
+// ---------- Tab: טלפוני הורים - מתיבתא ----------
+function buildPhonesGroupTable(names, groupKey, phonesData){
+  const scrollWrap = document.createElement('div');
+  scrollWrap.className = 'table-scroll';
+  const table = document.createElement('table');
+  table.className = 'phones-table';
+
+  const thead = document.createElement('thead');
+  const trh = document.createElement('tr');
+  ['תלמיד', 'טלפון אבא', 'טלפון אמא'].forEach(label => {
+    const th = document.createElement('th');
+    th.textContent = label;
+    trh.appendChild(th);
+  });
+  thead.appendChild(trh);
+  table.appendChild(thead);
+
+  const tbody = document.createElement('tbody');
+  names.forEach((name, idx) => {
+    const id = idx + 1;
+    const existing = (phonesData[groupKey] && phonesData[groupKey][id]) || {};
+    const tr = document.createElement('tr');
+    const nameTd = document.createElement('td');
+    nameTd.textContent = name;
+    tr.appendChild(nameTd);
+    ['father', 'mother'].forEach(role => {
+      const td = document.createElement('td');
+      const input = document.createElement('input');
+      input.type = 'tel';
+      input.value = existing[role] || '';
+      input.dataset.group = groupKey;
+      input.dataset.id = id;
+      input.dataset.role = role;
+      td.appendChild(input);
+      tr.appendChild(td);
+    });
+    tbody.appendChild(tr);
+  });
+  table.appendChild(tbody);
+  scrollWrap.appendChild(table);
+  return scrollWrap;
+}
+
+async function renderPhonesTab(container){
+  const status = document.createElement('div');
+  status.className = 'loading';
+  status.textContent = 'טוען…';
+  container.appendChild(status);
+  try{
+    const phonesDocRef = doc(db, FIRESTORE_COLLECTION, STORAGE_KEY, 'meta', 'metivtaPhones');
+    const snap = await getDoc(phonesDocRef);
+    const phonesData = snap.exists() ? snap.data() : {};
+    if (!phonesData.main) phonesData.main = {};
+    if (!phonesData.extra) phonesData.extra = {};
+    status.remove();
+
+    const mainTitle = document.createElement('div');
+    mainTitle.className = 'section-title';
+    mainTitle.textContent = 'תלמידים';
+    container.appendChild(mainTitle);
+    container.appendChild(buildPhonesGroupTable(STUDENT_NAMES, 'main', phonesData));
+
+    const extraTitle = document.createElement('div');
+    extraTitle.className = 'section-title';
+    extraTitle.textContent = 'תלמידים נוספים (מתיבתא בלבד)';
+    container.appendChild(extraTitle);
+    container.appendChild(buildPhonesGroupTable(METIVTA_EXTRA_NAMES, 'extra', phonesData));
+
+    const saveBar = document.createElement('div');
+    saveBar.className = 'save-bar';
+    const saveBtn = document.createElement('button');
+    saveBtn.textContent = 'שמירה';
+    saveBar.appendChild(saveBtn);
+    const saveStatus = document.createElement('span');
+    saveStatus.className = 'save-status';
+    saveBar.appendChild(saveStatus);
+    container.appendChild(saveBar);
+
+    saveBtn.addEventListener('click', async () => {
+      saveStatus.textContent = 'שומר…';
+      const newData = { main: {}, extra: {} };
+      container.querySelectorAll('table.phones-table input').forEach(input => {
+        const group = input.dataset.group;
+        const id = input.dataset.id;
+        const role = input.dataset.role;
+        if (!newData[group][id]) newData[group][id] = {};
+        newData[group][id][role] = normalizePhone(input.value);
+      });
+      try{
+        await setDoc(phonesDocRef, newData);
+        saveStatus.textContent = 'נשמר ✓';
+        setTimeout(() => { saveStatus.textContent = ''; }, 2500);
+      } catch(e){
+        saveStatus.textContent = 'שמירה נכשלה: ' + (e && e.message ? e.message : String(e));
+      }
+    });
+  } catch(e){
+    status.className = 'err';
+    status.textContent = 'שגיאה בטעינה: ' + (e && e.message ? e.message : String(e));
+  }
+}
+
+// ---------- Tab: שליחת SMS - מתיבתא ----------
+function computeDefaultStats(student, days, dayCountVal){
+  const dayCount = dayCountVal === 'all' ? null : parseInt(dayCountVal, 10);
+  const relevantDays = dayCount === null ? days : days.slice(0, dayCount);
+  let onTime = 0, late = 0, leftEarly = 0, disturbed = 0;
+  relevantDays.forEach(entry => {
+    const rec = student.getRecord(entry);
+    if (!rec || !metivtaRecordHasFlags(rec)) return;
+    const f = rec.metivtaFlags;
+    if (f.late) late++; else onTime++;
+    if (f.leftEarly) leftEarly++;
+    if (f.disturbCount > 0) disturbed += f.disturbCount;
+  });
+  return { onTime, late, leftEarly, disturbed };
+}
+
+function summaryTextFromStats(stats){
+  const parts = [];
+  parts.push('הגיע בזמן: ' + stats.onTime + ' פעמים');
+  if (stats.late) parts.push('איחר: ' + stats.late + ' פעמים');
+  if (stats.leftEarly) parts.push('יצא מוקדם: ' + stats.leftEarly + ' פעמים');
+  if (stats.disturbed) parts.push('הפריע: ' + stats.disturbed + ' פעמים');
+  return parts.join(', ');
+}
+
+async function renderSmsTab(container){
+  const status = document.createElement('div');
+  status.className = 'loading';
+  status.textContent = 'טוען…';
+  container.appendChild(status);
+
+  try{
+    const [mainSnap, archiveSnap, phonesSnap] = await Promise.all([
+      getDoc(doc(db, FIRESTORE_COLLECTION, STORAGE_KEY)),
+      getDoc(doc(db, FIRESTORE_COLLECTION, STORAGE_KEY, 'meta', 'dailyArchive')),
+      getDoc(doc(db, FIRESTORE_COLLECTION, STORAGE_KEY, 'meta', 'metivtaPhones'))
+    ]);
+    if (!mainSnap.exists()) throw new Error('לא נמצאו נתוני כיתה');
+    const mainData = mainSnap.data();
+    const metivtaNames = mainData.metivtaNames || {};
+    const days = (archiveSnap.exists() && Array.isArray(archiveSnap.data().days)) ? archiveSnap.data().days.slice() : [];
+    days.sort((a, b) => new Date(b.date) - new Date(a.date));
+    const phonesData = phonesSnap.exists() ? phonesSnap.data() : {};
+    const mainPhones = phonesData.main || {};
+    const extraPhones = phonesData.extra || {};
+
+    status.remove();
+
+    const students = [];
+    STUDENT_NAMES.forEach((name, idx) => {
+      const id = idx + 1;
+      students.push({
+        key: 'main-' + id, id, isExtra: false,
+        name: metivtaNames[id] || name,
+        link: new URL('parent-update.html?id=' + id, location.href).href,
+        father: (mainPhones[id] && mainPhones[id].father) || '',
+        mother: (mainPhones[id] && mainPhones[id].mother) || '',
+        getRecord: (entry) => (entry.students || []).find(x => x.id === id) || null
+      });
+    });
+    METIVTA_EXTRA_NAMES.forEach((name, idx) => {
+      const id = idx + 1;
+      students.push({
+        key: 'extra-' + id, id, isExtra: true,
+        name: name,
+        link: '',
+        father: (extraPhones[id] && extraPhones[id].father) || '',
+        mother: (extraPhones[id] && extraPhones[id].mother) || '',
+        getRecord: (entry) => (entry.metivtaExtraStudents || []).find(x => x.id === id) || null
+      });
+    });
+
+    // --- Template card ---
+    const templateCard = document.createElement('div');
+    templateCard.className = 'card';
+    const templateLabel = document.createElement('label');
+    templateLabel.className = 'field-label';
+    templateLabel.textContent = 'תבנית ההודעה';
+    templateCard.appendChild(templateLabel);
+    const hint = document.createElement('div');
+    hint.className = 'hint';
+    hint.innerHTML = 'שדות משתנים זמינים: <b>{שם}</b>, <b>{קישור}</b> (קיים רק לתלמידים הרגילים), <b>{סיכום}</b> (כל הנתונים יחד), או כל נתון בנפרד: <b>{בזמן}</b>, <b>{איחור}</b>, <b>{מוקדם}</b>, <b>{הפרעות}</b>.';
+    templateCard.appendChild(hint);
+    const templateTextarea = document.createElement('textarea');
+    templateTextarea.id = 'template';
+    templateTextarea.value = DEFAULT_TEMPLATE;
+    templateCard.appendChild(templateTextarea);
+
+    const rowInline = document.createElement('div');
+    rowInline.className = 'row-inline';
+    const senderWrap = document.createElement('div');
+    const senderLabel = document.createElement('label');
+    senderLabel.className = 'field-label';
+    senderLabel.textContent = 'שם/מספר השולח (כפי שמאושר בחשבון ה-sms4free)';
+    senderWrap.appendChild(senderLabel);
+    const senderInput = document.createElement('input');
+    senderInput.id = 'sender';
+    senderInput.type = 'text';
+    senderWrap.appendChild(senderInput);
+    rowInline.appendChild(senderWrap);
+
+    const dayCountWrap = document.createElement('div');
+    const dayCountLabel = document.createElement('label');
+    dayCountLabel.className = 'field-label';
+    dayCountLabel.textContent = 'טווח הסיכום';
+    dayCountWrap.appendChild(dayCountLabel);
+    const dayCountSelect = document.createElement('select');
+    dayCountSelect.className = 'day-count-select';
+    dayCountSelect.id = 'dayCount';
+    DAY_COUNT_OPTIONS.forEach(opt => {
+      const o = document.createElement('option');
+      o.value = opt.value;
+      o.textContent = opt.label;
+      dayCountSelect.appendChild(o);
+    });
+    dayCountWrap.appendChild(dayCountSelect);
+    rowInline.appendChild(dayCountWrap);
+    templateCard.appendChild(rowInline);
+    container.appendChild(templateCard);
+
+    // --- Recipients card ---
+    const recipientsCard = document.createElement('div');
+    recipientsCard.className = 'card';
+    const recipientsTitle = document.createElement('div');
+    recipientsTitle.className = 'section-title';
+    recipientsTitle.textContent = 'נמענים';
+    recipientsCard.appendChild(recipientsTitle);
+
+    const selectAllRow = document.createElement('div');
+    selectAllRow.className = 'select-all-row';
+    const selectAllBtn = document.createElement('button');
+    selectAllBtn.type = 'button';
+    selectAllBtn.textContent = 'בחר הכל';
+    const clearAllBtn = document.createElement('button');
+    clearAllBtn.type = 'button';
+    clearAllBtn.textContent = 'בטל הכל';
+    selectAllRow.appendChild(selectAllBtn);
+    selectAllRow.appendChild(clearAllBtn);
+    recipientsCard.appendChild(selectAllRow);
+
+    const tableScroll = document.createElement('div');
+    tableScroll.className = 'table-scroll';
+    const table = document.createElement('table');
+    table.className = 'recipients-table';
+    const thead = document.createElement('thead');
+    const trh = document.createElement('tr');
+    ['תלמיד', 'אבא', 'אמא'].forEach(label => {
+      const th = document.createElement('th');
+      th.textContent = label;
+      trh.appendChild(th);
+    });
+    thead.appendChild(trh);
+    table.appendChild(thead);
+    const tbody = document.createElement('tbody');
+    students.forEach(s => {
+      const tr = document.createElement('tr');
+      const nameTd = document.createElement('td');
+      nameTd.textContent = s.name + (s.isExtra ? ' (נוסף)' : '');
+      tr.appendChild(nameTd);
+      ['father', 'mother'].forEach(role => {
+        const td = document.createElement('td');
+        const phone = s[role];
+        if (phone){
+          const cell = document.createElement('div');
+          cell.className = 'parent-cell';
+          const cb = document.createElement('input');
+          cb.type = 'checkbox';
+          cb.dataset.studentKey = s.key;
+          cb.dataset.role = role;
+          cell.appendChild(cb);
+          const phoneSpan = document.createElement('span');
+          phoneSpan.className = 'phone';
+          phoneSpan.textContent = phone;
+          cell.appendChild(phoneSpan);
+          td.appendChild(cell);
+        } else {
+          const missing = document.createElement('span');
+          missing.className = 'missing';
+          missing.textContent = 'אין מספר';
+          td.appendChild(missing);
+        }
+        tr.appendChild(td);
+      });
+      tbody.appendChild(tr);
+    });
+    table.appendChild(tbody);
+    tableScroll.appendChild(table);
+    recipientsCard.appendChild(tableScroll);
+
+    const recipientsAction = document.createElement('div');
+    recipientsAction.className = 'action-bar';
+    const dataTableBtn = document.createElement('button');
+    dataTableBtn.className = 'btn-secondary';
+    dataTableBtn.type = 'button';
+    dataTableBtn.textContent = 'הצג טבלת נתונים לעריכה';
+    recipientsAction.appendChild(dataTableBtn);
+    recipientsCard.appendChild(recipientsAction);
+    container.appendChild(recipientsCard);
+
+    selectAllBtn.addEventListener('click', () => {
+      recipientsCard.querySelectorAll('input[type="checkbox"]').forEach(cb => { cb.checked = true; });
+    });
+    clearAllBtn.addEventListener('click', () => {
+      recipientsCard.querySelectorAll('input[type="checkbox"]').forEach(cb => { cb.checked = false; });
+    });
+
+    function getSelectedRecipients(){
+      const selected = [];
+      recipientsCard.querySelectorAll('input[type="checkbox"]:checked').forEach(cb => {
+        const student = students.find(s => s.key === cb.dataset.studentKey);
+        if (!student) return;
+        const phone = student[cb.dataset.role];
+        if (!phone) return;
+        selected.push({ student, role: cb.dataset.role, phone });
+      });
+      return selected;
+    }
+
+    // --- Data table card (editable stats, per unique selected student - never saved back) ---
+    const dataCard = document.createElement('div');
+    dataCard.className = 'card';
+    dataCard.style.display = 'none';
+    const dataTitle = document.createElement('div');
+    dataTitle.className = 'section-title';
+    dataTitle.textContent = 'נתונים לשליחה (עריכה כאן משפיעה רק על ההודעות, לא על נתוני המתיבתא)';
+    dataCard.appendChild(dataTitle);
+    const dataTableScroll = document.createElement('div');
+    dataTableScroll.className = 'table-scroll';
+    const dataTable = document.createElement('table');
+    dataTable.className = 'data-table';
+    dataTableScroll.appendChild(dataTable);
+    dataCard.appendChild(dataTableScroll);
+    const dataAction = document.createElement('div');
+    dataAction.className = 'action-bar';
+    const previewBtn = document.createElement('button');
+    previewBtn.className = 'btn-secondary';
+    previewBtn.type = 'button';
+    previewBtn.textContent = 'הצג תצוגה מקדימה של ההודעות';
+    dataAction.appendChild(previewBtn);
+    dataCard.appendChild(dataAction);
+    container.appendChild(dataCard);
+
+    function buildDataTable(){
+      const selected = getSelectedRecipients();
+      const uniqueStudents = [];
+      const seen = new Set();
+      selected.forEach(r => {
+        if (seen.has(r.student.key)) return;
+        seen.add(r.student.key);
+        uniqueStudents.push(r.student);
+      });
+      if (uniqueStudents.length === 0){
+        dataCard.style.display = 'none';
+        return;
+      }
+      dataCard.style.display = '';
+      dataTable.innerHTML = '';
+      const theadD = document.createElement('thead');
+      const trhD = document.createElement('tr');
+      ['תלמיד', 'בזמן', 'איחור', 'מוקדם', 'הפרעות'].forEach(label => {
+        const th = document.createElement('th');
+        th.textContent = label;
+        trhD.appendChild(th);
+      });
+      theadD.appendChild(trhD);
+      dataTable.appendChild(theadD);
+      const tbodyD = document.createElement('tbody');
+      const dayCountVal = dayCountSelect.value;
+      uniqueStudents.forEach(student => {
+        const stats = computeDefaultStats(student, days, dayCountVal);
+        const tr = document.createElement('tr');
+        tr.dataset.studentKey = student.key;
+        const nameTd = document.createElement('td');
+        nameTd.textContent = student.name;
+        tr.appendChild(nameTd);
+        ['onTime', 'late', 'leftEarly', 'disturbed'].forEach(field => {
+          const td = document.createElement('td');
+          const input = document.createElement('input');
+          input.type = 'number';
+          input.min = '0';
+          input.value = stats[field];
+          input.dataset.field = field;
+          td.appendChild(input);
+          tr.appendChild(td);
+        });
+        tbodyD.appendChild(tr);
+      });
+      dataTable.appendChild(tbodyD);
+    }
+
+    dataTableBtn.addEventListener('click', buildDataTable);
+
+    function getStatsForStudent(studentKey){
+      const row = dataTable.querySelector('tr[data-student-key="' + CSS.escape(studentKey) + '"]');
+      if (!row) return { onTime: 0, late: 0, leftEarly: 0, disturbed: 0 };
+      const get = (field) => parseInt(row.querySelector('input[data-field="' + field + '"]').value, 10) || 0;
+      return { onTime: get('onTime'), late: get('late'), leftEarly: get('leftEarly'), disturbed: get('disturbed') };
+    }
+
+    function resolveMessage(student){
+      const stats = getStatsForStudent(student.key);
+      const summaryText = summaryTextFromStats(stats);
+      return templateTextarea.value
+        .split('{שם}').join(student.name)
+        .split('{סיכום}').join(summaryText)
+        .split('{קישור}').join(student.link || '')
+        .split('{בזמן}').join(String(stats.onTime))
+        .split('{איחור}').join(String(stats.late))
+        .split('{מוקדם}').join(String(stats.leftEarly))
+        .split('{הפרעות}').join(String(stats.disturbed));
+    }
+
+    // --- Preview + send card ---
+    const sendCard = document.createElement('div');
+    sendCard.className = 'card';
+    sendCard.style.display = 'none';
+    const sendTitle = document.createElement('div');
+    sendTitle.className = 'section-title';
+    sendTitle.textContent = 'תצוגה מקדימה - אפשר לערוך כל הודעה בנפרד לפני שליחה';
+    sendCard.appendChild(sendTitle);
+    const previewList = document.createElement('div');
+    previewList.className = 'preview-list';
+    sendCard.appendChild(previewList);
+    const sendAction = document.createElement('div');
+    sendAction.className = 'action-bar';
+    const sendBtn = document.createElement('button');
+    sendBtn.className = 'btn-primary';
+    sendBtn.type = 'button';
+    sendBtn.textContent = 'שלח הודעות';
+    sendAction.appendChild(sendBtn);
+    sendCard.appendChild(sendAction);
+    const summaryBar = document.createElement('div');
+    summaryBar.className = 'summary-bar';
+    sendCard.appendChild(summaryBar);
+    container.appendChild(sendCard);
+
+    previewBtn.addEventListener('click', () => {
+      const selected = getSelectedRecipients();
+      previewList.innerHTML = '';
+      summaryBar.textContent = '';
+      if (selected.length === 0){
+        sendCard.style.display = 'none';
+        return;
+      }
+      sendCard.style.display = '';
+      selected.forEach(r => {
+        const item = document.createElement('div');
+        item.className = 'preview-item';
+        item.dataset.studentKey = r.student.key;
+        item.dataset.role = r.role;
+        const head = document.createElement('div');
+        head.className = 'preview-head';
+        const nameSpan = document.createElement('span');
+        nameSpan.textContent = r.student.name + ' - ' + (r.role === 'father' ? 'אבא' : 'אמא');
+        const phoneSpan = document.createElement('span');
+        phoneSpan.className = 'preview-phone';
+        phoneSpan.textContent = r.phone;
+        head.appendChild(nameSpan);
+        head.appendChild(phoneSpan);
+        item.appendChild(head);
+        const textarea = document.createElement('textarea');
+        textarea.value = resolveMessage(r.student);
+        item.appendChild(textarea);
+        const statusEl = document.createElement('div');
+        statusEl.className = 'preview-status';
+        item.appendChild(statusEl);
+        previewList.appendChild(item);
+      });
+    });
+
+    async function sendOne(sender, recipientPhone, msg){
+      const res = await fetch('https://api.sms4free.co.il/ApiSMS/SendSMS', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json; charset=utf-8' },
+        body: JSON.stringify({ key: sms4freeConfig.key, user: sms4freeConfig.user, pass: sms4freeConfig.pass, sender, recipient: recipientPhone, msg })
+      });
+      const text = (await res.text()).trim();
+      return parseInt(text, 10);
+    }
+
+    sendBtn.addEventListener('click', async () => {
+      const sender = senderInput.value.trim();
+      if (!sender){
+        alert('יש להזין שם/מספר שולח לפני השליחה.');
+        return;
+      }
+      const items = Array.from(previewList.querySelectorAll('.preview-item'));
+      if (items.length === 0) return;
+      if (!confirm('לשלוח ' + items.length + ' הודעות SMS בפועל (בתשלום)?')) return;
+
+      sendBtn.disabled = true;
+      previewBtn.disabled = true;
+      dataTableBtn.disabled = true;
+      let okCount = 0, failCount = 0;
+
+      for (const item of items){
+        const studentKey = item.dataset.studentKey;
+        const role = item.dataset.role;
+        const student = students.find(s => s.key === studentKey);
+        const phone = normalizePhone(student[role]);
+        const msg = item.querySelector('textarea').value;
+        const statusEl = item.querySelector('.preview-status');
+        statusEl.textContent = 'שולח…';
+        try{
+          const code = await sendOne(sender, phone, msg);
+          if (!isNaN(code) && code > 0){
+            statusEl.textContent = 'נשלח בהצלחה ✓';
+            statusEl.className = 'preview-status status-ok';
+            okCount++;
+          } else {
+            const errMsg = SMS4FREE_ERROR_MESSAGES[String(code)] || ('קוד שגיאה: ' + code);
+            statusEl.textContent = 'נכשל: ' + errMsg;
+            statusEl.className = 'preview-status status-err';
+            failCount++;
+          }
+        } catch(e){
+          statusEl.textContent = 'נכשל: שגיאת רשת (' + (e && e.message ? e.message : String(e)) + ') - ייתכן שזה חסימת CORS של שרת ה-SMS';
+          statusEl.className = 'preview-status status-err';
+          failCount++;
+        }
+      }
+
+      summaryBar.textContent = 'נשלחו בהצלחה: ' + okCount + ' · נכשלו: ' + failCount;
+      previewBtn.disabled = false;
+      sendBtn.disabled = false;
+      dataTableBtn.disabled = false;
+    });
+
+  } catch(e){
+    status.className = 'err';
+    status.textContent = 'שגיאה בטעינה: ' + (e && e.message ? e.message : String(e));
+  }
+}
+
+if (!isFirebaseConfigured){
+  app.innerHTML = '<div class="err">האתר לא מוגדר עדיין.</div>';
+} else {
+  const firebaseApp = initializeApp(firebaseConfig);
+  db = getFirestore(firebaseApp);
+  showCodePrompt();
+}
+</script>
+</body>
+</html>
