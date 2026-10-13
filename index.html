@@ -2332,14 +2332,23 @@ async function exportMetivtaArchiveCSV(days){
 
 let metivtaArchiveSortIndex = null;
 let metivtaSummaryDayCount = 7;
-const METIVTA_SUMMARY_DAY_OPTIONS = [
-  { key: 7, label: '7 ימים' },
-  { key: 14, label: '14 ימים' },
-  { key: 30, label: '30 ימים' },
-  { key: null, label: 'הכל' }
+let metivtaSummaryField = 'total';
+const METIVTA_SUMMARY_DAY_OPTIONS = (() => {
+  const opts = [];
+  for (let i = 1; i <= 15; i++) opts.push({ key: i, label: i === 1 ? 'יום אחד' : i + ' ימים' });
+  opts.push({ key: 30, label: '30 ימים' });
+  opts.push({ key: null, label: 'הכל' });
+  return opts;
+})();
+const METIVTA_SUMMARY_FIELD_OPTIONS = [
+  { key: 'total', label: 'סה״כ' },
+  { key: 'onTime', label: 'בזמן' },
+  { key: 'late', label: 'איחור' },
+  { key: 'leftEarly', label: 'מוקדם' },
+  { key: 'disturbed', label: 'הפרעות' }
 ];
 
-function computeMetivtaSummary(row, days, dayCount){
+function computeMetivtaStats(row, days, dayCount){
   const relevantDays = dayCount === null ? days : days.slice(0, dayCount);
   let onTime = 0, late = 0, leftEarly = 0, disturbed = 0;
   relevantDays.forEach(entry => {
@@ -2350,12 +2359,19 @@ function computeMetivtaSummary(row, days, dayCount){
     if (f.leftEarly) leftEarly++;
     if (f.disturbCount > 0) disturbed += f.disturbCount;
   });
-  const parts = [];
-  if (onTime) parts.push(onTime + ' בזמן');
-  if (late) parts.push(late + ' איחור');
-  if (leftEarly) parts.push(leftEarly + ' מוקדם');
-  if (disturbed) parts.push(disturbed + ' הפרעות');
-  return parts.length ? parts.join(' · ') : '—';
+  return { onTime, late, leftEarly, disturbed };
+}
+
+function metivtaSummaryText(stats, field){
+  if (field === 'total'){
+    const parts = [];
+    if (stats.onTime) parts.push(stats.onTime + ' בזמן');
+    if (stats.late) parts.push(stats.late + ' איחור');
+    if (stats.leftEarly) parts.push(stats.leftEarly + ' מוקדם');
+    if (stats.disturbed) parts.push(stats.disturbed + ' הפרעות');
+    return parts.length ? parts.join(' · ') : '—';
+  }
+  return String(stats[field] || 0);
 }
 
 function buildMetivtaSummaryDaysDropdown(container){
@@ -2377,7 +2393,39 @@ function buildMetivtaSummaryDaysDropdown(container){
   const toggle = document.createElement('button');
   toggle.type = 'button';
   toggle.className = 'merged-dropdown-toggle';
-  toggle.textContent = 'סיכום · ' + activeOpt.label;
+  toggle.textContent = activeOpt.label;
+  toggle.addEventListener('click', (e) => {
+    e.stopPropagation();
+    document.querySelectorAll('.merged-dropdown-list.open').forEach(l => { if (l !== list) l.classList.remove('open'); });
+    list.classList.toggle('open');
+  });
+  const dropdown = document.createElement('div');
+  dropdown.className = 'merged-dropdown';
+  dropdown.appendChild(toggle);
+  dropdown.appendChild(list);
+  return dropdown;
+}
+
+function buildMetivtaSummaryFieldDropdown(container){
+  const list = document.createElement('div');
+  list.className = 'merged-dropdown-list merged-dropdown-list-right';
+  METIVTA_SUMMARY_FIELD_OPTIONS.forEach(opt => {
+    const optEl = document.createElement('div');
+    optEl.className = 'merged-dropdown-option' + (opt.key === metivtaSummaryField ? ' merged-dropdown-option-active' : '');
+    optEl.textContent = opt.label;
+    optEl.addEventListener('click', (e) => {
+      e.stopPropagation();
+      metivtaSummaryField = opt.key;
+      list.classList.remove('open');
+      renderMetivtaHistoryTable(container);
+    });
+    list.appendChild(optEl);
+  });
+  const activeOpt = METIVTA_SUMMARY_FIELD_OPTIONS.find(o => o.key === metivtaSummaryField) || METIVTA_SUMMARY_FIELD_OPTIONS[0];
+  const toggle = document.createElement('button');
+  toggle.type = 'button';
+  toggle.className = 'merged-dropdown-toggle';
+  toggle.textContent = activeOpt.label;
   toggle.addEventListener('click', (e) => {
     e.stopPropagation();
     document.querySelectorAll('.merged-dropdown-list.open').forEach(l => { if (l !== list) l.classList.remove('open'); });
@@ -2423,7 +2471,14 @@ function renderMetivtaHistoryTable(container){
   trh.appendChild(nameTh);
   const summaryTh = document.createElement('th');
   summaryTh.style.whiteSpace = 'nowrap';
-  summaryTh.appendChild(buildMetivtaSummaryDaysDropdown(container));
+  const summaryControls = document.createElement('div');
+  summaryControls.style.display = 'flex';
+  summaryControls.style.alignItems = 'center';
+  summaryControls.style.justifyContent = 'center';
+  summaryControls.style.gap = '2px';
+  summaryControls.appendChild(buildMetivtaSummaryFieldDropdown(container));
+  summaryControls.appendChild(buildMetivtaSummaryDaysDropdown(container));
+  summaryTh.appendChild(summaryControls);
   trh.appendChild(summaryTh);
   days.forEach((entry, dayIndex) => {
     const th = document.createElement('th');
@@ -2484,7 +2539,7 @@ function renderMetivtaHistoryTable(container){
     tr.appendChild(nameTd);
 
     const summaryTd = document.createElement('td');
-    summaryTd.textContent = computeMetivtaSummary(row, days, metivtaSummaryDayCount);
+    summaryTd.textContent = metivtaSummaryText(computeMetivtaStats(row, days, metivtaSummaryDayCount), metivtaSummaryField);
     summaryTd.style.fontWeight = '700';
     summaryTd.style.whiteSpace = 'nowrap';
     tr.appendChild(summaryTd);

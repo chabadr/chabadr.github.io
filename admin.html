@@ -320,12 +320,13 @@ const FIELD_LABELS = {
 const FIELD_ORDER = ['chitas', 'shema', 'netilatYadaim', 'minchaMaariv', 'mikveh', 'dvarTorah'];
 const LEAD_COL_WIDTHS = { student: 72, week: 80, when: 105 };
 
-const DAY_COUNT_OPTIONS = [
-  { value: '7', label: '7 ימים אחרונים' },
-  { value: '14', label: '14 ימים אחרונים' },
-  { value: '30', label: '30 ימים אחרונים' },
-  { value: 'all', label: 'כל הימים הארכיוניים' }
-];
+const DAY_COUNT_OPTIONS = (() => {
+  const opts = [];
+  for (let i = 1; i <= 15; i++) opts.push({ value: String(i), label: i === 1 ? 'יום אחרון' : i + ' ימים אחרונים' });
+  opts.push({ value: '30', label: '30 ימים אחרונים' });
+  opts.push({ value: 'all', label: 'כל הימים הארכיוניים' });
+  return opts;
+})();
 
 const DEFAULT_TEMPLATE = 'שלום,\nעדכון שבועי עבור {שם} מהמתיבתא:\n{סיכום}\n\nלעדכון נתונים: {קישור}';
 
@@ -795,6 +796,7 @@ async function renderSmsTab(container){
       o.textContent = opt.label;
       dayCountSelect.appendChild(o);
     });
+    dayCountSelect.value = '7';
     dayCountWrap.appendChild(dayCountSelect);
     rowInline.appendChild(dayCountWrap);
     templateCard.appendChild(rowInline);
