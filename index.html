@@ -320,6 +320,7 @@
   table.archive-table thead th .metivta-header-toggle{
     font-size: inherit;
     font-family: inherit;
+    padding: 2px;
   }
   .metivta-sort-btn{
     background: transparent;
@@ -327,13 +328,14 @@
     cursor: pointer;
     color: var(--ink);
     font-weight: 700;
-    padding: 2px;
+  }
+  table.archive-table thead th .metivta-sort-btn{
+    padding: 2px 1px;
   }
   .metivta-th-row{
     display: flex;
     align-items: center;
     justify-content: center;
-    gap: 2px;
   }
   table.archive-table th.metivta-summary-col,
   table.archive-table td.metivta-summary-col{
@@ -2522,11 +2524,17 @@ function renderMetivtaHistoryTable(container){
 
   // Fixed widths so the leading columns stay narrow - on a phone that keeps
   // today's column (where attendance is entered) on screen without scrolling.
-  const COL_W = { num: 30, family: 64, first: 72, class: 40, summary: 70, day: 58 };
+  // Today's column (where attendance is entered) gets whatever room is left
+  // on screen after the leading columns, between a normal day's width and
+  // 110px - wide on most phones and on desktop, never pushed off-screen.
+  const COL_W = { num: 26, family: 70, first: 56, class: 38, summary: 66, day: 58 };
+  const leadWidth = COL_W.num + COL_W.family + COL_W.first + COL_W.class + COL_W.summary;
+  const availableWidth = container.clientWidth || (window.innerWidth - 32);
+  COL_W.today = Math.max(COL_W.day, Math.min(110, availableWidth - 2 - leadWidth));
+  const dayColWidth = (entry) => entry.isLive ? COL_W.today : COL_W.day;
   const table = document.createElement('table');
   table.className = 'archive-table';
-  const leadWidth = COL_W.num + COL_W.family + COL_W.first + COL_W.class + COL_W.summary;
-  table.style.width = 'max(100%, ' + (leadWidth + days.length * COL_W.day) + 'px)';
+  table.style.width = 'max(100%, ' + days.reduce((sum, e) => sum + dayColWidth(e), leadWidth) + 'px)';
 
   const thead = document.createElement('thead');
   const trh = document.createElement('tr');
@@ -2594,7 +2602,9 @@ function renderMetivtaHistoryTable(container){
     trh.appendChild(th);
   });
   const headerWidths = [COL_W.num, COL_W.family, COL_W.first, COL_W.class, COL_W.summary];
-  [...trh.children].forEach((th, i) => { th.style.width = (i < headerWidths.length ? headerWidths[i] : COL_W.day) + 'px'; });
+  [...trh.children].forEach((th, i) => {
+    th.style.width = (i < headerWidths.length ? headerWidths[i] : dayColWidth(days[i - headerWidths.length])) + 'px';
+  });
   thead.appendChild(trh);
   table.appendChild(thead);
 
@@ -3484,7 +3494,10 @@ window.addEventListener('resize', () => {
   if (window.innerWidth === lastViewportWidth) return;
   lastViewportWidth = window.innerWidth;
   clearTimeout(resizeTimer);
-  resizeTimer = setTimeout(fitAllTextCells, 150);
+  resizeTimer = setTimeout(() => {
+    if (state && document.getElementById('metivtaView').style.display !== 'none') renderMetivtaView();
+    else fitAllTextCells();
+  }, 150);
 });
 
 const SCREENSAVER_IDLE_MS = 30000;
