@@ -1420,6 +1420,27 @@ function getWeekKey(date){
   return ws.getFullYear() + '-' + String(ws.getMonth() + 1).padStart(2, '0') + '-' + String(ws.getDate()).padStart(2, '0');
 }
 
+function mergeEarlierDailyEntry(target, earlier){
+  const sumCats = (a, b) => {
+    const out = { ...(b || {}) };
+    Object.keys(a || {}).forEach(k => { out[k] = (a[k] || 0) + (out[k] || 0); });
+    return out;
+  };
+  (earlier.students || []).forEach(e => {
+    const s = target.students.find(x => x.id === e.id);
+    if (!s){ target.students.push(e); return; }
+    s.cats = sumCats(s.cats, e.cats);
+    s.purchases = (s.purchases || 0) + (e.purchases || 0);
+    s.minusTotal = (s.minusTotal || 0) + (e.minusTotal || 0);
+    if (!metivtaRecordHasFlags(s) && e.metivtaFlags) s.metivtaFlags = { ...e.metivtaFlags };
+  });
+  (earlier.metivtaExtraStudents || []).forEach(e => {
+    const s = target.metivtaExtraStudents.find(x => x.id === e.id);
+    if (!s){ target.metivtaExtraStudents.push(e); return; }
+    if (!metivtaRecordHasFlags(s) && e.metivtaFlags) s.metivtaFlags = { ...e.metivtaFlags };
+  });
+}
+
 // Pure function: computes the result of archiving one day (mainData.lastActivityDate)
 // from freshly-read documents, without touching any global state. Used inside
 // doResetGuarded's transaction so the whole operation - reading the live
@@ -1450,7 +1471,13 @@ function computeDailyResetUpdate(mainData, dailyDays, weeklyEntry){
 
   let days = Array.isArray(dailyDays) ? dailyDays.slice() : [];
   const existingDailyIdx = days.findIndex(e => dayKeyOf(e.date) === entryDayKey);
-  if (existingDailyIdx !== -1) days.splice(existingDailyIdx, 1);
+  if (existingDailyIdx !== -1){
+    // The same day was already archived once (the 18:00 reset followed by
+    // more activity that evening, or an earlier mid-day reset) - add this
+    // part of the day to it instead of overwriting the earlier part.
+    mergeEarlierDailyEntry(newDailyData, days[existingDailyIdx]);
+    days.splice(existingDailyIdx, 1);
+  }
   days.unshift(newDailyData);
   const MAX_DAILY = 90;
   if (days.length > MAX_DAILY) days = days.slice(0, MAX_DAILY);
@@ -1497,14 +1524,21 @@ function computeDailyResetUpdate(mainData, dailyDays, weeklyEntry){
     const dayMikvaotVal = currentMikvaot - ws.baselineMikvaot - priorMikvaotSum;
     const dayRambamVal = currentRambam - ws.baselineRambam - priorRambamSum;
 
-    const dayMetivtaVal = metivtaDayScore(s.metivtaFlags || defaultMetivtaFlags);
+    // Same-day re-archive: the counters below are increments on top of what
+    // this day already holds, while bonus/metivta are whole-day values.
+    const prevDay = ws.days[entryDayKey] || null;
+    const hasMetivtaNow = metivtaRecordHasFlags(s);
+    const dayMetivtaVal = (prevDay && !hasMetivtaNow)
+      ? (prevDay.metivtaVal || 0)
+      : metivtaDayScore(s.metivtaFlags || defaultMetivtaFlags);
+    const mergedBonus = prevDay ? Math.min(prevDay.bonus || 0, dayBonus) : dayBonus;
 
     ws.days[entryDayKey] = {
-      morning: dayMorning,
-      tefila: dayTefila,
-      mikvaotVal: dayMikvaotVal,
-      bonus: dayBonus,
-      rambamVal: dayRambamVal,
+      morning: (prevDay ? prevDay.morning || 0 : 0) + dayMorning,
+      tefila: (prevDay ? prevDay.tefila || 0 : 0) + dayTefila,
+      mikvaotVal: (prevDay ? prevDay.mikvaotVal || 0 : 0) + dayMikvaotVal,
+      bonus: mergedBonus,
+      rambamVal: (prevDay ? prevDay.rambamVal || 0 : 0) + dayRambamVal,
       metivtaVal: dayMetivtaVal
     };
 
@@ -1512,10 +1546,10 @@ function computeDailyResetUpdate(mainData, dailyDays, weeklyEntry){
     ws.tefila += dayTefila;
     ws.mikve += (s.cats.c6 || 0) * 2;
     ws.minusDelta += s.minusTotal || 0;
-    ws.bonus = (ws.bonus || 0) + dayBonus;
+    ws.bonus = (ws.bonus || 0) - (prevDay ? prevDay.bonus || 0 : 0) + mergedBonus;
     ws.mikvaotVal = currentMikvaot - ws.baselineMikvaot;
     ws.rambamVal = currentRambam - ws.baselineRambam;
-    ws.metivtaVal = (ws.metivtaVal || 0) + dayMetivtaVal;
+    ws.metivtaVal = (ws.metivtaVal || 0) - (prevDay ? prevDay.metivtaVal || 0 : 0) + dayMetivtaVal;
   });
 
   const newMainData = JSON.parse(JSON.stringify(mainData));
@@ -1549,8 +1583,11 @@ async function doResetGuarded(){
       if (!mainSnap.exists()) return;
       const mainData = mainSnap.data();
       if (!Array.isArray(mainData.students) || mainData.students.length !== TOTAL_STUDENTS) return;
-      if (!mainData.lastActivityDate){
-        // someone else already archived and reset this transition
+      // Re-decide from the fresh server copy, never from this device's
+      // in-memory state: a device that slept since yesterday still holds
+      // yesterday's lastActivityDate, and its overdue 01:00 timer used to
+      // archive (and zero) today's live board mid-day on that stale basis.
+      if (!isLiveDayDueForArchive(mainData)){
         outcome = { mainData, dailyDays: null };
         return;
       }
@@ -1641,17 +1678,16 @@ async function updateDailyArchiveRecord(dayKey, studentId, isExtra, mutatorFn){
 
 const AUTO_RESET_HOUR = 18;
 
+function isLiveDayDueForArchive(data){
+  if (!data.lastActivityDate) return false;
+  const today = todayStr();
+  if (data.lastActivityDate !== today) return true;
+  return new Date().getHours() >= AUTO_RESET_HOUR && data.lastAutoResetDate !== today;
+}
+
 function checkAutoReset(){
   if (!state) return;
-  if (!state.lastActivityDate) return;
-  const today = todayStr();
-  if (state.lastActivityDate === today){
-    if (new Date().getHours() >= AUTO_RESET_HOUR && state.lastAutoResetDate !== today){
-      doResetGuarded();
-    }
-  } else {
-    doResetGuarded();
-  }
+  if (isLiveDayDueForArchive(state)) doResetGuarded();
 }
 
 function scheduleNextAutoResetCheck(){
