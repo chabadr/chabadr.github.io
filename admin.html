@@ -328,7 +328,10 @@ const FIELD_LABELS = {
 const FIELD_ORDER = ['chitas', 'shema', 'netilatYadaim', 'minchaMaariv', 'mikveh', 'dvarTorah'];
 const LEAD_COL_WIDTHS = { student: 72, week: 80, when: 105 };
 
-const DAY_COUNT_OPTIONS = Array.from({ length: 15 }, (_, i) => i + 1).map(n => ({ value: String(n), label: n === 1 ? 'יום אחרון' : n + ' ימים אחרונים' }));
+const DAY_COUNT_OPTIONS = [
+  ...Array.from({ length: 15 }, (_, i) => i + 1).map(n => ({ value: String(n), label: n === 1 ? 'יום אחרון' : n + ' ימים אחרונים' })),
+  { value: 'all', label: 'כל הימים' }
+];
 
 const DEFAULT_TEMPLATE = 'שלום,\nעדכון שבועי עבור {שם} מהמתיבתא:\nנוכחות: {נוכחות}\n\nלעדכון נתונים: {קישור}';
 
@@ -371,6 +374,13 @@ function normalizePhone(v){
 function metivtaRecordHasFlags(s){
   const f = s && s.metivtaFlags;
   return !!(f && (f.ok || f.late || f.leftEarly || (f.disturbCount || 0) > 0));
+}
+
+// Keep in sync with metivtaEntryHasData in index.html (a day counts only if
+// some Metivta attendance - flags, or the pre-flags legacy score - was recorded).
+function metivtaEntryHasData(entry){
+  const recs = [...(entry.students || []), ...(entry.metivtaExtraStudents || [])];
+  return recs.some(r => metivtaRecordHasFlags(r) || (r.metivtaAttendance || 0) + (r.metivtaBehavior || 0) > 0);
 }
 
 function showCodePrompt(){
@@ -738,8 +748,12 @@ async function renderSmsTab(container){
     const mainData = mainSnap.data();
     const metivtaNames = mainData.metivtaNames || {};
     const metivtaExtraNames = mainData.metivtaExtraNames || {};
-    const days = (archiveSnap.exists() && Array.isArray(archiveSnap.data().days)) ? archiveSnap.data().days.slice() : [];
-    days.sort((a, b) => new Date(b.date) - new Date(a.date));
+    // Same days as the Metivta table in index.html: today's live data first,
+    // then only past days where Metivta attendance was actually recorded.
+    const archivedDays = (archiveSnap.exists() && Array.isArray(archiveSnap.data().days)) ? archiveSnap.data().days.slice() : [];
+    archivedDays.sort((a, b) => new Date(b.date) - new Date(a.date));
+    const todayEntry = { date: new Date().toISOString(), students: mainData.students || [], metivtaExtraStudents: mainData.metivtaExtra || [] };
+    const days = [todayEntry, ...archivedDays.filter(metivtaEntryHasData)];
     const phonesData = phonesSnap.exists() ? phonesSnap.data() : {};
     const mainPhones = phonesData.main || {};
     const extraPhones = phonesData.extra || {};
