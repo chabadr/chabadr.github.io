@@ -2655,7 +2655,7 @@ function renderMetivtaHistoryTable(container){
 
   const table = document.createElement('table');
   table.className = 'archive-table';
-  table.style.width = 'max(100%, ' + (280 + days.length * 40) + 'px)';
+  table.style.width = 'max(100%, ' + (320 + days.length * 40) + 'px)';
 
   const thead = document.createElement('thead');
   const trh = document.createElement('tr');
@@ -2665,6 +2665,9 @@ function renderMetivtaHistoryTable(container){
   const firstTh = document.createElement('th');
   firstTh.textContent = 'פרטי';
   trh.appendChild(firstTh);
+  const classTh = document.createElement('th');
+  classTh.textContent = 'כיתה';
+  trh.appendChild(classTh);
   const summaryTh = document.createElement('th');
   summaryTh.style.whiteSpace = 'nowrap';
   const summaryControls = document.createElement('div');
@@ -2720,6 +2723,7 @@ function renderMetivtaHistoryTable(container){
     isExtra: false,
     family: metivtaFamilyName(student.id, false),
     first: metivtaFirstName(student.id, false),
+    cls: metivtaClassValue(student.id, false),
     getRecord: (entry) => entry.students.find(x => x.id === student.id) || null,
     ensureRecord: (entry) => entry.students.find(x => x.id === student.id) || null
   }));
@@ -2728,6 +2732,7 @@ function renderMetivtaHistoryTable(container){
     isExtra: true,
     family: metivtaFamilyName(student.id, true),
     first: metivtaFirstName(student.id, true),
+    cls: metivtaClassValue(student.id, true),
     getRecord: (entry) => (entry.metivtaExtraStudents || []).find(x => x.id === student.id) || null,
     ensureRecord: (entry) => {
       if (!Array.isArray(entry.metivtaExtraStudents)) entry.metivtaExtraStudents = [];
@@ -2759,6 +2764,9 @@ function renderMetivtaHistoryTable(container){
     const firstTd = document.createElement('td');
     firstTd.textContent = row.first;
     tr.appendChild(firstTd);
+    const classTd = document.createElement('td');
+    classTd.textContent = String(row.cls);
+    tr.appendChild(classTd);
 
     const summaryTd = document.createElement('td');
     summaryTd.textContent = metivtaSummaryText(computeMetivtaStats(row, days, metivtaSummaryDayCount), metivtaSummaryField);
