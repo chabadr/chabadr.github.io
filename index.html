@@ -1714,7 +1714,7 @@ function armExpandedGroupTimer(){
 function buildNameDropdown(toggleLabel){
   const list = document.createElement('div');
   list.className = 'merged-dropdown-list merged-dropdown-list-right';
-  [['כיתה', showMain], ['מתיבתא', showMetivta]].forEach(([label, action]) => {
+  [['כיתה', showMain], ['מתיבתא', showMetivta], ['ניהול', () => { location.href = 'admin.html'; }]].forEach(([label, action]) => {
     const opt = document.createElement('div');
     opt.className = 'merged-dropdown-option' + (label === 'שבועי' ? ' merged-dropdown-option-all' : '');
     opt.textContent = label;
