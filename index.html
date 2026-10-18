@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>נקודות</title>
+<title>כיתה ז</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Frank+Ruhl+Libre:wght@500;700;900&family=Rubik:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
@@ -376,6 +376,82 @@
   table.archive-table td.metivta-rownum{
     color: var(--ink-soft);
     font-size: 0.85em;
+  }
+  table.archive-table.metivta-table th,
+  table.archive-table.metivta-table td{
+    padding: 3px 2px;
+    white-space: nowrap;
+    overflow: hidden;
+  }
+  table.archive-table.metivta-table td{
+    line-height: 20px;
+  }
+  table.archive-table.metivta-table td.metivta-today-cell{
+    padding-left: 22px;
+  }
+  table.archive-table td.metivta-rownum{
+    cursor: pointer;
+    user-select: none;
+  }
+  table.archive-table tr.metivta-selected td{
+    background: #E4ECF7;
+  }
+  table.archive-table tr.metivta-selected td.metivta-rownum{
+    background: var(--ink);
+    color: var(--paper);
+    font-weight: 700;
+  }
+  .metivta-move-btn{
+    background: var(--paper);
+    color: var(--ink);
+    border: none;
+    font-family: inherit;
+    font-weight: 700;
+    font-size: inherit;
+    padding: 4px 12px;
+    border-radius: 8px;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  .header-group{
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: nowrap;
+    white-space: nowrap;
+  }
+  .archive-date .merged-dropdown-toggle{
+    font: inherit;
+    padding: 0 2px;
+  }
+  .archive-date .export-btn{
+    font-family: inherit;
+    font-size: inherit;
+    margin-inline-start: auto;
+  }
+  .missing-days{
+    font-weight: 800;
+    color: var(--gold-bright);
+  }
+  table.archive-table th.ff-group-th{
+    background: transparent;
+    border-bottom: none;
+    border-left: none;
+    padding: 0;
+  }
+  table.archive-table th.ff-parent-group-th{
+    background: var(--gold-bg);
+    border-bottom: 1px solid var(--gold);
+    border-right: 3px solid var(--gold);
+    font-size: 0.85em;
+    padding: 4px;
+  }
+  table.archive-table th.ff-parent-first,
+  table.archive-table td.ff-parent-first{
+    border-right: 3px solid var(--gold);
+  }
+  .ff-fit{
+    display: inline-block;
   }
   .merged-dropdown-toggle:focus{
     outline: 2px solid var(--gold);
@@ -760,6 +836,7 @@ import {
   getFirestore, doc, getDoc, getDocs, collection, setDoc, onSnapshot, runTransaction,
 } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
 import { firebaseConfig, isFirebaseConfigured } from "./firebase-config.js";
+import { mountPageNav } from "./page-nav.js";
 
 function showSetupNeededMessage(){
   document.body.innerHTML = '';
@@ -1149,6 +1226,7 @@ async function loadState(){
       if (!parsed.metivtaExtraNames || typeof parsed.metivtaExtraNames !== 'object') parsed.metivtaExtraNames = {};
       if (!parsed.metivtaClass || typeof parsed.metivtaClass !== 'object') parsed.metivtaClass = {};
       if (!parsed.metivtaExtraClass || typeof parsed.metivtaExtraClass !== 'object') parsed.metivtaExtraClass = {};
+      if (!Array.isArray(parsed.metivtaArchivedKeys)) parsed.metivtaArchivedKeys = [];
       state = parsed;
       return;
     }
@@ -1711,40 +1789,6 @@ function armExpandedGroupTimer(){
   }, 10000);
 }
 
-function buildNameDropdown(toggleLabel){
-  const list = document.createElement('div');
-  list.className = 'merged-dropdown-list merged-dropdown-list-right';
-  [['כיתה', showMain], ['מתיבתא', showMetivta], ['ניהול', () => { location.href = 'admin.html'; }]].forEach(([label, action]) => {
-    const opt = document.createElement('div');
-    opt.className = 'merged-dropdown-option' + (label === 'שבועי' ? ' merged-dropdown-option-all' : '');
-    opt.textContent = label;
-    opt.addEventListener('click', (e) => {
-      e.stopPropagation();
-      list.classList.remove('open');
-      action();
-    });
-    list.appendChild(opt);
-  });
-
-  const toggle = document.createElement('button');
-  toggle.type = 'button';
-  toggle.className = 'merged-dropdown-toggle';
-  toggle.textContent = toggleLabel || 'שם';
-  toggle.addEventListener('click', (e) => {
-    e.stopPropagation();
-    document.querySelectorAll('.merged-dropdown-list.open').forEach(l => {
-      if (l !== list) l.classList.remove('open');
-    });
-    list.classList.toggle('open');
-  });
-
-  const dropdown = document.createElement('div');
-  dropdown.className = 'merged-dropdown';
-  dropdown.appendChild(toggle);
-  dropdown.appendChild(list);
-  return dropdown;
-}
-
 function buildColSpec(){
   const spec = [];
   spec.push({ kind: 'name', category: 'none', weight: 30 });
@@ -1807,7 +1851,7 @@ function buildBoard(title, students){
     if (isColHidden(s.category)) th.style.display = 'none';
 
     if (s.kind === 'name'){
-      th.appendChild(buildNameDropdown());
+      th.textContent = 'שם';
     } else if (s.kind === 'total'){
       th.className = (th.className ? th.className + ' ' : '') + 'col-hide-narrow';
       const totalBtn = document.createElement('button');
@@ -2085,12 +2129,69 @@ function toggleFrequent(studentId, key){
 
 let selectedWeeklyKey = null;
 
+// Weeks archived before the parent form started stamping weekParsha have
+// none stored - their name is looked up once from hebcal (same source as the
+// parent form) and cached in this browser. A week with no weekly parsha
+// (e.g. a holiday Shabbat) falls back to its starting date.
+const PARSHA_CACHE_KEY = 'parshaNamesV1';
+let parshaNameCache = (() => {
+  try{ return JSON.parse(localStorage.getItem(PARSHA_CACHE_KEY)) || {}; } catch(e){ return {}; }
+})();
+let parshaLookupStarted = false;
+
 function weeklyEntryLabel(entry){
-  const parshaName = entry.weekParsha ? entry.weekParsha.replace(/^פרשת\s+/, '') : ('שבוע ' + entry.weekKey);
+  const name = entry.weekParsha || parshaNameCache[entry.weekKey];
+  if (name) return name.replace(/^פרשת\s+/, '');
+  return 'שבוע ' + formatHebrewDateShort(new Date(entry.weekStart));
+}
+
+async function lookupMissingParshaNames(weeklyEntries){
+  const missing = weeklyEntries.filter(e => !e.weekParsha && !parshaNameCache[e.weekKey]);
+  if (missing.length === 0 || parshaLookupStarted) return;
+  parshaLookupStarted = true;
+  const starts = missing.map(e => new Date(e.weekStart)).sort((a, b) => a - b);
+  const end = new Date(starts[starts.length - 1]);
+  end.setDate(end.getDate() + 6);
+  try{
+    const url = 'https://www.hebcal.com/hebcal?cfg=json&v=1&maj=off&min=off&mod=off&nx=off&mf=off&ss=off&s=on&i=on&geo=none'
+      + '&start=' + dayKeyOf(starts[0].toISOString()) + '&end=' + dayKeyOf(end.toISOString());
+    const res = await fetch(url);
+    if (!res.ok) return;
+    const data = await res.json();
+    const items = Array.isArray(data.items) ? data.items : [];
+    let found = false;
+    missing.forEach(e => {
+      const sat = new Date(e.weekStart);
+      sat.setDate(sat.getDate() + 6);
+      const satKey = dayKeyOf(sat.toISOString());
+      const match = items.find(it => it.category === 'parashat' && String(it.date || '').slice(0, 10) === satKey);
+      if (match){ parshaNameCache[e.weekKey] = match.hebrew || match.title; found = true; }
+    });
+    if (!found) return;
+    try{ localStorage.setItem(PARSHA_CACHE_KEY, JSON.stringify(parshaNameCache)); } catch(e){}
+    if (document.getElementById('frequentArchiveView').style.display !== 'none') renderFrequentFlyerView();
+  } catch(e){
+    // best-effort only - the date fallback label stays
+  }
+}
+
+// School days are Sunday-Friday. A day counts as missing when no student has
+// any archived data for it; days from today on (still live or in the future)
+// are never listed.
+function weekMissingDayNames(entry){
   const weekStartD = new Date(entry.weekStart);
-  const weekEndD = new Date(weekStartD);
-  weekEndD.setDate(weekEndD.getDate() + 6);
-  return parshaName + ' · ' + formatHebrewDateShort(weekStartD) + ' – ' + formatHebrewDateShort(weekEndD);
+  const today = todayStr();
+  const present = new Set();
+  (entry.students || []).forEach(s => Object.keys(s.days || {}).forEach(k => present.add(k)));
+  const missing = [];
+  for (let i = 0; i < 6; i++){
+    const d = new Date(weekStartD);
+    d.setDate(d.getDate() + i);
+    const k = dayKeyOf(d.toISOString());
+    if (k >= today) break;
+    if (!present.has(k)) missing.push(HEBREW_WEEKDAY_NAMES[i]);
+  }
+  return missing;
 }
 
 function renderFrequentFlyerView(){
@@ -2106,6 +2207,7 @@ function renderFrequentFlyerView(){
   const selectedEntry = weeklyEntries.find(e => e.weekKey === selectedWeeklyKey) || weeklyEntries[0];
 
   renderWeeklyEntryInto(selectedEntry, el, weeklyEntries);
+  lookupMissingParshaNames(weeklyEntries);
 }
 
 function findMetivtaStatusStudent(studentId, isExtra){
@@ -2300,14 +2402,61 @@ function metivtaClassLabel(id, isExtra){
   return /^\d+$/.test(v) ? 'ז' + v : v;
 }
 
+// Students moved to the Metivta page's "ארכיון" table, by row key
+// ('main-<id>' / 'extra-<id>'), saved with the live document.
+function metivtaRowKey(id, isExtra){
+  return (isExtra ? 'extra-' : 'main-') + id;
+}
+
+function metivtaArchivedKeySet(){
+  return new Set(Array.isArray(state.metivtaArchivedKeys) ? state.metivtaArchivedKeys : []);
+}
+
+// Rows picked by clicking their row number - only on this screen, not saved.
+const metivtaSelectedKeys = new Set();
+
 function renderMetivtaView(){
   const el = document.getElementById('metivtaView');
   el.innerHTML = '';
   if (!Array.isArray(state.metivtaExtra)) state.metivtaExtra = [];
-  const container = document.createElement('div');
-  el.appendChild(container);
-  renderMetivtaHistoryTable(container);
-  fitAllTextCells();
+
+  const pastDays = getDisplayArchive().filter(e => e.type !== 'weekly' && !e.isLive && metivtaEntryHasData(e));
+  const allDays = [buildMetivtaTodayEntry(), ...pastDays];
+  const days = metivtaVisibleDayCount === null ? allDays : allDays.slice(0, metivtaVisibleDayCount);
+  const archivedKeys = metivtaArchivedKeySet();
+  const elStyle = getComputedStyle(el);
+  const availableWidth = (el.clientWidth - (parseFloat(elStyle.paddingLeft) || 0) - (parseFloat(elStyle.paddingRight) || 0)) || (window.innerWidth - 40);
+
+  el.appendChild(buildMetivtaTable({ days, archivedKeys, archiveTable: false, availableWidth }));
+  if (archivedKeys.size > 0){
+    el.appendChild(buildMetivtaTable({ days, archivedKeys, archiveTable: true, availableWidth }));
+  }
+  el.querySelectorAll('table.metivta-table th, table.metivta-table td').forEach(shrinkCellTextToFit);
+}
+
+// Rows keep one line: text that doesn't fit its cell is made a little smaller
+// instead of wrapping onto a taller row.
+function shrinkCellTextToFit(cell){
+  if (cell.scrollWidth <= cell.clientWidth) return;
+  let size = parseFloat(getComputedStyle(cell).fontSize) || 13;
+  let guard = 0;
+  while (cell.scrollWidth > cell.clientWidth && size > 7 && guard < 40){
+    size -= 0.5;
+    cell.style.fontSize = size + 'px';
+    guard++;
+  }
+}
+
+function moveSelectedMetivtaRows(keys, toArchive){
+  if (keys.length === 0) return;
+  requireArchiveEditAccess(() => {
+    const archived = metivtaArchivedKeySet();
+    keys.forEach(k => { if (toArchive) archived.add(k); else archived.delete(k); });
+    state.metivtaArchivedKeys = [...archived];
+    keys.forEach(k => metivtaSelectedKeys.delete(k));
+    saveState();
+    renderMetivtaView();
+  });
 }
 
 async function exportMetivtaArchiveCSV(days){
@@ -2439,11 +2588,11 @@ function metivtaSortDefaultDir(key){
   return (key === 'family' || key === 'first' || key === 'class') ? 1 : -1;
 }
 
-function setMetivtaSort(key, container){
+function setMetivtaSort(key){
   if (key === null) metivtaSort = { key: null, dir: 1 };
   else if (metivtaSort.key === key) metivtaSort = { key, dir: -metivtaSort.dir };
   else metivtaSort = { key, dir: metivtaSortDefaultDir(key) };
-  renderMetivtaHistoryTable(container);
+  renderMetivtaView();
 }
 
 function metivtaSortArrow(key){
@@ -2476,7 +2625,7 @@ function sortMetivtaRows(rows, visibleDays){
   });
 }
 
-function buildMetivtaSortBtn(key, container){
+function buildMetivtaSortBtn(key){
   const btn = document.createElement('button');
   btn.type = 'button';
   btn.className = 'metivta-header-toggle metivta-sort-btn';
@@ -2484,135 +2633,19 @@ function buildMetivtaSortBtn(key, container){
   btn.title = 'מיון לפי הטור הזה';
   btn.addEventListener('click', (e) => {
     e.stopPropagation();
-    setMetivtaSort(key, container);
+    setMetivtaSort(key);
   });
   return btn;
 }
 
-function renderMetivtaHistoryTable(container){
-  container.innerHTML = '';
-
-  const pastDays = getDisplayArchive().filter(e => e.type !== 'weekly' && !e.isLive && metivtaEntryHasData(e));
-  const allDays = [buildMetivtaTodayEntry(), ...pastDays];
-  const days = metivtaVisibleDayCount === null ? allDays : allDays.slice(0, metivtaVisibleDayCount);
-
+function buildMetivtaTable({ days, archivedKeys, archiveTable, availableWidth }){
   const wrap = document.createElement('div');
   wrap.className = 'archive-entry';
 
-  const dateEl = document.createElement('div');
-  dateEl.className = 'archive-date weekly-header-row';
-  const titleWrap = document.createElement('div');
-  titleWrap.style.display = 'flex';
-  titleWrap.style.alignItems = 'center';
-  titleWrap.style.gap = '8px';
-  const titleSpan = document.createElement('span');
-  titleSpan.textContent = 'מתיבתא';
-  titleWrap.appendChild(titleSpan);
-  titleWrap.appendChild(buildMetivtaDropdown(METIVTA_VISIBLE_DAY_OPTIONS, metivtaVisibleDayCount, '', (k) => {
-    metivtaVisibleDayCount = k;
-    renderMetivtaHistoryTable(container);
-  }));
-  dateEl.appendChild(titleWrap);
-
-  const exportBtn = document.createElement('button');
-  exportBtn.className = 'export-btn';
-  exportBtn.textContent = 'הורדת אקסל';
-  exportBtn.addEventListener('click', () => exportMetivtaArchiveCSV(days));
-  dateEl.appendChild(exportBtn);
-
-  wrap.appendChild(dateEl);
-
-  // Fixed widths so the leading columns stay narrow - on a phone that keeps
-  // today's column (where attendance is entered) on screen without scrolling.
-  // Today's column (where attendance is entered) gets whatever room is left
-  // on screen after the leading columns, between a normal day's width and
-  // 110px - wide on most phones and on desktop, never pushed off-screen.
-  const COL_W = { num: 26, family: 70, first: 56, class: 38, summary: 66, day: 58 };
-  const leadWidth = COL_W.num + COL_W.family + COL_W.first + COL_W.class + COL_W.summary;
-  const availableWidth = container.clientWidth || (window.innerWidth - 32);
-  COL_W.today = Math.max(COL_W.day, Math.min(110, availableWidth - 2 - leadWidth));
-  const dayColWidth = (entry) => entry.isLive ? COL_W.today : COL_W.day;
-  const table = document.createElement('table');
-  table.className = 'archive-table';
-  table.style.width = 'max(100%, ' + days.reduce((sum, e) => sum + dayColWidth(e), leadWidth) + 'px)';
-
-  const thead = document.createElement('thead');
-  const trh = document.createElement('tr');
-
-  function plainSortableTh(label, key){
-    const th = document.createElement('th');
-    th.style.cursor = 'pointer';
-    th.textContent = label + metivtaSortArrow(key);
-    th.addEventListener('click', () => setMetivtaSort(key, container));
-    return th;
-  }
-
-  const numTh = document.createElement('th');
-  numTh.textContent = '#';
-  numTh.style.cursor = 'pointer';
-  numTh.title = 'חזרה לסדר המקורי';
-  numTh.addEventListener('click', () => setMetivtaSort(null, container));
-  trh.appendChild(numTh);
-
-  const familyTh = document.createElement('th');
-  const familyControls = document.createElement('div');
-  familyControls.className = 'metivta-th-row';
-  const navDropdown = buildNameDropdown('משפחה');
-  navDropdown.querySelector('.merged-dropdown-toggle').classList.add('metivta-header-toggle');
-  familyControls.appendChild(navDropdown);
-  familyControls.appendChild(buildMetivtaSortBtn('family', container));
-  familyTh.appendChild(familyControls);
-  trh.appendChild(familyTh);
-
-  trh.appendChild(plainSortableTh('פרטי', 'first'));
-  trh.appendChild(plainSortableTh('כיתה', 'class'));
-
-  const summaryTh = document.createElement('th');
-  summaryTh.className = 'metivta-summary-col';
-  const summaryLabel = document.createElement('div');
-  summaryLabel.className = 'metivta-summary-label';
-  summaryLabel.textContent = 'סיכום';
-  summaryTh.appendChild(summaryLabel);
-  const fieldRow = document.createElement('div');
-  fieldRow.className = 'metivta-th-row';
-  fieldRow.appendChild(buildMetivtaDropdown(METIVTA_SUMMARY_FIELD_OPTIONS, metivtaSummaryField, 'metivta-header-toggle', (k) => {
-    metivtaSummaryField = k;
-    renderMetivtaHistoryTable(container);
-  }));
-  fieldRow.appendChild(buildMetivtaSortBtn('summary', container));
-  summaryTh.appendChild(fieldRow);
-  trh.appendChild(summaryTh);
-
-  days.forEach(entry => {
-    const key = metivtaDayColumnKey(entry);
-    const th = document.createElement('th');
-    th.style.cursor = 'pointer';
-    if (entry.isLive) th.className = 'metivta-today-col';
-    const d = new Date(entry.date);
-    const dateSpan = document.createElement('div');
-    dateSpan.textContent = formatHebrewDateShort(d) + metivtaSortArrow(key);
-    const weekdaySpan = document.createElement('div');
-    weekdaySpan.textContent = entry.isLive ? 'היום' : d.toLocaleDateString('he-IL', { weekday: 'short' });
-    weekdaySpan.style.fontWeight = entry.isLive ? '700' : '400';
-    weekdaySpan.style.fontSize = '0.75em';
-    weekdaySpan.style.color = 'var(--ink-soft)';
-    th.appendChild(dateSpan);
-    th.appendChild(weekdaySpan);
-    th.addEventListener('click', () => setMetivtaSort(key, container));
-    trh.appendChild(th);
-  });
-  const headerWidths = [COL_W.num, COL_W.family, COL_W.first, COL_W.class, COL_W.summary];
-  [...trh.children].forEach((th, i) => {
-    th.style.width = (i < headerWidths.length ? headerWidths[i] : dayColWidth(days[i - headerWidths.length])) + 'px';
-  });
-  thead.appendChild(trh);
-  table.appendChild(thead);
-
-  const tbody = document.createElement('tbody');
-
-  const toRow =(student, isExtra, getRecord, ensureRecord) => ({
+  const toRow = (student, isExtra, getRecord, ensureRecord) => ({
     id: student.id,
     isExtra,
+    key: metivtaRowKey(student.id, isExtra),
     family: metivtaFamilyName(student.id, isExtra),
     first: metivtaFirstName(student.id, isExtra),
     clsLabel: metivtaClassLabel(student.id, isExtra),
@@ -2632,15 +2665,136 @@ function renderMetivtaHistoryTable(container){
       return s;
     }
   ));
+  const tableRows = mainRows.concat(extraRows).filter(r => archivedKeys.has(r.key) === archiveTable);
+  const selectedHere = tableRows.filter(r => metivtaSelectedKeys.has(r.key)).map(r => r.key);
 
-  const allRows = sortMetivtaRows(mainRows.concat(extraRows), days);
+  const dateEl = document.createElement('div');
+  dateEl.className = 'archive-date weekly-header-row';
+  const headerGroup = document.createElement('div');
+  headerGroup.className = 'header-group';
+  const titleSpan = document.createElement('span');
+  titleSpan.textContent = archiveTable ? 'ארכיון' : 'מתיבתא';
+  headerGroup.appendChild(titleSpan);
+  if (!archiveTable){
+    const sep = document.createElement('span');
+    sep.textContent = '·';
+    headerGroup.appendChild(sep);
+    const viewLabel = document.createElement('span');
+    viewLabel.textContent = 'תצוגה:';
+    headerGroup.appendChild(viewLabel);
+    headerGroup.appendChild(buildMetivtaDropdown(METIVTA_VISIBLE_DAY_OPTIONS, metivtaVisibleDayCount, '', (k) => {
+      metivtaVisibleDayCount = k;
+      renderMetivtaView();
+    }));
+  }
+  if (selectedHere.length > 0){
+    const moveBtn = document.createElement('button');
+    moveBtn.type = 'button';
+    moveBtn.className = 'metivta-move-btn';
+    moveBtn.textContent = (archiveTable ? 'החזרה למתיבתא' : 'העברה לארכיון') + ' (' + selectedHere.length + ')';
+    moveBtn.addEventListener('click', () => moveSelectedMetivtaRows(selectedHere, !archiveTable));
+    headerGroup.appendChild(moveBtn);
+  }
+  dateEl.appendChild(headerGroup);
 
-  allRows.forEach((row, rowIndex) => {
+  if (!archiveTable){
+    const exportBtn = document.createElement('button');
+    exportBtn.className = 'export-btn';
+    exportBtn.textContent = 'הורדת אקסל';
+    exportBtn.addEventListener('click', () => exportMetivtaArchiveCSV(days));
+    dateEl.appendChild(exportBtn);
+  }
+
+  wrap.appendChild(dateEl);
+
+  // Fixed widths so the leading columns stay narrow. Today's column (where
+  // attendance is entered) gets whatever room is left on screen after them,
+  // between a normal day's width and 110px - never pushed off-screen.
+  const COL_W = { num: 26, family: 62, first: 54, class: 34, summary: 62, day: 56 };
+  const leadWidth = COL_W.num + COL_W.family + COL_W.first + COL_W.class + COL_W.summary;
+  COL_W.today = Math.max(COL_W.day, Math.min(110, availableWidth - 2 - leadWidth));
+  const dayColWidth = (entry) => entry.isLive ? COL_W.today : COL_W.day;
+  const table = document.createElement('table');
+  table.className = 'archive-table metivta-table';
+  table.style.width = 'max(100%, ' + days.reduce((sum, e) => sum + dayColWidth(e), leadWidth) + 'px)';
+
+  const thead = document.createElement('thead');
+  const trh = document.createElement('tr');
+
+  function plainSortableTh(label, key){
+    const th = document.createElement('th');
+    th.style.cursor = 'pointer';
+    th.textContent = label + metivtaSortArrow(key);
+    th.addEventListener('click', () => setMetivtaSort(key));
+    return th;
+  }
+
+  const numTh = document.createElement('th');
+  numTh.textContent = '#';
+  numTh.style.cursor = 'pointer';
+  numTh.title = 'חזרה לסדר המקורי';
+  numTh.addEventListener('click', () => setMetivtaSort(null));
+  trh.appendChild(numTh);
+
+  trh.appendChild(plainSortableTh('משפחה', 'family'));
+  trh.appendChild(plainSortableTh('פרטי', 'first'));
+  trh.appendChild(plainSortableTh('כיתה', 'class'));
+
+  const summaryTh = document.createElement('th');
+  summaryTh.className = 'metivta-summary-col';
+  const summaryLabel = document.createElement('div');
+  summaryLabel.className = 'metivta-summary-label';
+  summaryLabel.textContent = 'סיכום';
+  summaryTh.appendChild(summaryLabel);
+  const fieldRow = document.createElement('div');
+  fieldRow.className = 'metivta-th-row';
+  fieldRow.appendChild(buildMetivtaDropdown(METIVTA_SUMMARY_FIELD_OPTIONS, metivtaSummaryField, 'metivta-header-toggle', (k) => {
+    metivtaSummaryField = k;
+    renderMetivtaView();
+  }));
+  fieldRow.appendChild(buildMetivtaSortBtn('summary'));
+  summaryTh.appendChild(fieldRow);
+  trh.appendChild(summaryTh);
+
+  days.forEach(entry => {
+    const key = metivtaDayColumnKey(entry);
+    const th = document.createElement('th');
+    th.style.cursor = 'pointer';
+    if (entry.isLive) th.className = 'metivta-today-col';
+    const d = new Date(entry.date);
+    const dateSpan = document.createElement('div');
+    dateSpan.textContent = formatHebrewDateShort(d) + metivtaSortArrow(key);
+    const weekdaySpan = document.createElement('div');
+    weekdaySpan.textContent = entry.isLive ? 'היום' : d.toLocaleDateString('he-IL', { weekday: 'short' });
+    weekdaySpan.style.fontWeight = entry.isLive ? '700' : '400';
+    weekdaySpan.style.fontSize = '0.75em';
+    weekdaySpan.style.color = 'var(--ink-soft)';
+    th.appendChild(dateSpan);
+    th.appendChild(weekdaySpan);
+    th.addEventListener('click', () => setMetivtaSort(key));
+    trh.appendChild(th);
+  });
+  const headerWidths = [COL_W.num, COL_W.family, COL_W.first, COL_W.class, COL_W.summary];
+  [...trh.children].forEach((th, i) => {
+    th.style.width = (i < headerWidths.length ? headerWidths[i] : dayColWidth(days[i - headerWidths.length])) + 'px';
+  });
+  thead.appendChild(trh);
+  table.appendChild(thead);
+
+  const tbody = document.createElement('tbody');
+  sortMetivtaRows(tableRows, days).forEach((row, rowIndex) => {
     const tr = document.createElement('tr');
+    if (metivtaSelectedKeys.has(row.key)) tr.className = 'metivta-selected';
 
     const numTd = document.createElement('td');
     numTd.className = 'metivta-rownum';
     numTd.textContent = String(rowIndex + 1);
+    numTd.title = 'סימון התלמיד';
+    numTd.addEventListener('click', () => {
+      if (metivtaSelectedKeys.has(row.key)) metivtaSelectedKeys.delete(row.key);
+      else metivtaSelectedKeys.add(row.key);
+      renderMetivtaView();
+    });
     tr.appendChild(numTd);
 
     tr.appendChild(buildMetivtaEditableCell(row.family, 'שם משפחה', (v) => setMetivtaNamePart(row.id, row.isExtra, 'family', v)));
@@ -2687,7 +2841,7 @@ function renderMetivtaHistoryTable(container){
             updateDailyArchiveRecord(dayKey, row.id, row.isExtra, (fresh) => {
               fresh.metivtaFlags = { ...flags };
             });
-            renderMetivtaHistoryTable(container);
+            renderMetivtaView();
           });
         });
       }
@@ -2702,23 +2856,34 @@ function renderMetivtaHistoryTable(container){
   scrollWrap.className = 'table-scroll';
   scrollWrap.appendChild(table);
   wrap.appendChild(scrollWrap);
-  container.appendChild(wrap);
+  return wrap;
+}
+
+// A day's metivtaVal is -1 when the student wasn't at the Metivta that day
+// (so sorting ranks "absent" below "present with 0"); it is shown, summed and
+// exported as no value at all, never as -1.
+function weeklyDayFieldValue(dayData, field){
+  const v = (dayData && dayData[field]) || 0;
+  return field === 'metivtaVal' ? Math.max(0, v) : v;
+}
+
+function weeklyDailySum(s, field){
+  return Object.values(s.days || {}).reduce((sum, d) => sum + weeklyDayFieldValue(d, field), 0);
 }
 
 async function exportWeeklyCSV(entry, weekStartD, weekEndD){
   try {
-    const headers = ['שם', 'חסידות', 'תפילה', 'מקוואות', 'בונוס', 'רמב"ם', 'מתיבתא', ...WEEKLY_PARENT_FIELD_DEFS.map(f => f.label)];
+    const headers = ['שם', 'חסידות', 'תפילה', 'מקוואות', 'רמב"ם', 'בונוס', 'מתיבתא', ...WEEKLY_PARENT_FIELD_DEFS.map(f => f.label)];
     const rows = [headers];
-    const sumField = (s, field) => Object.values(s.days || {}).reduce((sum, d) => sum + (d[field] || 0), 0);
     entry.students.forEach(s => {
       rows.push([
         studentName(s.id),
-        sumField(s, 'morning'),
-        sumField(s, 'tefila'),
-        sumField(s, 'mikvaotVal'),
-        sumField(s, 'bonus'),
-        sumField(s, 'rambamVal'),
-        sumField(s, 'metivtaVal'),
+        weeklyDailySum(s, 'morning'),
+        weeklyDailySum(s, 'tefila'),
+        weeklyDailySum(s, 'mikvaotVal'),
+        weeklyDailySum(s, 'rambamVal'),
+        weeklyDailySum(s, 'bonus'),
+        weeklyDailySum(s, 'metivtaVal'),
         ...WEEKLY_PARENT_FIELD_DEFS.map(f => f.kind === 'weekly-bool' ? (s[f.field] ? 'כן' : 'לא') : (s[f.field] || 0))
       ]);
     });
@@ -2868,7 +3033,7 @@ function buildWeekDaySelectDropdown(allWeeklyEntries, selectedEntry){
   toggle.type = 'button';
   toggle.className = 'merged-dropdown-toggle';
   const weekStartD = new Date(selectedEntry.weekStart);
-  toggle.textContent = weeklyEntryLabel(selectedEntry) + (currentMode === 'total' ? '' : ' · ' + dayLabelWithinWeek(weekStartD, currentMode));
+  toggle.textContent = currentMode === 'total' ? weeklyEntryLabel(selectedEntry) : dayLabelWithinWeek(weekStartD, currentMode);
   toggle.addEventListener('click', (e) => {
     e.stopPropagation();
     document.querySelectorAll('.merged-dropdown-list.open').forEach(l => {
@@ -2887,7 +3052,7 @@ function buildWeekDaySelectDropdown(allWeeklyEntries, selectedEntry){
 
 const WEEKLY_PARENT_FIELD_DEFS = [
   { field: 'chitas', label: 'חת"ת', kind: 'weekly-number' },
-  { field: 'shema', label: 'קריאת שמע', kind: 'weekly-number' },
+  { field: 'shema', label: 'ישן חסיד', kind: 'weekly-number' },
   { field: 'netilatYadaim', label: 'נטילת ידיים', kind: 'weekly-number' },
   { field: 'minchaMaariv', label: 'מנחה מעריב', kind: 'weekly-number' },
   { field: 'mikveh', label: 'מקווה שישי', kind: 'weekly-bool' },
@@ -2944,6 +3109,40 @@ function fitNamesColumnWidth(th, names){
   th.style.width = Math.ceil(maxWidth + padding + border + 4) + 'px';
 }
 
+function fitTextSpan(td, text){
+  const span = document.createElement('span');
+  span.className = 'ff-fit';
+  span.textContent = text;
+  td.appendChild(span);
+  return span;
+}
+
+// One font size per group (headers / names / values): the largest size, up to
+// maxSize, at which every span of the group still fits inside its own cell.
+// A header allowed to wrap fills its cell's width; it only "doesn't fit" when
+// one of its words is wider than the cell (scrollWidth > offsetWidth).
+function fitSpanGroupToCells(spans, minSize, maxSize, slack){
+  if (spans.length === 0) return;
+  const avail = spans.map(span => {
+    const cell = span.parentElement;
+    const cs = getComputedStyle(cell);
+    return cell.clientWidth - (parseFloat(cs.paddingLeft) || 0) - (parseFloat(cs.paddingRight) || 0) - (slack || 0);
+  });
+  const fits = (size) => {
+    spans.forEach(sp => { sp.style.fontSize = size + 'px'; });
+    return spans.every((sp, i) => sp.offsetWidth <= avail[i] && sp.scrollWidth <= avail[i]);
+  };
+  let lo = minSize, hi = maxSize;
+  if (fits(hi)) return;
+  while (hi - lo > 0.5){
+    const mid = (lo + hi) / 2;
+    if (fits(mid)) lo = mid; else hi = mid;
+  }
+  fits(Math.floor(lo * 2) / 2);
+}
+
+const FREQUENT_WIDE_MIN_WIDTH = 900;
+
 function renderWeeklyEntryInto(entry, container, allWeeklyEntries){
   const entryWrap = document.createElement('div');
   entryWrap.className = 'archive-entry';
@@ -2954,12 +3153,26 @@ function renderWeeklyEntryInto(entry, container, allWeeklyEntries){
   const weekEndD = new Date(weekStartD);
   weekEndD.setDate(weekEndD.getDate() + 6);
 
+  const headerGroup = document.createElement('div');
+  headerGroup.className = 'header-group';
   const titleSpan = document.createElement('span');
   titleSpan.textContent = 'הנוסע המתמיד';
-  dateEl.appendChild(titleSpan);
-
-  dateEl.appendChild(buildWeekDaySelectDropdown(allWeeklyEntries || [entry], entry));
-
+  headerGroup.appendChild(titleSpan);
+  const sep1 = document.createElement('span');
+  sep1.textContent = '·';
+  headerGroup.appendChild(sep1);
+  headerGroup.appendChild(buildWeekDaySelectDropdown(allWeeklyEntries || [entry], entry));
+  const missingDays = weekMissingDayNames(entry);
+  if (missingDays.length){
+    const sep2 = document.createElement('span');
+    sep2.textContent = '·';
+    headerGroup.appendChild(sep2);
+    const missingEl = document.createElement('span');
+    missingEl.className = 'missing-days';
+    missingEl.textContent = 'ימים חסרים: ' + missingDays.join(', ');
+    headerGroup.appendChild(missingEl);
+  }
+  dateEl.appendChild(headerGroup);
 
   const exportBtn = document.createElement('button');
   exportBtn.className = 'export-btn';
@@ -2969,37 +3182,67 @@ function renderWeeklyEntryInto(entry, container, allWeeklyEntries){
 
   entryWrap.appendChild(dateEl);
 
+  // On a computer the table spans the whole page and its text grows to fill
+  // the cells; on a narrow screen it keeps its compact, scrollable layout.
+  const wide = window.innerWidth >= FREQUENT_WIDE_MIN_WIDTH;
+
   const table = document.createElement('table');
   table.className = 'archive-table';
   table.style.tableLayout = 'fixed';
-  table.style.width = 'max-content';
+  table.style.width = wide ? '100%' : 'max-content';
 
-  const thead = document.createElement('thead');
-  const trh = document.createElement('tr');
-  const nameTh = document.createElement('th');
-  nameTh.textContent = 'שם';
-  nameTh.dataset.fitNamesCol = '1';
-  trh.appendChild(nameTh);
   const fieldDefs = [
     { field: 'morning', label: 'חסידות', kind: 'daily' },
     { field: 'tefila', label: 'תפילה', kind: 'daily' },
     { field: 'mikvaotVal', label: 'מקוואות', kind: 'daily' },
-    { field: 'bonus', label: 'בונוס', kind: 'daily' },
     { field: 'rambamVal', label: 'רמב"ם', kind: 'daily' },
+    { field: 'bonus', label: 'בונוס', kind: 'daily' },
     { field: 'metivtaVal', label: 'מתיבתא', kind: 'daily' },
     ...WEEKLY_PARENT_FIELD_DEFS
   ];
+  const isParentField = (field) => WEEKLY_PARENT_FIELD_DEFS.some(f => f.field === field);
+  const firstParentField = WEEKLY_PARENT_FIELD_DEFS[0].field;
+  const dailyCount = fieldDefs.length - WEEKLY_PARENT_FIELD_DEFS.length;
+
+  const colgroup = document.createElement('colgroup');
+  const cols = [];
+  for (let i = 0; i <= fieldDefs.length; i++){
+    const col = document.createElement('col');
+    if (wide) col.style.width = i === 0 ? '12%' : (88 / fieldDefs.length) + '%';
+    cols.push(col);
+    colgroup.appendChild(col);
+  }
+  table.appendChild(colgroup);
+
   const currentSortField = weeklyArchiveSortField[entry.weekKey] || null;
   const viewMode = weeklyArchiveViewMode[entry.weekKey] || 'total';
   const isDayView = viewMode !== 'total';
 
-  const isParentField = (field) => WEEKLY_PARENT_FIELD_DEFS.some(f => f.field === field);
+  const thead = document.createElement('thead');
+  const groupRow = document.createElement('tr');
+  const groupSpacer = document.createElement('th');
+  groupSpacer.className = 'ff-group-th';
+  groupSpacer.colSpan = 1 + dailyCount;
+  groupRow.appendChild(groupSpacer);
+  const parentGroupTh = document.createElement('th');
+  parentGroupTh.className = 'ff-parent-group-th';
+  parentGroupTh.colSpan = WEEKLY_PARENT_FIELD_DEFS.length;
+  parentGroupTh.textContent = 'עדכוני הורים';
+  groupRow.appendChild(parentGroupTh);
+  thead.appendChild(groupRow);
+
+  const trh = document.createElement('tr');
+  const headerSpans = [];
+  const nameTh = document.createElement('th');
+  headerSpans.push(fitTextSpan(nameTh, 'שם'));
+  trh.appendChild(nameTh);
   fieldDefs.forEach(({ field, label }) => {
     const th = document.createElement('th');
     th.style.cursor = 'pointer';
     if (isParentField(field)) th.style.whiteSpace = 'normal';
+    if (field === firstParentField) th.classList.add('ff-parent-first');
     th.dataset.fitLabel = label;
-    th.textContent = label + (currentSortField === field ? ' ▼' : '');
+    headerSpans.push(fitTextSpan(th, label + (currentSortField === field ? ' ▼' : '')));
     th.addEventListener('click', () => {
       weeklyArchiveSortField[entry.weekKey] = field;
       renderFrequentFlyerView();
@@ -3020,26 +3263,28 @@ function renderWeeklyEntryInto(entry, container, allWeeklyEntries){
   const getFieldVal = (s, field, kind) => {
     if (kind === 'weekly-number') return s[field] || 0;
     if (kind === 'weekly-bool') return s[field] ? 1 : 0;
-    if (!isDayView){
-      return Object.values(s.days || {}).reduce((sum, d) => sum + (d[field] || 0), 0);
-    }
-    const dayData = (s.days || {})[viewMode];
-    return dayData ? (dayData[field] || 0) : 0;
+    if (!isDayView) return weeklyDailySum(s, field);
+    return weeklyDayFieldValue((s.days || {})[viewMode], field);
   };
   const kindOf = (field) => (fieldDefs.find(f => f.field === field) || {}).kind;
 
   if (currentSortField){
     uniqueStudents = uniqueStudents.slice().sort((a, b) => getFieldVal(b, currentSortField, kindOf(currentSortField)) - getFieldVal(a, currentSortField, kindOf(currentSortField)));
   }
+  const nameSpans = [];
+  const valueSpans = [];
   uniqueStudents.forEach(s => {
     const tr = document.createElement('tr');
-    tr.appendChild(document.createElement('td')).textContent = studentName(s.id);
+    const nameTd = document.createElement('td');
+    nameSpans.push(fitTextSpan(nameTd, studentName(s.id)));
+    tr.appendChild(nameTd);
 
     fieldDefs.forEach(({ field, kind }) => {
       const td = document.createElement('td');
+      if (field === firstParentField) td.classList.add('ff-parent-first');
       const val = getFieldVal(s, field, kind);
       if (kind === 'weekly-bool'){
-        td.textContent = s[field] ? '✓' : '';
+        valueSpans.push(fitTextSpan(td, s[field] ? '✓' : ''));
         td.style.cursor = 'pointer';
         td.addEventListener('click', () => {
           requireArchiveEditAccess(() => {
@@ -3050,7 +3295,7 @@ function renderWeeklyEntryInto(entry, container, allWeeklyEntries){
           });
         });
       } else if (kind === 'weekly-number'){
-        td.textContent = val || '';
+        valueSpans.push(fitTextSpan(td, val || ''));
         td.style.cursor = 'pointer';
         td.addEventListener('click', () => {
           promptEditArchiveValue(val, (newVal) => {
@@ -3060,7 +3305,7 @@ function renderWeeklyEntryInto(entry, container, allWeeklyEntries){
           });
         });
       } else {
-        td.textContent = val || '';
+        valueSpans.push(fitTextSpan(td, val || ''));
         if (isDayView){
           td.style.cursor = 'pointer';
           td.addEventListener('click', () => {
@@ -3090,8 +3335,21 @@ function renderWeeklyEntryInto(entry, container, allWeeklyEntries){
   entryWrap.appendChild(scrollWrap);
   container.appendChild(entryWrap);
 
-  trh.querySelectorAll('th[data-fit-label]').forEach(fitHeaderCellToWidestWord);
-  if (nameTh.isConnected) fitNamesColumnWidth(nameTh, uniqueStudents.map(s => studentName(s.id)));
+  if (!table.isConnected || container.clientWidth === 0) return;
+  if (wide){
+    fitSpanGroupToCells(headerSpans, 12, 40);
+    fitSpanGroupToCells(nameSpans, 12, 40, 6);
+    fitSpanGroupToCells(valueSpans, 12, 40);
+    parentGroupTh.style.fontSize = headerSpans[0].style.fontSize;
+  } else {
+    // Compact layout: each column as narrow as its widest header word (the
+    // name column as wide as the longest name), applied through the
+    // colgroup since the group-label row above spans several columns.
+    trh.querySelectorAll('th[data-fit-label]').forEach(fitHeaderCellToWidestWord);
+    nameTh.dataset.fitNamesCol = '1';
+    fitNamesColumnWidth(nameTh, uniqueStudents.map(s => studentName(s.id)));
+    [...trh.children].forEach((th, i) => { if (cols[i]) cols[i].style.width = th.style.width; });
+  }
 }
 
 let historyMergedActive = {};
@@ -3243,15 +3501,18 @@ function renderTodayHistoryTable(container){
 
   const dateEl = document.createElement('div');
   dateEl.className = 'archive-date weekly-header-row';
+  const headerGroup = document.createElement('div');
+  headerGroup.className = 'header-group';
   const titleSpan = document.createElement('span');
   titleSpan.textContent = 'ארכיון';
-  dateEl.appendChild(titleSpan);
+  headerGroup.appendChild(titleSpan);
 
   const titleSep = document.createElement('span');
   titleSep.textContent = '·';
-  dateEl.appendChild(titleSep);
+  headerGroup.appendChild(titleSep);
 
-  dateEl.appendChild(buildHistoryDropdown('archive_shared', groupType, allOptions));
+  headerGroup.appendChild(buildHistoryDropdown('archive_shared', groupType, allOptions));
+  dateEl.appendChild(headerGroup);
 
   const exportBtn = document.createElement('button');
   exportBtn.className = 'export-btn';
@@ -3496,7 +3757,10 @@ window.addEventListener('resize', () => {
   clearTimeout(resizeTimer);
   resizeTimer = setTimeout(() => {
     if (state && document.getElementById('metivtaView').style.display !== 'none') renderMetivtaView();
-    else fitAllTextCells();
+    else {
+      fitAllTextCells();
+      if (state) renderFrequentFlyerView();
+    }
   }, 150);
 });
 
@@ -3714,6 +3978,14 @@ async function initApp(){
     if (new URLSearchParams(location.search).get('view') === 'metivta'){
       showMetivta();
     }
+    mountPageNav({
+      getCurrent: currentView,
+      onNavigate: (key) => {
+        if (key === 'main'){ showMain(); history.replaceState(null, '', location.pathname); return true; }
+        if (key === 'metivta'){ showMetivta(); history.replaceState(null, '', location.pathname + '?view=metivta'); return true; }
+        return false;
+      }
+    });
     setStatus('');
     checkAutoReset();
     scheduleNextAutoResetCheck();
@@ -3722,6 +3994,8 @@ async function initApp(){
     if (document.fonts && document.fonts.ready){
       document.fonts.ready.then(() => {
         fitAllTextCells();
+        if (currentView() === 'main') renderFrequentFlyerView();
+        else renderMetivtaView();
       });
     }
   } catch(e){

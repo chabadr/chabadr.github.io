@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>ניהול</title>
+<title>כיתה ז - ניהול</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Frank+Ruhl+Libre:wght@500;700;900&family=Rubik:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
@@ -267,28 +267,36 @@
   .status-ok{ color: var(--ok); }
   .status-err{ color: var(--danger); }
   .summary-bar{ margin-top: 12px; font-size: 13.5px; font-weight: 700; }
-  .save-bar{
-    position: sticky;
-    bottom: 0;
-    background: var(--paper);
-    padding: 12px 0;
-    border-top: 1px solid var(--line);
-    margin-top: 16px;
-    display: flex;
-    align-items: center;
-    gap: 14px;
-  }
-  .save-bar button{
-    padding: 10px 28px;
-    border: none;
-    border-radius: var(--radius);
-    background: var(--gold);
-    color: #fff;
-    font-weight: 700;
-    font-size: 15px;
-    cursor: pointer;
-  }
   .save-status{ font-size: 13px; color: var(--ink-soft); }
+  .title-row{ display: flex; align-items: center; gap: 14px; }
+  .title-row .section-title{ margin-bottom: 4px; }
+  th.sortable-th{ cursor: pointer; user-select: none; }
+  table.phones-table td.link-cell{ text-align: left; direction: ltr; font-size: 12px; }
+  table.phones-table td.link-cell a{ color: var(--ink); word-break: break-all; }
+  .archived-mark{ font-size: 11.5px; color: var(--ink-soft); }
+  .saved-templates{
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 10px;
+  }
+  .saved-templates .field-label{ margin: 0; }
+  .saved-templates select{ width: auto; min-width: 180px; }
+  .small-btn, .select-all-row button.preset-btn{
+    padding: 6px 12px;
+    border-radius: 8px;
+    border: 1px solid var(--gold);
+    background: #fff;
+    color: var(--ink);
+    cursor: pointer;
+    font-family: 'Rubik', sans-serif;
+    font-size: 12.5px;
+    font-weight: 600;
+  }
+  .small-btn:disabled{ opacity: 0.5; cursor: default; }
+  .select-all-row button.preset-btn.active{ background: var(--gold); color: #fff; }
+  table.sent-table td.msg-cell{ white-space: pre-wrap; text-align: right; min-width: 220px; }
   .loading, .empty, .err{
     text-align: center;
     color: var(--ink-soft);
@@ -305,6 +313,7 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.13.0/fireba
 import { getFirestore, doc, getDoc, setDoc, addDoc, deleteDoc, collection, query, orderBy, limit, getDocs } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
 import { firebaseConfig, isFirebaseConfigured } from "./firebase-config.js";
 import { sms4freeConfig } from "./sms-config.js";
+import { mountPageNav } from "./page-nav.js";
 
 const STORAGE_KEY = 'classroom-points-v1';
 const FIRESTORE_COLLECTION = 'classroom_points';
@@ -322,7 +331,7 @@ const METIVTA_EXTRA_NAMES = [
 ];
 // Keep in sync with WEEKLY_PARENT_FIELD_DEFS in index.html.
 const FIELD_LABELS = {
-  chitas: 'חת"ת', shema: 'קריאת שמע', netilatYadaim: 'נטילת ידיים',
+  chitas: 'חת"ת', shema: 'ישן חסיד', netilatYadaim: 'נטילת ידיים',
   minchaMaariv: 'מנחה מעריב', mikveh: 'מקווה שישי', dvarTorah: 'שיחה'
 };
 const FIELD_ORDER = ['chitas', 'shema', 'netilatYadaim', 'minchaMaariv', 'mikveh', 'dvarTorah'];
@@ -356,15 +365,16 @@ const SMS4FREE_ERROR_MESSAGES = {
 };
 
 const TABS = [
-  { key: 'links', label: 'קישורי הורים' },
-  { key: 'history', label: 'היסטוריית עדכונים' },
-  { key: 'phones', label: 'טלפוני הורים - מתיבתא' },
-  { key: 'sms', label: 'שליחת SMS - מתיבתא' }
+  { key: 'phones', label: 'משתנים' },
+  { key: 'history', label: 'עדכוני הורים' },
+  { key: 'sms', label: 'שליחת הודעות' }
 ];
+
+const DEFAULT_SENDER = '058-4012374';
 
 const app = document.getElementById('app');
 let db = null;
-let activeTab = 'links';
+let activeTab = 'phones';
 const tabLoaded = {};
 
 function normalizePhone(v){
@@ -454,48 +464,12 @@ function switchTab(key){
 function renderActiveTab(){
   const content = document.getElementById('tabContent');
   content.innerHTML = '';
-  if (activeTab === 'links') renderLinksTab(content);
-  else if (activeTab === 'history') renderHistoryTab(content);
+  if (activeTab === 'history') renderHistoryTab(content);
   else if (activeTab === 'phones') renderPhonesTab(content);
   else if (activeTab === 'sms') renderSmsTab(content);
 }
 
-// ---------- Tab: קישורי הורים ----------
-function renderLinksTab(container){
-  const table = document.createElement('table');
-  table.className = 'links-table';
-  const thead = document.createElement('thead');
-  const trh = document.createElement('tr');
-  ['תלמיד', 'קישור אישי'].forEach(label => {
-    const th = document.createElement('th');
-    th.textContent = label;
-    trh.appendChild(th);
-  });
-  thead.appendChild(trh);
-  table.appendChild(thead);
-
-  const tbody = document.createElement('tbody');
-  STUDENT_NAMES.forEach((name, idx) => {
-    const id = idx + 1;
-    const url = new URL('parent-update.html?id=' + id, location.href).href;
-    const tr = document.createElement('tr');
-    const nameTd = document.createElement('td');
-    nameTd.textContent = name;
-    tr.appendChild(nameTd);
-    const linkTd = document.createElement('td');
-    const a = document.createElement('a');
-    a.href = url;
-    a.textContent = url;
-    a.target = '_blank';
-    linkTd.appendChild(a);
-    tr.appendChild(linkTd);
-    tbody.appendChild(tr);
-  });
-  table.appendChild(tbody);
-  container.appendChild(table);
-}
-
-// ---------- Tab: היסטוריית עדכונים ----------
+// ---------- Tab: עדכוני הורים ----------
 function fitHeaderCellToWidestWord(th){
   const label = th.dataset.fitLabel;
   if (!label) return;
@@ -601,49 +575,104 @@ async function renderHistoryTab(container){
   }
 }
 
-// ---------- Tab: טלפוני הורים - מתיבתא ----------
-function buildPhonesGroupTable(names, groupKey, phonesData){
-  const scrollWrap = document.createElement('div');
-  scrollWrap.className = 'table-scroll';
-  const table = document.createElement('table');
-  table.className = 'phones-table';
+// ---------- Shared: the Metivta student list ----------
 
-  const thead = document.createElement('thead');
-  const trh = document.createElement('tr');
-  ['תלמיד', 'טלפון אבא', 'טלפון אמא'].forEach(label => {
-    const th = document.createElement('th');
-    th.textContent = label;
-    trh.appendChild(th);
-  });
-  thead.appendChild(trh);
-  table.appendChild(thead);
-
-  const tbody = document.createElement('tbody');
-  names.forEach((name, idx) => {
-    const id = idx + 1;
-    const existing = (phonesData[groupKey] && phonesData[groupKey][id]) || {};
-    const tr = document.createElement('tr');
-    const nameTd = document.createElement('td');
-    nameTd.textContent = name;
-    tr.appendChild(nameTd);
-    ['father', 'mother'].forEach(role => {
-      const td = document.createElement('td');
-      const input = document.createElement('input');
-      input.type = 'tel';
-      input.value = existing[role] || '';
-      input.dataset.group = groupKey;
-      input.dataset.id = id;
-      input.dataset.role = role;
-      td.appendChild(input);
-      tr.appendChild(td);
-    });
-    tbody.appendChild(tr);
-  });
-  table.appendChild(tbody);
-  scrollWrap.appendChild(table);
-  return scrollWrap;
+// Parent-update form link for a main-group student ("up" - GitHub Pages
+// serves up.html for it, so nobody has to type the .html).
+function parentLinkFor(id){
+  return new URL('up?id=' + id, location.href).href;
 }
 
+// Keep in sync with metivtaClassValue/metivtaClassLabel in index.html.
+function metivtaClassLabelFrom(mainData, id, isExtra){
+  const map = (isExtra ? mainData.metivtaExtraClass : mainData.metivtaClass) || {};
+  const raw = map[id];
+  const v = String((raw === undefined || raw === null || raw === '') ? (isExtra ? 1 : 2) : raw);
+  return /^\d+$/.test(v) ? 'ז' + v : v;
+}
+
+// Every Metivta student (main group, then the extra group) with the same
+// family/first name and class as the Metivta table in index.html, plus their
+// parents' phones. "archived" = moved to that page's ארכיון table.
+function buildRoster(mainData, phonesData){
+  const archivedKeys = new Set(Array.isArray(mainData.metivtaArchivedKeys) ? mainData.metivtaArchivedKeys : []);
+  const out = [];
+  [
+    { names: STUDENT_NAMES, isExtra: false, group: 'main', nameMap: mainData.metivtaNames || {} },
+    { names: METIVTA_EXTRA_NAMES, isExtra: true, group: 'extra', nameMap: mainData.metivtaExtraNames || {} }
+  ].forEach(({ names, isExtra, group, nameMap }) => {
+    const phones = phonesData[group] || {};
+    names.forEach((defaultName, idx) => {
+      const id = idx + 1;
+      const key = group + '-' + id;
+      const entry = decodeMetivtaNameEntry(nameMap[id], defaultName);
+      out.push({
+        key, id, isExtra, group, order: out.length,
+        family: entry.family,
+        first: entry.first,
+        name: metivtaFullNameFromEntry(entry),
+        clsLabel: metivtaClassLabelFrom(mainData, id, isExtra),
+        link: isExtra ? '' : parentLinkFor(id),
+        father: (phones[id] && phones[id].father) || '',
+        mother: (phones[id] && phones[id].mother) || '',
+        archived: archivedKeys.has(key)
+      });
+    });
+  });
+  return out;
+}
+
+const ROSTER_SORT_COLUMNS = [
+  { key: 'family', label: 'משפחה' },
+  { key: 'first', label: 'פרטי' },
+  { key: 'class', label: 'כיתה' }
+];
+
+function sortRoster(rows, sort){
+  if (!sort.key) return rows.slice().sort((a, b) => a.order - b.order);
+  const textOf = (r) => sort.key === 'family' ? r.family : sort.key === 'first' ? r.first : r.clsLabel;
+  return rows.slice().sort((a, b) => {
+    const ta = textOf(a), tb = textOf(b);
+    if (!ta && tb) return 1;
+    if (ta && !tb) return -1;
+    return (ta.localeCompare(tb, 'he', { numeric: true }) * sort.dir) || (a.order - b.order);
+  });
+}
+
+// Header cells for משפחה/פרטי/כיתה: click sorts א→ת, again reverses.
+function appendRosterSortHeaders(trh, sort, onChange){
+  ROSTER_SORT_COLUMNS.forEach(col => {
+    const th = document.createElement('th');
+    th.className = 'sortable-th';
+    th.textContent = col.label + (sort.key === col.key ? (sort.dir === 1 ? ' ▼' : ' ▲') : '');
+    th.addEventListener('click', () => {
+      if (sort.key === col.key) sort.dir = -sort.dir;
+      else { sort.key = col.key; sort.dir = 1; }
+      onChange();
+    });
+    trh.appendChild(th);
+  });
+}
+
+function appendRosterNameCells(tr, r, withArchiveMark){
+  const familyTd = document.createElement('td');
+  familyTd.textContent = r.family;
+  tr.appendChild(familyTd);
+  const firstTd = document.createElement('td');
+  firstTd.textContent = r.first;
+  if (withArchiveMark && r.archived){
+    const mark = document.createElement('span');
+    mark.className = 'archived-mark';
+    mark.textContent = ' (מתיבתא ארכיון)';
+    firstTd.appendChild(mark);
+  }
+  tr.appendChild(firstTd);
+  const classTd = document.createElement('td');
+  classTd.textContent = r.clsLabel;
+  tr.appendChild(classTd);
+}
+
+// ---------- Tab: משתנים (phones + parent links) ----------
 async function renderPhonesTab(container){
   const status = document.createElement('div');
   status.className = 'loading';
@@ -651,59 +680,115 @@ async function renderPhonesTab(container){
   container.appendChild(status);
   try{
     const phonesDocRef = doc(db, FIRESTORE_COLLECTION, STORAGE_KEY, 'meta', 'metivtaPhones');
-    const snap = await getDoc(phonesDocRef);
-    const phonesData = snap.exists() ? snap.data() : {};
-    if (!phonesData.main) phonesData.main = {};
-    if (!phonesData.extra) phonesData.extra = {};
+    const [mainSnap, phonesSnap] = await Promise.all([
+      getDoc(doc(db, FIRESTORE_COLLECTION, STORAGE_KEY)),
+      getDoc(phonesDocRef)
+    ]);
+    const mainData = mainSnap.exists() ? mainSnap.data() : {};
+    const phonesData = phonesSnap.exists() ? phonesSnap.data() : {};
+    const roster = buildRoster(mainData, phonesData);
     status.remove();
 
-    const mainTitle = document.createElement('div');
-    mainTitle.className = 'section-title';
-    mainTitle.textContent = 'תלמידים';
-    container.appendChild(mainTitle);
-    container.appendChild(buildPhonesGroupTable(STUDENT_NAMES, 'main', phonesData));
-
-    const extraTitle = document.createElement('div');
-    extraTitle.className = 'section-title';
-    extraTitle.textContent = 'תלמידים נוספים (מתיבתא בלבד)';
-    container.appendChild(extraTitle);
-    container.appendChild(buildPhonesGroupTable(METIVTA_EXTRA_NAMES, 'extra', phonesData));
-
-    const saveBar = document.createElement('div');
-    saveBar.className = 'save-bar';
-    const saveBtn = document.createElement('button');
-    saveBtn.textContent = 'שמירה';
-    saveBar.appendChild(saveBtn);
+    const titleRow = document.createElement('div');
+    titleRow.className = 'title-row';
+    const title = document.createElement('div');
+    title.className = 'section-title';
+    title.textContent = 'טלפונים וקישורי הורים';
+    titleRow.appendChild(title);
     const saveStatus = document.createElement('span');
     saveStatus.className = 'save-status';
-    saveBar.appendChild(saveStatus);
-    container.appendChild(saveBar);
+    titleRow.appendChild(saveStatus);
+    container.appendChild(titleRow);
 
-    saveBtn.addEventListener('click', async () => {
+    const hint = document.createElement('div');
+    hint.className = 'hint';
+    hint.textContent = 'כל שינוי נשמר אוטומטית. השמות והכיתות נלקחים מעמוד המתיבתא.';
+    container.appendChild(hint);
+
+    const scrollWrap = document.createElement('div');
+    scrollWrap.className = 'table-scroll';
+    const table = document.createElement('table');
+    table.className = 'phones-table';
+    scrollWrap.appendChild(table);
+    container.appendChild(scrollWrap);
+
+    const sort = { key: null, dir: 1 };
+    const pendingSaves = new Map();
+    let inFlight = 0;
+
+    async function saveField(r, role){
+      pendingSaves.delete(r.key + ':' + role);
+      inFlight++;
       saveStatus.textContent = 'שומר…';
-      const newData = { main: {}, extra: {} };
-      container.querySelectorAll('table.phones-table input').forEach(input => {
-        const group = input.dataset.group;
-        const id = input.dataset.id;
-        const role = input.dataset.role;
-        if (!newData[group][id]) newData[group][id] = {};
-        newData[group][id][role] = normalizePhone(input.value);
-      });
       try{
-        await setDoc(phonesDocRef, newData);
-        saveStatus.textContent = 'נשמר ✓';
-        setTimeout(() => { saveStatus.textContent = ''; }, 2500);
+        await setDoc(phonesDocRef, { [r.group]: { [r.id]: { [role]: normalizePhone(r[role]) } } }, { merge: true });
+        inFlight--;
+        if (inFlight === 0 && pendingSaves.size === 0) saveStatus.textContent = 'נשמר ✓';
       } catch(e){
+        inFlight--;
         saveStatus.textContent = 'שמירה נכשלה: ' + (e && e.message ? e.message : String(e));
       }
-    });
+    }
+
+    function scheduleSave(r, role, delay){
+      const k = r.key + ':' + role;
+      clearTimeout(pendingSaves.get(k));
+      pendingSaves.set(k, setTimeout(() => saveField(r, role), delay));
+    }
+
+    function render(){
+      table.innerHTML = '';
+      const thead = document.createElement('thead');
+      const trh = document.createElement('tr');
+      appendRosterSortHeaders(trh, sort, render);
+      ['טלפון אבא', 'טלפון אמא', 'קישור הורים'].forEach(label => {
+        const th = document.createElement('th');
+        th.textContent = label;
+        trh.appendChild(th);
+      });
+      thead.appendChild(trh);
+      table.appendChild(thead);
+
+      const tbody = document.createElement('tbody');
+      sortRoster(roster, sort).forEach(r => {
+        const tr = document.createElement('tr');
+        appendRosterNameCells(tr, r, false);
+        ['father', 'mother'].forEach(role => {
+          const td = document.createElement('td');
+          const input = document.createElement('input');
+          input.type = 'tel';
+          input.value = r[role];
+          input.addEventListener('input', () => {
+            r[role] = input.value;
+            saveStatus.textContent = 'שומר…';
+            scheduleSave(r, role, 700);
+          });
+          input.addEventListener('change', () => scheduleSave(r, role, 0));
+          td.appendChild(input);
+          tr.appendChild(td);
+        });
+        const linkTd = document.createElement('td');
+        linkTd.className = 'link-cell';
+        if (r.link){
+          const a = document.createElement('a');
+          a.href = r.link;
+          a.target = '_blank';
+          a.textContent = r.link;
+          linkTd.appendChild(a);
+        }
+        tr.appendChild(linkTd);
+        tbody.appendChild(tr);
+      });
+      table.appendChild(tbody);
+    }
+    render();
   } catch(e){
     status.className = 'err';
     status.textContent = 'שגיאה בטעינה: ' + (e && e.message ? e.message : String(e));
   }
 }
 
-// ---------- Tab: שליחת SMS - מתיבתא ----------
+// ---------- Tab: שליחת הודעות ----------
 
 // Metivta custom names are stored as { family, first } (older saved data -
 // from before the family/first split existed - stored a single plain
@@ -746,8 +831,6 @@ async function renderSmsTab(container){
     ]);
     if (!mainSnap.exists()) throw new Error('לא נמצאו נתוני כיתה');
     const mainData = mainSnap.data();
-    const metivtaNames = mainData.metivtaNames || {};
-    const metivtaExtraNames = mainData.metivtaExtraNames || {};
     // Same days as the Metivta table in index.html: today's live data first,
     // then only past days where Metivta attendance was actually recorded.
     const archivedDays = (archiveSnap.exists() && Array.isArray(archiveSnap.data().days)) ? archiveSnap.data().days.slice() : [];
@@ -755,38 +838,19 @@ async function renderSmsTab(container){
     const todayEntry = { date: new Date().toISOString(), students: mainData.students || [], metivtaExtraStudents: mainData.metivtaExtra || [] };
     const days = [todayEntry, ...archivedDays.filter(metivtaEntryHasData)];
     const phonesData = phonesSnap.exists() ? phonesSnap.data() : {};
-    const mainPhones = phonesData.main || {};
-    const extraPhones = phonesData.extra || {};
 
     status.remove();
 
-    const students = [];
-    STUDENT_NAMES.forEach((name, idx) => {
-      const id = idx + 1;
-      const entry = decodeMetivtaNameEntry(metivtaNames[id], name);
-      students.push({
-        key: 'main-' + id, id, isExtra: false,
-        name: metivtaFullNameFromEntry(entry),
-        firstName: entry.first,
-        link: new URL('parent-update.html?id=' + id, location.href).href,
-        father: (mainPhones[id] && mainPhones[id].father) || '',
-        mother: (mainPhones[id] && mainPhones[id].mother) || '',
-        getRecord: (entry) => (entry.students || []).find(x => x.id === id) || null
-      });
-    });
-    METIVTA_EXTRA_NAMES.forEach((name, idx) => {
-      const id = idx + 1;
-      const entry = decodeMetivtaNameEntry(metivtaExtraNames[id], name);
-      students.push({
-        key: 'extra-' + id, id, isExtra: true,
-        name: metivtaFullNameFromEntry(entry),
-        firstName: entry.first,
-        link: '',
-        father: (extraPhones[id] && extraPhones[id].father) || '',
-        mother: (extraPhones[id] && extraPhones[id].mother) || '',
-        getRecord: (entry) => (entry.metivtaExtraStudents || []).find(x => x.id === id) || null
-      });
-    });
+    const students = buildRoster(mainData, phonesData).map(r => ({
+      ...r,
+      firstName: r.first,
+      getRecord: (entry) => ((r.isExtra ? entry.metivtaExtraStudents : entry.students) || []).find(x => x.id === r.id) || null
+    }));
+    const settingsDocRef = doc(db, FIRESTORE_COLLECTION, STORAGE_KEY, 'meta', 'smsSettings');
+    const settingsSnap = await getDoc(settingsDocRef);
+    const settings = settingsSnap.exists() ? settingsSnap.data() : {};
+    let savedTemplates = Array.isArray(settings.templates) ? settings.templates : [];
+    let frequentPreset = Array.isArray(settings.frequentFlyerRecipients) ? settings.frequentFlyerRecipients : null;
 
     // --- Template card ---
     const templateCard = document.createElement('div');
@@ -799,21 +863,97 @@ async function renderSmsTab(container){
     hint.className = 'hint';
     hint.innerHTML = 'שדות משתנים זמינים: <b>{שם}</b> (השם הפרטי), <b>{קישור}</b> (קיים רק לתלמידים הרגילים), <b>{נוכחות}</b> (כמה ימים נוכח, כולל ימים עם איחור/מוקדם/הפרעה), <b>{בזמן}</b>, <b>{איחור}</b>, <b>{מוקדם}</b>, <b>{הפרעות}</b>. בטבלת הנתונים לשליחה יופיעו רק הנתונים שנמצאים בהודעה.';
     templateCard.appendChild(hint);
+    // Saved message templates (shared, stored with the site's data).
+    const savedBox = document.createElement('div');
+    savedBox.className = 'saved-templates';
+    const savedLabel = document.createElement('span');
+    savedLabel.className = 'field-label';
+    savedLabel.textContent = 'תבניות שמורות:';
+    savedBox.appendChild(savedLabel);
+    const savedSelect = document.createElement('select');
+    savedSelect.className = 'day-count-select';
+    savedSelect.id = 'savedTemplates';
+    savedBox.appendChild(savedSelect);
+    const saveTemplateBtn = document.createElement('button');
+    saveTemplateBtn.type = 'button';
+    saveTemplateBtn.className = 'small-btn';
+    saveTemplateBtn.textContent = 'שמירת ההודעה כתבנית';
+    savedBox.appendChild(saveTemplateBtn);
+    const deleteTemplateBtn = document.createElement('button');
+    deleteTemplateBtn.type = 'button';
+    deleteTemplateBtn.className = 'small-btn';
+    deleteTemplateBtn.textContent = 'מחיקת התבנית';
+    savedBox.appendChild(deleteTemplateBtn);
+    templateCard.appendChild(savedBox);
+
     const templateTextarea = document.createElement('textarea');
     templateTextarea.id = 'template';
     templateTextarea.value = DEFAULT_TEMPLATE;
     templateCard.appendChild(templateTextarea);
+
+    function refreshSavedTemplates(selectedName){
+      savedSelect.innerHTML = '';
+      const placeholder = document.createElement('option');
+      placeholder.value = '';
+      placeholder.textContent = savedTemplates.length ? '— בחירת תבנית —' : 'אין עדיין תבניות שמורות';
+      savedSelect.appendChild(placeholder);
+      savedTemplates.forEach(t => {
+        const o = document.createElement('option');
+        o.value = t.name;
+        o.textContent = t.name;
+        savedSelect.appendChild(o);
+      });
+      savedSelect.value = selectedName || '';
+      deleteTemplateBtn.disabled = !savedSelect.value;
+    }
+    refreshSavedTemplates('');
+
+    async function saveSettings(update){
+      await setDoc(settingsDocRef, update, { merge: true });
+    }
+
+    savedSelect.addEventListener('change', () => {
+      deleteTemplateBtn.disabled = !savedSelect.value;
+      const t = savedTemplates.find(x => x.name === savedSelect.value);
+      if (!t) return;
+      templateTextarea.value = t.text;
+      templateTextarea.dispatchEvent(new Event('input'));
+    });
+    saveTemplateBtn.addEventListener('click', async () => {
+      const name = (prompt('שם לתבנית:', savedSelect.value || '') || '').trim();
+      if (!name) return;
+      if (savedTemplates.some(t => t.name === name) && !confirm('תבנית בשם הזה כבר קיימת. להחליף אותה?')) return;
+      savedTemplates = [...savedTemplates.filter(t => t.name !== name), { name, text: templateTextarea.value }];
+      try{
+        await saveSettings({ templates: savedTemplates });
+        refreshSavedTemplates(name);
+      } catch(e){
+        alert('שמירת התבנית נכשלה: ' + (e && e.message ? e.message : String(e)));
+      }
+    });
+    deleteTemplateBtn.addEventListener('click', async () => {
+      const name = savedSelect.value;
+      if (!name || !confirm('למחוק את התבנית "' + name + '"?')) return;
+      savedTemplates = savedTemplates.filter(t => t.name !== name);
+      try{
+        await saveSettings({ templates: savedTemplates });
+        refreshSavedTemplates('');
+      } catch(e){
+        alert('מחיקת התבנית נכשלה: ' + (e && e.message ? e.message : String(e)));
+      }
+    });
 
     const rowInline = document.createElement('div');
     rowInline.className = 'row-inline';
     const senderWrap = document.createElement('div');
     const senderLabel = document.createElement('label');
     senderLabel.className = 'field-label';
-    senderLabel.textContent = 'שם/מספר השולח (כפי שמאושר בחשבון ה-sms4free)';
+    senderLabel.textContent = 'מספר השולח';
     senderWrap.appendChild(senderLabel);
     const senderInput = document.createElement('input');
     senderInput.id = 'sender';
     senderInput.type = 'text';
+    senderInput.value = DEFAULT_SENDER;
     senderWrap.appendChild(senderInput);
     rowInline.appendChild(senderWrap);
 
@@ -926,58 +1066,110 @@ async function renderSmsTab(container){
     const clearAllBtn = document.createElement('button');
     clearAllBtn.type = 'button';
     clearAllBtn.textContent = 'בטל הכל';
+    const presetBtn = document.createElement('button');
+    presetBtn.type = 'button';
+    presetBtn.className = 'preset-btn';
+    presetBtn.textContent = 'הנוסע המתמיד';
     selectAllRow.appendChild(selectAllBtn);
     selectAllRow.appendChild(clearAllBtn);
+    selectAllRow.appendChild(presetBtn);
     recipientsCard.appendChild(selectAllRow);
+    const presetHint = document.createElement('div');
+    presetHint.className = 'hint';
+    recipientsCard.appendChild(presetHint);
+
+    // Which parent of which student is ticked, as 'studentKey:role'.
+    let checkedSet = new Set();
+    // "הנוסע המתמיד" remembers its own list of ticked parents: pressing it
+    // ticks exactly that list, and while it stays pressed every change to the
+    // ticks is saved back into the list for next week.
+    let presetActive = false;
+    const validCheckKey = (k) => {
+      const [studentKey, role] = k.split(':');
+      const st = students.find(x => x.key === studentKey);
+      return !!(st && st[role]);
+    };
+
+    function refreshPresetUi(){
+      presetBtn.classList.toggle('active', presetActive);
+      presetHint.textContent = presetActive
+        ? 'רשימת "הנוסע המתמיד" פעילה - כל סימון או ביטול נשמר בה אוטומטית לפעם הבאה.'
+        : 'לחיצה על "הנוסע המתמיד" מסמנת את ההורים ששמורים ברשימה הזו (ובפעם הראשונה שומרת את הסימון הנוכחי).';
+    }
+
+    async function saveFrequentPreset(){
+      frequentPreset = [...checkedSet];
+      try{
+        await setDoc(settingsDocRef, { frequentFlyerRecipients: frequentPreset }, { merge: true });
+      } catch(e){
+        presetHint.textContent = 'שמירת הרשימה נכשלה: ' + (e && e.message ? e.message : String(e));
+      }
+    }
+
+    function selectionChanged(){
+      if (presetActive) saveFrequentPreset();
+    }
 
     const tableScroll = document.createElement('div');
     tableScroll.className = 'table-scroll';
     const table = document.createElement('table');
     table.className = 'recipients-table';
-    const thead = document.createElement('thead');
-    const trh = document.createElement('tr');
-    ['תלמיד', 'אבא', 'אמא'].forEach(label => {
-      const th = document.createElement('th');
-      th.textContent = label;
-      trh.appendChild(th);
-    });
-    thead.appendChild(trh);
-    table.appendChild(thead);
-    const tbody = document.createElement('tbody');
-    students.forEach(s => {
-      const tr = document.createElement('tr');
-      const nameTd = document.createElement('td');
-      nameTd.textContent = s.name + (s.isExtra ? ' (נוסף)' : '');
-      tr.appendChild(nameTd);
-      ['father', 'mother'].forEach(role => {
-        const td = document.createElement('td');
-        const phone = s[role];
-        if (phone){
-          const cell = document.createElement('div');
-          cell.className = 'parent-cell';
-          const cb = document.createElement('input');
-          cb.type = 'checkbox';
-          cb.dataset.studentKey = s.key;
-          cb.dataset.role = role;
-          cell.appendChild(cb);
-          const phoneSpan = document.createElement('span');
-          phoneSpan.className = 'phone';
-          phoneSpan.textContent = phone;
-          cell.appendChild(phoneSpan);
-          td.appendChild(cell);
-        } else {
-          const missing = document.createElement('span');
-          missing.className = 'missing';
-          missing.textContent = 'אין מספר';
-          td.appendChild(missing);
-        }
-        tr.appendChild(td);
-      });
-      tbody.appendChild(tr);
-    });
-    table.appendChild(tbody);
     tableScroll.appendChild(table);
     recipientsCard.appendChild(tableScroll);
+    const recipientsSort = { key: null, dir: 1 };
+
+    function renderRecipients(){
+      table.innerHTML = '';
+      const thead = document.createElement('thead');
+      const trh = document.createElement('tr');
+      appendRosterSortHeaders(trh, recipientsSort, renderRecipients);
+      ['אבא', 'אמא'].forEach(label => {
+        const th = document.createElement('th');
+        th.textContent = label;
+        trh.appendChild(th);
+      });
+      thead.appendChild(trh);
+      table.appendChild(thead);
+      const tbody = document.createElement('tbody');
+      sortRoster(students, recipientsSort).forEach(s => {
+        const tr = document.createElement('tr');
+        appendRosterNameCells(tr, s, true);
+        ['father', 'mother'].forEach(role => {
+          const td = document.createElement('td');
+          const phone = s[role];
+          if (phone){
+            const cell = document.createElement('label');
+            cell.className = 'parent-cell';
+            const cb = document.createElement('input');
+            cb.type = 'checkbox';
+            cb.dataset.studentKey = s.key;
+            cb.dataset.role = role;
+            cb.checked = checkedSet.has(s.key + ':' + role);
+            cb.addEventListener('change', () => {
+              if (cb.checked) checkedSet.add(s.key + ':' + role);
+              else checkedSet.delete(s.key + ':' + role);
+              selectionChanged();
+            });
+            cell.appendChild(cb);
+            const phoneSpan = document.createElement('span');
+            phoneSpan.className = 'phone';
+            phoneSpan.textContent = phone;
+            cell.appendChild(phoneSpan);
+            td.appendChild(cell);
+          } else {
+            const missing = document.createElement('span');
+            missing.className = 'missing';
+            missing.textContent = 'אין מספר';
+            td.appendChild(missing);
+          }
+          tr.appendChild(td);
+        });
+        tbody.appendChild(tr);
+      });
+      table.appendChild(tbody);
+    }
+    renderRecipients();
+    refreshPresetUi();
 
     const recipientsAction = document.createElement('div');
     recipientsAction.className = 'action-bar';
@@ -990,15 +1182,30 @@ async function renderSmsTab(container){
     container.appendChild(recipientsCard);
 
     selectAllBtn.addEventListener('click', () => {
-      recipientsCard.querySelectorAll('input[type="checkbox"]').forEach(cb => { cb.checked = true; });
+      students.forEach(s => ['father', 'mother'].forEach(role => { if (s[role]) checkedSet.add(s.key + ':' + role); }));
+      renderRecipients();
+      selectionChanged();
     });
     clearAllBtn.addEventListener('click', () => {
-      recipientsCard.querySelectorAll('input[type="checkbox"]').forEach(cb => { cb.checked = false; });
+      checkedSet.clear();
+      renderRecipients();
+      selectionChanged();
+    });
+    presetBtn.addEventListener('click', () => {
+      if (presetActive){
+        presetActive = false;
+      } else {
+        presetActive = true;
+        if (frequentPreset) checkedSet = new Set(frequentPreset.filter(validCheckKey));
+        else saveFrequentPreset();
+        renderRecipients();
+      }
+      refreshPresetUi();
     });
 
     function getSelectedRecipients(){
       const selected = [];
-      recipientsCard.querySelectorAll('input[type="checkbox"]:checked').forEach(cb => {
+      table.querySelectorAll('input[type="checkbox"]:checked').forEach(cb => {
         const student = students.find(s => s.key === cb.dataset.studentKey);
         if (!student) return;
         const phone = student[cb.dataset.role];
@@ -1212,8 +1419,24 @@ async function renderSmsTab(container){
       return parseInt(text, 10);
     }
 
+    // A phone number typed with dashes/spaces is sent as plain digits.
+    function senderForApi(){
+      const v = senderInput.value.trim();
+      return /^[\d\s-]+$/.test(v) ? normalizePhone(v) : v;
+    }
+
+    const sentSmsCollection = collection(db, FIRESTORE_COLLECTION, STORAGE_KEY, 'sentSms');
+
+    async function logSent(record){
+      try{
+        await addDoc(sentSmsCollection, { ...record, sentAt: new Date().toISOString() });
+      } catch(e){
+        // the archive is a record only; never fail a send because of it
+      }
+    }
+
     sendBtn.addEventListener('click', async () => {
-      const sender = senderInput.value.trim();
+      const sender = senderForApi();
       if (!sender){
         alert('יש להזין שם/מספר שולח לפני השליחה.');
         return;
@@ -1234,6 +1457,7 @@ async function renderSmsTab(container){
         const phone = normalizePhone(student[role]);
         const msg = item.querySelector('textarea').value;
         const statusEl = item.querySelector('.preview-status');
+        const label = student.name + ' - ' + (role === 'father' ? 'אבא' : 'אמא');
         statusEl.textContent = 'שולח…';
         try{
           const code = await sendOne(sender, phone, msg);
@@ -1241,27 +1465,32 @@ async function renderSmsTab(container){
             statusEl.textContent = 'נשלח בהצלחה ✓';
             statusEl.className = 'preview-status status-ok';
             okCount++;
+            await logSent({ phone, label, msg, sender, status: 'sent' });
           } else {
             const errMsg = SMS4FREE_ERROR_MESSAGES[String(code)] || ('קוד שגיאה: ' + code);
             statusEl.textContent = 'נכשל: ' + errMsg;
             statusEl.className = 'preview-status status-err';
             failCount++;
+            await logSent({ phone, label, msg, sender, status: 'failed', error: errMsg });
           }
         } catch(e){
-          statusEl.textContent = 'נכשל: שגיאת רשת (' + (e && e.message ? e.message : String(e)) + ') - ייתכן שזה חסימת CORS של שרת ה-SMS';
+          const errMsg = 'שגיאת רשת (' + (e && e.message ? e.message : String(e)) + ')';
+          statusEl.textContent = 'נכשל: ' + errMsg + ' - ייתכן שזה חסימת CORS של שרת ה-SMS';
           statusEl.className = 'preview-status status-err';
           failCount++;
+          await logSent({ phone, label, msg, sender, status: 'failed', error: errMsg });
         }
       }
 
       summaryBar.textContent = 'נשלחו בהצלחה: ' + okCount + ' · נכשלו: ' + failCount;
+      await renderSentArchive();
       previewBtn.disabled = false;
       sendBtn.disabled = false;
       dataTableBtn.disabled = false;
     });
 
     scheduleBtn.addEventListener('click', async () => {
-      const sender = senderInput.value.trim();
+      const sender = senderForApi();
       if (!sender){
         alert('יש להזין שם/מספר שולח לפני התזמון.');
         return;
@@ -1303,7 +1532,77 @@ async function renderSmsTab(container){
       sendBtn.disabled = false;
     });
 
+    // --- Sent messages archive card ---
+    const sentCard = document.createElement('div');
+    sentCard.className = 'card';
+    const sentTitle = document.createElement('div');
+    sentTitle.className = 'section-title';
+    sentTitle.textContent = 'ארכיון הודעות שנשלחו';
+    sentCard.appendChild(sentTitle);
+    const sentBody = document.createElement('div');
+    sentCard.appendChild(sentBody);
+    container.appendChild(sentCard);
+
+    // Messages sent from this page (sentSms) plus scheduled ones the server
+    // function already sent or failed (scheduledSms), newest first.
+    async function renderSentArchive(){
+      sentBody.textContent = 'טוען…';
+      try{
+        const [sentSnap, schedSnap] = await Promise.all([getDocs(sentSmsCollection), getDocs(scheduledSmsCollection)]);
+        const rows = [];
+        sentSnap.forEach(d => rows.push({ ...d.data(), via: 'מיידי' }));
+        schedSnap.forEach(d => {
+          const data = d.data();
+          if (data.status === 'sent' || data.status === 'failed') rows.push({ ...data, sentAt: data.sentAt || data.sendAt, via: 'מתוזמן' });
+        });
+        rows.sort((a, b) => new Date(b.sentAt) - new Date(a.sentAt));
+        sentBody.innerHTML = '';
+        if (rows.length === 0){
+          sentBody.textContent = 'עדיין לא נשלחו הודעות.';
+          return;
+        }
+        const t = document.createElement('table');
+        t.className = 'log-table sent-table';
+        const th = document.createElement('thead');
+        const trh = document.createElement('tr');
+        ['זמן', 'נמען', 'הודעה', 'מצב'].forEach(label => {
+          const c = document.createElement('th');
+          c.textContent = label;
+          trh.appendChild(c);
+        });
+        th.appendChild(trh);
+        t.appendChild(th);
+        const tb = document.createElement('tbody');
+        rows.slice(0, 300).forEach(r => {
+          const tr = document.createElement('tr');
+          const whenTd = document.createElement('td');
+          whenTd.textContent = r.sentAt ? new Date(r.sentAt).toLocaleString('he-IL', { day: 'numeric', month: 'numeric', year: '2-digit', hour: '2-digit', minute: '2-digit' }) : '';
+          tr.appendChild(whenTd);
+          const toTd = document.createElement('td');
+          toTd.textContent = (r.label || '') + (r.phone ? ' · ' + r.phone : '');
+          tr.appendChild(toTd);
+          const msgTd = document.createElement('td');
+          msgTd.className = 'msg-cell';
+          msgTd.textContent = r.msg || '';
+          tr.appendChild(msgTd);
+          const stTd = document.createElement('td');
+          stTd.textContent = (r.status === 'sent' ? 'נשלח ✓' : 'נכשל' + (r.error ? ': ' + r.error : '')) + ' (' + r.via + ')';
+          stTd.className = r.status === 'sent' ? 'status-ok' : 'status-err';
+          tr.appendChild(stTd);
+          tb.appendChild(tr);
+        });
+        t.appendChild(tb);
+        const wrap = document.createElement('div');
+        wrap.className = 'table-scroll';
+        wrap.appendChild(t);
+        sentBody.appendChild(wrap);
+      } catch(e){
+        sentBody.textContent = 'שגיאה בטעינת הארכיון: ' + (e && e.message ? e.message : String(e));
+      }
+    }
+
     await renderPendingList();
+    await renderSentArchive();
 
   } catch(e){
     status.className = 'err';
@@ -1318,6 +1617,7 @@ if (!isFirebaseConfigured){
   db = getFirestore(firebaseApp);
   showCodePrompt();
 }
+mountPageNav({ getCurrent: () => 'admin' });
 </script>
 </body>
 </html>
