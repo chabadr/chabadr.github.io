@@ -2182,21 +2182,31 @@ async function lookupMissingParshaNames(weeklyEntries){
   }
 }
 
-// School days are Sunday-Friday. A day counts as missing when no student has
-// any archived data for it; days from today on (still live or in the future)
-// are never listed.
+// The daily columns a school day is expected to fill. There is no Metivta on
+// Friday, so that column isn't expected (or shown) for a Friday.
+const WEEKLY_EXPECTED_DAY_FIELDS = ['morning', 'tefila', 'mikvaotVal', 'rambamVal', 'metivtaVal'];
+const FRIDAY_INDEX = 5;
+
+function weeklyDayHasNoMetivta(weekStartD, dayKeyStr){
+  return Math.round((new Date(dayKeyStr).getTime() - new Date(dayKeyOf(weekStartD.toISOString())).getTime()) / 86400000) === FRIDAY_INDEX;
+}
+
+// School days are Sunday-Friday. A past day counts as missing when any of its
+// expected columns is empty for every student (no data for the day at all
+// included); days from today on (still live or in the future) are never listed.
 function weekMissingDayNames(entry){
   const weekStartD = new Date(entry.weekStart);
   const today = todayStr();
-  const present = new Set();
-  (entry.students || []).forEach(s => Object.keys(s.days || {}).forEach(k => present.add(k)));
+  const students = entry.students || [];
   const missing = [];
   for (let i = 0; i < 6; i++){
     const d = new Date(weekStartD);
     d.setDate(d.getDate() + i);
     const k = dayKeyOf(d.toISOString());
     if (k >= today) break;
-    if (!present.has(k)) missing.push(HEBREW_WEEKDAY_NAMES[i]);
+    const fields = WEEKLY_EXPECTED_DAY_FIELDS.filter(f => !(i === FRIDAY_INDEX && f === 'metivtaVal'));
+    const filled = (f) => students.some(s => ((s.days || {})[k] || {})[f] > 0);
+    if (!fields.every(filled)) missing.push(HEBREW_WEEKDAY_NAMES[i]);
   }
   return missing;
 }
@@ -2419,6 +2429,9 @@ function metivtaArchivedKeySet(){
   return new Set(Array.isArray(state.metivtaArchivedKeys) ? state.metivtaArchivedKeys : []);
 }
 
+// The ארכיון table starts folded; its title arrow opens/closes it.
+let metivtaArchiveOpen = false;
+
 // Rows picked by clicking their row number - only on this screen, not saved.
 const metivtaSelectedKeys = new Set();
 
@@ -2581,6 +2594,9 @@ function buildMetivtaDropdown(options, activeKey, toggleClass, onPick){
     e.stopPropagation();
     document.querySelectorAll('.merged-dropdown-list.open').forEach(l => { if (l !== list) l.classList.remove('open'); });
     list.classList.toggle('open');
+    // The table sits in a sideways-scrolling, clipped box - position the
+    // list against the viewport so it is never hidden under the table.
+    if (list.classList.contains('open')) placeDropdownListFixed(toggle, list);
   });
   const dropdown = document.createElement('div');
   dropdown.className = 'merged-dropdown';
@@ -2681,6 +2697,15 @@ function buildMetivtaTable({ days, archivedKeys, archiveTable, availableWidth })
   headerGroup.className = 'header-group';
   const titleSpan = document.createElement('span');
   titleSpan.textContent = archiveTable ? 'ארכיון' : 'מתיבתא';
+  if (archiveTable){
+    titleSpan.textContent = (metivtaArchiveOpen ? '▾ ' : '◂ ') + 'ארכיון (' + tableRows.length + ')';
+    titleSpan.style.cursor = 'pointer';
+    titleSpan.title = metivtaArchiveOpen ? 'סגירה' : 'פתיחה';
+    titleSpan.addEventListener('click', () => {
+      metivtaArchiveOpen = !metivtaArchiveOpen;
+      renderMetivtaView();
+    });
+  }
   headerGroup.appendChild(titleSpan);
   if (!archiveTable){
     const sep = document.createElement('span');
@@ -2713,6 +2738,7 @@ function buildMetivtaTable({ days, archivedKeys, archiveTable, availableWidth })
   }
 
   wrap.appendChild(dateEl);
+  if (archiveTable && !metivtaArchiveOpen) return wrap;
 
   // Fixed widths so the leading columns stay narrow. Today's column (where
   // attendance is entered) gets whatever room is left on screen after them,
@@ -3206,7 +3232,8 @@ function renderWeeklyEntryInto(entry, container, allWeeklyEntries){
     { field: 'bonus', label: 'בונוס', kind: 'daily' },
     { field: 'metivtaVal', label: 'מתיבתא', kind: 'daily' },
     ...WEEKLY_PARENT_FIELD_DEFS
-  ];
+  ].filter(f => !(f.field === 'metivtaVal' && (weeklyArchiveViewMode[entry.weekKey] || 'total') !== 'total'
+    && weeklyDayHasNoMetivta(weekStartD, weeklyArchiveViewMode[entry.weekKey])));
   const isParentField = (field) => WEEKLY_PARENT_FIELD_DEFS.some(f => f.field === field);
   const firstParentField = WEEKLY_PARENT_FIELD_DEFS[0].field;
   const dailyCount = fieldDefs.length - WEEKLY_PARENT_FIELD_DEFS.length;

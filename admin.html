@@ -189,7 +189,24 @@
     font-size: 14px;
     text-align: center;
   }
-  table.phones-table input{ min-width: 110px; direction: ltr; }
+  /* משתנים + עדכוני הורים: every row on one line, tight columns; the table
+     scrolls sideways instead of wrapping. */
+  table.phones-table, table.log-table{ width: auto; }
+  table.phones-table th, table.phones-table td,
+  table.log-table th, table.log-table td{ white-space: nowrap; padding: 4px 6px; }
+  table.phones-table input{
+    width: 11ch;
+    min-width: 0;
+    padding: 2px 0;
+    border: none;
+    border-bottom: 1px solid transparent;
+    border-radius: 0;
+    background: transparent;
+    direction: ltr;
+    font-size: 13.5px;
+  }
+  table.phones-table input:hover{ border-bottom-color: var(--line); }
+  table.phones-table input:focus{ outline: none; border-bottom-color: var(--gold); background: var(--gold-bg); }
   .parent-cell{
     display: flex;
     align-items: center;
@@ -272,7 +289,7 @@
   .title-row .section-title{ margin-bottom: 4px; }
   th.sortable-th{ cursor: pointer; user-select: none; }
   table.phones-table td.link-cell{ text-align: left; direction: ltr; font-size: 12px; }
-  table.phones-table td.link-cell a{ color: var(--ink); word-break: break-all; }
+  table.phones-table td.link-cell a{ color: var(--ink); }
   .archived-mark{ font-size: 11.5px; color: var(--ink-soft); }
   .saved-templates{
     display: flex;
@@ -335,7 +352,6 @@ const FIELD_LABELS = {
   minchaMaariv: 'מנחה מעריב', mikveh: 'מקווה שישי', dvarTorah: 'שיחה'
 };
 const FIELD_ORDER = ['chitas', 'shema', 'netilatYadaim', 'minchaMaariv', 'mikveh', 'dvarTorah'];
-const LEAD_COL_WIDTHS = { student: 72, week: 80, when: 105 };
 
 const DAY_COUNT_OPTIONS = [
   ...Array.from({ length: 15 }, (_, i) => i + 1).map(n => ({ value: String(n), label: n === 1 ? 'יום אחרון' : n + ' ימים אחרונים' })),
@@ -470,52 +486,21 @@ function renderActiveTab(){
 }
 
 // ---------- Tab: עדכוני הורים ----------
-function fitHeaderCellToWidestWord(th){
-  const label = th.dataset.fitLabel;
-  if (!label) return;
-  const words = label.split(' ');
-  const cs = getComputedStyle(th);
-  const span = document.createElement('span');
-  span.style.position = 'fixed';
-  span.style.top = '-9999px';
-  span.style.whiteSpace = 'nowrap';
-  span.style.fontFamily = cs.fontFamily;
-  span.style.fontWeight = cs.fontWeight;
-  span.style.fontSize = cs.fontSize;
-  document.body.appendChild(span);
-  let maxWordWidth = 0;
-  words.forEach(w => {
-    span.textContent = w;
-    maxWordWidth = Math.max(maxWordWidth, span.getBoundingClientRect().width);
-  });
-  span.remove();
-  const padding = (parseFloat(cs.paddingLeft) || 0) + (parseFloat(cs.paddingRight) || 0);
-  const border = (parseFloat(cs.borderLeftWidth) || 0) + (parseFloat(cs.borderRightWidth) || 0);
-  th.style.width = Math.ceil(maxWordWidth + padding + border + 4) + 'px';
-}
-
 function buildLogTable(entries){
   const scrollWrap = document.createElement('div');
   scrollWrap.className = 'table-scroll';
   const table = document.createElement('table');
   table.className = 'log-table';
-  table.style.tableLayout = 'fixed';
 
   const thead = document.createElement('thead');
   const trh = document.createElement('tr');
-  [
-    { label: 'תלמיד', width: LEAD_COL_WIDTHS.student },
-    { label: 'שבוע', width: LEAD_COL_WIDTHS.week },
-    { label: 'תאריך ושעה', width: LEAD_COL_WIDTHS.when }
-  ].forEach(({ label, width }) => {
+  ['תלמיד', 'שבוע', 'תאריך ושעה'].forEach(label => {
     const th = document.createElement('th');
-    th.style.width = width + 'px';
     th.textContent = label;
     trh.appendChild(th);
   });
   FIELD_ORDER.forEach(key => {
     const th = document.createElement('th');
-    th.dataset.fitLabel = FIELD_LABELS[key] || key;
     th.textContent = FIELD_LABELS[key] || key;
     trh.appendChild(th);
   });
@@ -566,9 +551,7 @@ async function renderHistoryTab(container){
     }
     const entries = [];
     snaps.forEach(s => entries.push(s.data()));
-    const logTableWrap = buildLogTable(entries);
-    container.appendChild(logTableWrap);
-    logTableWrap.querySelectorAll('th[data-fit-label]').forEach(fitHeaderCellToWidestWord);
+    container.appendChild(buildLogTable(entries));
   } catch(e){
     status.className = 'err';
     status.textContent = 'שגיאה בטעינת היסטוריית התשובות: ' + (e && e.message ? e.message : String(e));
