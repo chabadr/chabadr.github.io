@@ -802,8 +802,8 @@ function metivtaFullNameFromEntry(entry){
   return entry.family ? (entry.first + ' ' + entry.family) : entry.first;
 }
 
-// Scheduled messages go out only on Saturday 20:00-22:00 Israel time - the
-// server function (functions/index.js) runs only then.
+// Scheduled messages go out only on Saturday and Sunday 19:00-22:00 Israel
+// time - the server function (functions/index.js) runs only then.
 function israelTimeParts(d){
   const parts = new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Jerusalem', weekday: 'short', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).formatToParts(d);
   const get = (t) => (parts.find(p => p.type === t) || {}).value;
@@ -812,20 +812,21 @@ function israelTimeParts(d){
 
 function isInSendWindow(d){
   const { weekday, hour, minute } = israelTimeParts(d);
-  if (weekday !== 'Sat') return false;
-  return (hour >= 20 && hour < 22) || (hour === 22 && minute === 0);
+  if (weekday !== 'Sat' && weekday !== 'Sun') return false;
+  return (hour >= 19 && hour < 22) || (hour === 22 && minute === 0);
 }
 
-// The next Saturday 20:00 that is still ahead (in this browser's clock,
-// which is Israel time for everyone using the site).
+// The next 19:00 on a Saturday or Sunday that is still ahead (in this
+// browser's clock, which is Israel time for everyone using the site), or a
+// couple of minutes from now while a window is open.
 function nextSendWindowStart(){
+  const soon = new Date(Date.now() + 2 * 60000);
+  if (isInSendWindow(soon)) return soon;
   const d = new Date();
-  d.setHours(20, 0, 0, 0);
-  d.setDate(d.getDate() + ((6 - d.getDay() + 7) % 7));
-  if (d.getTime() <= Date.now()){
-    const soon = new Date(Date.now() + 2 * 60000);
-    if (isInSendWindow(soon)) return soon;
-    d.setDate(d.getDate() + 7);
+  d.setHours(19, 0, 0, 0);
+  for (let i = 0; i < 8; i++){
+    if ((d.getDay() === 6 || d.getDay() === 0) && d.getTime() > Date.now()) return d;
+    d.setDate(d.getDate() + 1);
   }
   return d;
 }
@@ -1014,7 +1015,7 @@ async function renderSmsTab(container){
     pendingCard.appendChild(pendingTitle);
     const pendingHint = document.createElement('div');
     pendingHint.className = 'hint';
-    pendingHint.textContent = 'אפשר לתזמן רק למוצאי שבת בין 20:00 ל-22:00 (שעון ישראל). השרת בודק כל 10 דקות ושולח את מה שהגיע זמנו (20:00, 20:10, 20:20...), גם אם העמוד הזה סגור.';
+    pendingHint.textContent = 'אפשר לתזמן רק לשבת או ליום ראשון בין 19:00 ל-22:00 (שעון ישראל). השרת בודק כל 20 דקות ושולח את מה שהגיע זמנו (19:00, 19:20, 19:40...), גם אם העמוד הזה סגור.';
     pendingCard.appendChild(pendingHint);
     const pendingBody = document.createElement('div');
     pendingCard.appendChild(pendingBody);
@@ -1531,7 +1532,7 @@ async function renderSmsTab(container){
         return;
       }
       if (!isInSendWindow(sendAtDate)){
-        alert('אפשר לתזמן רק למוצאי שבת בין 20:00 ל-22:00 (שעון ישראל) - רק אז השרת שולח הודעות.');
+        alert('אפשר לתזמן רק לשבת או ליום ראשון בין 19:00 ל-22:00 (שעון ישראל) - רק אז השרת שולח הודעות.');
         return;
       }
       const items = Array.from(previewList.querySelectorAll('.preview-item'));
