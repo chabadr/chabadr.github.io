@@ -1014,7 +1014,7 @@ async function renderSmsTab(container){
     pendingCard.appendChild(pendingTitle);
     const pendingHint = document.createElement('div');
     pendingHint.className = 'hint';
-    pendingHint.textContent = 'אפשר לתזמן רק למוצאי שבת בין 20:00 ל-22:00 (שעון ישראל) - רק אז השרת בודק ושולח, גם אם העמוד הזה סגור.';
+    pendingHint.textContent = 'אפשר לתזמן רק למוצאי שבת בין 20:00 ל-22:00 (שעון ישראל). השרת בודק כל 10 דקות ושולח את מה שהגיע זמנו (20:00, 20:10, 20:20...), גם אם העמוד הזה סגור.';
     pendingCard.appendChild(pendingHint);
     const pendingBody = document.createElement('div');
     pendingCard.appendChild(pendingBody);
