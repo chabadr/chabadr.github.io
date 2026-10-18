@@ -6,8 +6,8 @@
 
 1. **לפתוח Cloud Shell** ולהריץ:
    ```bash
-   git clone https://github.com/pshita/point.git
-   cd point
+   git clone https://github.com/chabadr/chabadr.github.io.git
+   cd chabadr.github.io
    ```
 
 2. **להתקין את כלי השורה של Firebase** (אם עוד לא מותקן):
