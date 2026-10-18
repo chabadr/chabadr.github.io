@@ -46,12 +46,14 @@ function sendSms(key, user, pass, sender, recipient, msg){
   });
 }
 
-// Runs every minute; picks up any "pending" doc in scheduledSms whose sendAt
-// has arrived and actually sends it via the sms4free API, independent of
+// Runs every minute, but only on Saturday night 20:00-22:59 Israel time (the
+// sending window admin.html enforces for scheduling); picks up any "pending"
+// doc in scheduledSms whose sendAt has arrived and actually sends it via the sms4free API, independent of
 // whether admin.html is open anywhere. See admin.html's "תזמון שליחה" button
 // (writes the pending docs this reads) and functions/README.md (deployment).
 exports.sendScheduledSms = onSchedule({
-  schedule: 'every 1 minutes',
+  schedule: '* 20-22 * * 6',
+  timeZone: 'Asia/Jerusalem',
   region: 'us-central1',
   secrets: [SMS4FREE_KEY, SMS4FREE_USER, SMS4FREE_PASS]
 }, async () => {

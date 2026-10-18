@@ -802,6 +802,34 @@ function metivtaFullNameFromEntry(entry){
   return entry.family ? (entry.first + ' ' + entry.family) : entry.first;
 }
 
+// Scheduled messages go out only on Saturday 20:00-22:00 Israel time - the
+// server function (functions/index.js) runs only then.
+function israelTimeParts(d){
+  const parts = new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Jerusalem', weekday: 'short', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).formatToParts(d);
+  const get = (t) => (parts.find(p => p.type === t) || {}).value;
+  return { weekday: get('weekday'), hour: parseInt(get('hour'), 10), minute: parseInt(get('minute'), 10) };
+}
+
+function isInSendWindow(d){
+  const { weekday, hour, minute } = israelTimeParts(d);
+  if (weekday !== 'Sat') return false;
+  return (hour >= 20 && hour < 22) || (hour === 22 && minute === 0);
+}
+
+// The next Saturday 20:00 that is still ahead (in this browser's clock,
+// which is Israel time for everyone using the site).
+function nextSendWindowStart(){
+  const d = new Date();
+  d.setHours(20, 0, 0, 0);
+  d.setDate(d.getDate() + ((6 - d.getDay() + 7) % 7));
+  if (d.getTime() <= Date.now()){
+    const soon = new Date(Date.now() + 2 * 60000);
+    if (isInSendWindow(soon)) return soon;
+    d.setDate(d.getDate() + 7);
+  }
+  return d;
+}
+
 function computeDefaultStats(student, days, dayCountVal){
   const dayCount = dayCountVal === 'all' ? null : parseInt(dayCountVal, 10);
   const relevantDays = dayCount === null ? days : days.slice(0, dayCount);
@@ -986,7 +1014,7 @@ async function renderSmsTab(container){
     pendingCard.appendChild(pendingTitle);
     const pendingHint = document.createElement('div');
     pendingHint.className = 'hint';
-    pendingHint.textContent = 'השליחה בפועל בזמן שנקבע מתבצעת על ידי פונקציית שרת מתוזמנת (Cloud Function) שבודקת כל דקה אם הגיע הזמן - היא פועלת ברקע גם אם העמוד הזה סגור, בתנאי שהוגדרה ונפרסה בפרויקט (ראו functions/README.md בקוד).';
+    pendingHint.textContent = 'אפשר לתזמן רק למוצאי שבת בין 20:00 ל-22:00 (שעון ישראל) - רק אז השרת בודק ושולח, גם אם העמוד הזה סגור.';
     pendingCard.appendChild(pendingHint);
     const pendingBody = document.createElement('div');
     pendingCard.appendChild(pendingBody);
@@ -1360,8 +1388,9 @@ async function renderSmsTab(container){
     const scheduleInput = document.createElement('input');
     scheduleInput.type = 'datetime-local';
     scheduleInput.id = 'scheduleAt';
-    const minDate = new Date(Date.now() - new Date().getTimezoneOffset() * 60000);
-    scheduleInput.min = minDate.toISOString().slice(0, 16);
+    const toLocalInputValue = (d) => new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+    scheduleInput.min = toLocalInputValue(new Date());
+    scheduleInput.value = toLocalInputValue(nextSendWindowStart());
     scheduleRow.appendChild(scheduleInput);
     const scheduleBtn = document.createElement('button');
     scheduleBtn.className = 'btn-secondary';
@@ -1499,6 +1528,10 @@ async function renderSmsTab(container){
       const sendAtDate = whenVal ? new Date(whenVal) : null;
       if (!sendAtDate || isNaN(sendAtDate.getTime()) || sendAtDate.getTime() <= Date.now()){
         alert('יש לבחור תאריך ושעה בעתיד לשליחה.');
+        return;
+      }
+      if (!isInSendWindow(sendAtDate)){
+        alert('אפשר לתזמן רק למוצאי שבת בין 20:00 ל-22:00 (שעון ישראל) - רק אז השרת שולח הודעות.');
         return;
       }
       const items = Array.from(previewList.querySelectorAll('.preview-item'));
