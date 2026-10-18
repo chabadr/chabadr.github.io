@@ -1539,7 +1539,7 @@ function computeDailyResetUpdate(mainData, dailyDays, weeklyEntry){
   let days = Array.isArray(dailyDays) ? dailyDays.slice() : [];
   const existingDailyIdx = days.findIndex(e => dayKeyOf(e.date) === entryDayKey);
   if (existingDailyIdx !== -1){
-    // The same day was already archived once (the 18:00 reset followed by
+    // The same day was already archived once (an earlier reset followed by
     // more activity that evening, or an earlier mid-day reset) - add this
     // part of the day to it instead of overwriting the earlier part.
     mergeEarlierDailyEntry(newDailyData, days[existingDailyIdx]);
@@ -1743,13 +1743,20 @@ async function updateDailyArchiveRecord(dayKey, studentId, isExtra, mutatorFn){
   }
 }
 
-const AUTO_RESET_HOUR = 18;
+// A day is archived (and the board starts fresh) at 01:00 at night - by the
+// server's scheduled function (functions/index.js, dailyReset) even when no
+// page is open; an open page also tries at 01:00, and a page opened later
+// catches up. Keep in sync with isLiveDayDueForArchive in functions/index.js.
+const AUTO_RESET_HOUR = 1;
 
 function isLiveDayDueForArchive(data){
   if (!data.lastActivityDate) return false;
   const today = todayStr();
-  if (data.lastActivityDate !== today) return true;
-  return new Date().getHours() >= AUTO_RESET_HOUR && data.lastAutoResetDate !== today;
+  if (data.lastActivityDate >= today) return false;
+  const y = new Date();
+  y.setDate(y.getDate() - 1);
+  const yesterday = y.getFullYear() + '-' + String(y.getMonth() + 1).padStart(2, '0') + '-' + String(y.getDate()).padStart(2, '0');
+  return data.lastActivityDate < yesterday || new Date().getHours() >= AUTO_RESET_HOUR;
 }
 
 function checkAutoReset(){
