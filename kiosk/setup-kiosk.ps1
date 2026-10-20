@@ -9,8 +9,8 @@
   - only those sites can be opened; downloads, file dialogs, developer tools
     and InPrivate are off;
   - no other program can be started (only Edge and the on-screen keyboard);
-    the taskbar stays, so the network (Wi-Fi) button and the touch keyboard
-    button are there, and Edge's own refresh button is on its toolbar;
+    the taskbar stays, so the network (Wi-Fi) button and the on-screen
+    keyboard button are there, and Edge's own refresh button is on its toolbar;
   - Task Manager, the command prompt, Control Panel/Settings, the Run box
     and browsing the drives are blocked.
   Everything applies to that user only. Keep (or let this script create) a
