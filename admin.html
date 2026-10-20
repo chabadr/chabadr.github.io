@@ -331,7 +331,7 @@ import { getFirestore, doc, getDoc, setDoc, addDoc, deleteDoc, collection, query
 import { firebaseConfig, isFirebaseConfigured } from "./firebase-config.js";
 import { sms4freeConfig } from "./sms-config.js";
 import { mountPageNav } from "./page-nav.js";
-import { setSaveFailedBanner } from "./save-banner.js";
+import { setSaveFailedBanner, describeSaveError, SAVE_STALLED_REASON } from "./save-banner.js";
 
 const STORAGE_KEY = 'classroom-points-v1';
 const FIRESTORE_COLLECTION = 'classroom_points';
@@ -704,7 +704,8 @@ async function renderPhonesTab(container){
     // hangs offline counts as failed after 8 seconds).
     const failedFields = new Map();
     let stalledSaves = 0;
-    const refreshBanner = () => setSaveFailedBanner(failedFields.size > 0 || stalledSaves > 0);
+    let failureReason = '';
+    const refreshBanner = () => setSaveFailedBanner(failedFields.size > 0 || stalledSaves > 0, failureReason);
 
     async function saveField(r, role){
       const k = r.key + ':' + role;
@@ -712,11 +713,12 @@ async function renderPhonesTab(container){
       inFlight++;
       saveStatus.textContent = 'שומר…';
       let stalled = false;
-      const stallTimer = setTimeout(() => { stalled = true; stalledSaves++; refreshBanner(); }, 8000);
+      const stallTimer = setTimeout(() => { stalled = true; stalledSaves++; failureReason = SAVE_STALLED_REASON; refreshBanner(); }, 8000);
       try{
         await setDoc(phonesDocRef, { [r.group]: { [r.id]: { [role]: normalizePhone(r[role]) } } }, { merge: true });
         failedFields.delete(k);
       } catch(e){
+        failureReason = describeSaveError(e);
         failedFields.set(k, () => saveField(r, role));
         scheduleSave(r, role, 5000);
       }

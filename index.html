@@ -837,7 +837,7 @@ import {
 } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
 import { firebaseConfig, isFirebaseConfigured } from "./firebase-config.js";
 import { mountPageNav } from "./page-nav.js";
-import { setSaveFailedBanner } from "./save-banner.js";
+import { setSaveFailedBanner, describeSaveError, SAVE_STALLED_REASON } from "./save-banner.js";
 
 function showSetupNeededMessage(){
   document.body.innerHTML = '';
@@ -1083,7 +1083,7 @@ async function storageSet(value){
     lastSyncedMainJson = JSON.stringify(body);
     return { ok: true };
   } catch(e){
-    return null;
+    return { ok: false, error: e };
   }
 }
 
@@ -1260,13 +1260,14 @@ const pendingArchiveOps = [];
 let archiveOpsStalled = 0;
 let saveRetryTimer = null;
 let saveRetryRunning = false;
+let lastSaveFailureReason = '';
 
 function hasUnsavedChanges(){
   return mainSaveFailed || mainSaveStalled || pendingArchiveOps.length > 0 || archiveOpsStalled > 0;
 }
 
 function refreshSaveBanner(){
-  setSaveFailedBanner(hasUnsavedChanges());
+  setSaveFailedBanner(hasUnsavedChanges(), lastSaveFailureReason);
 }
 
 function scheduleSaveRetry(){
@@ -1284,6 +1285,7 @@ async function retryFailedSaves(){
       await pendingArchiveOps[0]();
       pendingArchiveOps.shift();
     } catch(e){
+      lastSaveFailureReason = describeSaveError(e);
       break;
     }
   }
@@ -1302,6 +1304,7 @@ async function saveState(){
   const stallTimer = setTimeout(() => {
     if (seq !== mainSaveSeq) return;
     mainSaveStalled = true;
+    lastSaveFailureReason = SAVE_STALLED_REASON;
     refreshSaveBanner();
   }, SAVE_STALL_MS);
   const res = await storageSet(JSON.stringify(state));
@@ -1309,8 +1312,9 @@ async function saveState(){
   // A newer save already carries everything this one had.
   if (seq !== mainSaveSeq) return;
   mainSaveStalled = false;
-  if (!res){
+  if (!res || !res.ok){
     mainSaveFailed = true;
+    lastSaveFailureReason = describeSaveError(res && res.error);
     setStatus('שמירה נכשלה');
     scheduleSaveRetry();
   } else {
@@ -1332,12 +1336,13 @@ async function runArchiveSave(op){
   }
   setStatus('שומר…');
   let stalled = false;
-  const stallTimer = setTimeout(() => { stalled = true; archiveOpsStalled++; refreshSaveBanner(); }, SAVE_STALL_MS);
+  const stallTimer = setTimeout(() => { stalled = true; archiveOpsStalled++; lastSaveFailureReason = SAVE_STALLED_REASON; refreshSaveBanner(); }, SAVE_STALL_MS);
   try{
     await op();
     setStatus('נשמר');
     setTimeout(() => setStatus(''), 1200);
   } catch(e){
+    lastSaveFailureReason = describeSaveError(e);
     pendingArchiveOps.push(op);
     setStatus('שמירה נכשלה');
     scheduleSaveRetry();
