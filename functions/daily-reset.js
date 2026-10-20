@@ -116,10 +116,15 @@ function computeDailyResetUpdate(mainData, dailyDays, weeklyEntry){
   if (days.length > MAX_DAILY) days = days.slice(0, MAX_DAILY);
 
   const weekKey = getWeekKey(entryDate);
+  // The week's starting point for the cumulative מקוואות/רמב"ם counters is
+  // their value before the day being archived - today's checkmarks
+  // (s.frequent) are already inside frequentFrozen and belong to this week.
+  const weekStartCounter = (s, key) => ((s.frequentFrozen && s.frequentFrozen[key]) || 0) - ((s.frequent && s.frequent[key]) || 0);
   const freshWeeklyStudent = (s) => ({
     id: s.id, morning: 0, tefila: 0, mikve: 0, minusDelta: 0, bonus: 0, days: {},
-    baselineMikvaot: s.frequentFrozen ? (s.frequentFrozen.mikvaot || 0) : 0,
-    baselineRambam: s.frequentFrozen ? (s.frequentFrozen.rambam || 0) : 0,
+    baselineMikvaot: weekStartCounter(s, 'mikvaot'),
+    baselineRambam: weekStartCounter(s, 'rambam'),
+    countedMikvaot: 0, countedRambam: 0,
     chitas: 0, shema: 0, netilatYadaim: 0, minchaMaariv: 0, mikveh: false, dvarTorah: false
   });
   const weeklyEntryOut = weeklyEntry ? JSON.parse(JSON.stringify(weeklyEntry)) : {
@@ -141,8 +146,11 @@ function computeDailyResetUpdate(mainData, dailyDays, weeklyEntry){
       weeklyEntryOut.students.push(ws);
     }
     if (!ws.days) ws.days = {};
-    if (typeof ws.baselineMikvaot !== 'number') ws.baselineMikvaot = 0;
-    if (typeof ws.baselineRambam !== 'number') ws.baselineRambam = 0;
+    // A record created before any reset this week (e.g. by a parent's form)
+    // has no starting point yet - take it from now, not from 0, which would
+    // count every checkmark since the counters began into this one day.
+    if (typeof ws.baselineMikvaot !== 'number') ws.baselineMikvaot = weekStartCounter(s, 'mikvaot');
+    if (typeof ws.baselineRambam !== 'number') ws.baselineRambam = weekStartCounter(s, 'rambam');
 
     const dayMorning = Math.round((s.cats.c1 || 0) * (2 / 3));
     const dayTefila = (s.cats.c7 || 0) + (s.cats.c3 || 0);
@@ -154,8 +162,17 @@ function computeDailyResetUpdate(mainData, dailyDays, weeklyEntry){
     const currentMikvaot = s.frequentFrozen ? (s.frequentFrozen.mikvaot || 0) : 0;
     const currentRambam = s.frequentFrozen ? (s.frequentFrozen.rambam || 0) : 0;
 
-    const dayMikvaotVal = currentMikvaot - ws.baselineMikvaot - priorMikvaotSum;
-    const dayRambamVal = currentRambam - ws.baselineRambam - priorRambamSum;
+    // How much of the week's counter growth earlier resets already turned
+    // into day values - tracked on its own, not re-derived from the day
+    // values, so a day value corrected by hand in the archive is not taken
+    // back from the next day's count. Weeks from before this field existed
+    // fall back to the sum of their day values.
+    const countedMikvaot = typeof ws.countedMikvaot === 'number' ? ws.countedMikvaot : priorMikvaotSum;
+    const countedRambam = typeof ws.countedRambam === 'number' ? ws.countedRambam : priorRambamSum;
+    const dayMikvaotVal = currentMikvaot - ws.baselineMikvaot - countedMikvaot;
+    const dayRambamVal = currentRambam - ws.baselineRambam - countedRambam;
+    ws.countedMikvaot = countedMikvaot + dayMikvaotVal;
+    ws.countedRambam = countedRambam + dayRambamVal;
 
     // Same-day re-archive: the counters below are increments on top of what
     // this day already holds, while bonus/metivta are whole-day values.
