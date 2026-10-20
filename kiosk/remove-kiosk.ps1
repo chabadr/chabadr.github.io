@@ -1,39 +1,41 @@
 #Requires -RunAsAdministrator
 <#
-  Undoes setup-kiosk.ps1: the kiosk user gets the normal Windows desktop back,
-  the Edge restrictions and the Task Manager block are removed, and automatic
-  sign-in is turned off. The user itself is kept unless -DeleteUser is given.
+  Undoes setup-kiosk.ps1 for the kiosk user: Edge no longer opens at
+  sign-in, the program and Edge restrictions are removed, and automatic
+  sign-in is turned off. Run it from the administrator (maintenance) account.
 #>
 param(
-  [string]$KioskUser = 'kita',
-  [switch]$DeleteUser
+  [string]$KioskUser = 'user'
 )
 $ErrorActionPreference = 'Stop'
 
 $user = Get-LocalUser -Name $KioskUser -ErrorAction SilentlyContinue
-if ($user) {
-  $sid = $user.SID.Value
-  $profilePath = (Get-CimInstance Win32_UserProfile | Where-Object { $_.SID -eq $sid }).LocalPath
-  $loadedHere = $false
-  $hive = "Registry::HKEY_USERS\$sid"
-  if (-not (Test-Path $hive) -and $profilePath) {
-    & reg.exe load "HKU\KioskSetup" "$profilePath\NTUSER.DAT" | Out-Null
-    $hive = 'Registry::HKEY_USERS\KioskSetup'
-    $loadedHere = $true
+if (-not $user) { throw "There is no Windows user named '$KioskUser'." }
+$sid = $user.SID.Value
+$profilePath = (Get-CimInstance Win32_UserProfile | Where-Object { $_.SID -eq $sid }).LocalPath
+$loadedHere = $false
+$hive = "Registry::HKEY_USERS\$sid"
+if (-not (Test-Path $hive) -and $profilePath) {
+  & reg.exe load "HKU\KioskSetup" "$profilePath\NTUSER.DAT" | Out-Null
+  $hive = 'Registry::HKEY_USERS\KioskSetup'
+  $loadedHere = $true
+}
+try {
+  if (Test-Path $hive) {
+    Remove-ItemProperty -Path "$hive\Software\Microsoft\Windows NT\CurrentVersion\Winlogon" -Name 'Shell' -ErrorAction SilentlyContinue
+    Remove-ItemProperty -Path "$hive\Software\Microsoft\Windows\CurrentVersion\Run" -Name 'ClassKiosk' -ErrorAction SilentlyContinue
+    $explorerPol = "$hive\Software\Microsoft\Windows\CurrentVersion\Policies\Explorer"
+    foreach ($n in 'RestrictRun', 'NoRun', 'NoControlPanel', 'NoViewOnDrive') { Remove-ItemProperty -Path $explorerPol -Name $n -ErrorAction SilentlyContinue }
+    Remove-Item -Path "$explorerPol\RestrictRun" -Recurse -Force -ErrorAction SilentlyContinue
+    Remove-ItemProperty -Path "$hive\Software\Microsoft\Windows\CurrentVersion\Policies\System" -Name 'DisableTaskMgr' -ErrorAction SilentlyContinue
+    Remove-ItemProperty -Path "$hive\Software\Policies\Microsoft\Windows\System" -Name 'DisableCMD' -ErrorAction SilentlyContinue
+    Remove-Item -Path "$hive\Software\Policies\Microsoft\Edge" -Recurse -Force -ErrorAction SilentlyContinue
   }
-  try {
-    if (Test-Path $hive) {
-      Remove-ItemProperty -Path "$hive\Software\Microsoft\Windows NT\CurrentVersion\Winlogon" -Name 'Shell' -ErrorAction SilentlyContinue
-      Remove-ItemProperty -Path "$hive\Software\Microsoft\Windows\CurrentVersion\Policies\System" -Name 'DisableTaskMgr' -ErrorAction SilentlyContinue
-      Remove-Item -Path "$hive\Software\Policies\Microsoft\Edge" -Recurse -Force -ErrorAction SilentlyContinue
-    }
-  } finally {
-    if ($loadedHere) {
-      [gc]::Collect(); [gc]::WaitForPendingFinalizers()
-      & reg.exe unload 'HKU\KioskSetup' | Out-Null
-    }
+} finally {
+  if ($loadedHere) {
+    [gc]::Collect(); [gc]::WaitForPendingFinalizers()
+    & reg.exe unload 'HKU\KioskSetup' | Out-Null
   }
-  if ($DeleteUser) { Remove-LocalUser -Name $KioskUser; Write-Host "Deleted user $KioskUser (its folder in C:\Users can be deleted by hand)" }
 }
 
 $winlogon = 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon'

@@ -53,6 +53,7 @@ const NAV_CSS = `
   }
   .page-nav-option:hover{ background: #FBF1D9; }
   .page-nav-option.active{ color: #B8902E; font-weight: 700; }
+  .page-nav-reload{ border-top: 1px solid #D9D2BC; }
 `;
 
 export const PAGES = [
@@ -99,6 +100,14 @@ export function mountPageNav({ getCurrent, onNavigate }){
     });
     list.appendChild(a);
   });
+
+  // Reloading the page without a keyboard (touch screen kiosk).
+  const reload = document.createElement('a');
+  reload.className = 'page-nav-option page-nav-reload';
+  reload.href = '#';
+  reload.textContent = '⟳ רענון';
+  reload.addEventListener('click', (e) => { e.preventDefault(); location.reload(); });
+  list.appendChild(reload);
 
   btn.addEventListener('click', (e) => {
     e.stopPropagation();

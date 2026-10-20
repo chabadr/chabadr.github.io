@@ -1,74 +1,65 @@
 #Requires -RunAsAdministrator
 <#
-  Sets up the classroom computer as a kiosk:
-  - a separate standard Windows user (default name: kita) that signs in
-    automatically and gets Microsoft Edge INSTEAD of the desktop - no taskbar,
-    Start menu or File Explorer, so no other program can be opened;
-  - Edge runs in normal (not InPrivate) mode, so the site keeps its data;
-  - only the allowed sites can be opened; downloads, file dialogs, developer
-    tools, InPrivate and extra profiles are turned off;
-  - if Edge is closed it opens again by itself.
-  Everything applies to the kiosk user only - the administrator account
-  (yours) keeps working normally.
-
-  To leave the kiosk: Ctrl+Alt+Del -> Switch user (or Sign out).
-  To undo: run remove-kiosk.ps1 the same way.
+  Sets up the classroom computer as a kiosk on an EXISTING Windows user
+  (default: "user"):
+  - signs in to that user automatically when the computer starts;
+  - opens Microsoft Edge (normal mode, not InPrivate - the site keeps its
+    data, and Edge keeps saved usernames and passwords) with the class site
+    and Mashov as two tabs;
+  - only those sites can be opened; downloads, file dialogs, developer tools
+    and InPrivate are off;
+  - no other program can be started (only Edge and the on-screen keyboard);
+    the taskbar stays, so the network (Wi-Fi) button and the touch keyboard
+    button are there, and Edge's own refresh button is on its toolbar;
+  - Task Manager, the command prompt, Control Panel/Settings, the Run box
+    and browsing the drives are blocked.
+  Everything applies to that user only. Keep (or let this script create) a
+  separate administrator account for maintenance - that is where you undo
+  it, with remove-kiosk.ps1.
 #>
 param(
-  [string]$KioskUser = 'kita',
+  [string]$KioskUser = 'user',
+  [string]$MaintenanceAdmin = 'maintenance',
   [switch]$NoAutoLogin
 )
 $ErrorActionPreference = 'Stop'
 
-# The two sites, opened as two tabs.
 $StartPages = @('https://chabadr.github.io/', 'https://web.mashov.info/')
-# Allowed sites, including the services the class site itself loads from
-# (data, fonts, parsha names, SMS).
+# Allowed sites, including the services the class site itself loads from.
 $AllowedSites = @('chabadr.github.io', 'mashov.info', 'googleapis.com', 'gstatic.com', 'hebcal.com', 'sms4free.co.il')
+# The only programs this user may start.
+$AllowedPrograms = @('msedge.exe', 'TabTip.exe', 'osk.exe')
 
 $Edge = @("${env:ProgramFiles(x86)}\Microsoft\Edge\Application\msedge.exe",
           "$env:ProgramFiles\Microsoft\Edge\Application\msedge.exe") | Where-Object { Test-Path $_ } | Select-Object -First 1
 if (-not $Edge) { throw 'Microsoft Edge (msedge.exe) was not found.' }
 
-# ---- 1. The kiosk user ----
-$Password = Read-Host -AsSecureString "Choose a password for the kiosk user '$KioskUser'"
 $user = Get-LocalUser -Name $KioskUser -ErrorAction SilentlyContinue
-if (-not $user) {
-  $user = New-LocalUser -Name $KioskUser -Password $Password -PasswordNeverExpires -AccountNeverExpires -UserMayNotChangePassword -Description 'Classroom kiosk'
-  # "Users" group, looked up by its fixed SID so it works in a Hebrew Windows too.
-  Add-LocalGroupMember -SID 'S-1-5-32-545' -Member $KioskUser
-  Write-Host "Created user $KioskUser"
-} else {
-  Set-LocalUser -Name $KioskUser -Password $Password
-  Write-Host "User $KioskUser already exists - password updated"
-}
+if (-not $user) { throw "There is no Windows user named '$KioskUser'. Run again with -KioskUser <name>." }
 $sid = $user.SID.Value
-
-# Windows creates a user's profile folder on first sign-in; start a process
-# as that user once so the profile (and its registry) exists.
-$cred = New-Object System.Management.Automation.PSCredential($KioskUser, $Password)
-Start-Process -FilePath "$env:SystemRoot\System32\cmd.exe" -ArgumentList '/c exit' -Credential $cred -LoadUserProfile -WindowStyle Hidden -Wait
 $profilePath = (Get-CimInstance Win32_UserProfile | Where-Object { $_.SID -eq $sid }).LocalPath
-if (-not $profilePath) { throw "The profile of $KioskUser was not created. Sign in once as $KioskUser, sign out, and run this again." }
+if (-not $profilePath) { throw "User '$KioskUser' has never signed in. Sign in to it once, sign out, and run this again." }
 
-# ---- 2. The launcher that replaces the desktop ----
-$kioskDir = "$env:SystemDrive\Kiosk"
-New-Item -ItemType Directory -Force -Path $kioskDir | Out-Null
-$pagesLiteral = ($StartPages | ForEach-Object { "'$_'" }) -join ', '
-@"
-# Opens Edge with the class sites and opens it again whenever it is closed
-# (checked every few seconds, only for Edge in this sign-in session).
-`$edgeArgs = @('--start-maximized', '--no-first-run', $pagesLiteral)
-`$mySession = (Get-Process -Id `$PID).SessionId
-while (`$true) {
-  `$running = Get-Process -Name msedge -ErrorAction SilentlyContinue | Where-Object { `$_.SessionId -eq `$mySession }
-  if (-not `$running) { Start-Process -FilePath '$Edge' -ArgumentList `$edgeArgs }
-  Start-Sleep -Seconds 3
+# ---- A separate administrator for maintenance (to get out and undo) ----
+$adminsGroup = Get-LocalGroup -SID 'S-1-5-32-544'
+$otherAdmins = $null
+try {
+  $otherAdmins = Get-LocalGroupMember -Group $adminsGroup | Where-Object {
+    $_.ObjectClass -eq 'User' -and $_.SID.Value -ne $sid -and $_.SID.Value -notlike '*-500'
+  }
+} catch {
+  Write-Host 'Could not list the administrators - a maintenance account will be made to be safe.'
 }
-"@ | Set-Content -Path "$kioskDir\start-kiosk.ps1" -Encoding UTF8
-$shell = "powershell.exe -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$kioskDir\start-kiosk.ps1`""
+if (-not $otherAdmins) {
+  Write-Host "There is no other administrator account. Creating '$MaintenanceAdmin' for maintenance."
+  $adminPw = Read-Host -AsSecureString "Choose a password for the maintenance account '$MaintenanceAdmin' (write it down)"
+  if (-not (Get-LocalUser -Name $MaintenanceAdmin -ErrorAction SilentlyContinue)) {
+    New-LocalUser -Name $MaintenanceAdmin -Password $adminPw -PasswordNeverExpires -AccountNeverExpires -Description 'Kiosk maintenance' | Out-Null
+  }
+  Add-LocalGroupMember -Group $adminsGroup -Member $MaintenanceAdmin -ErrorAction SilentlyContinue
+}
 
-# ---- 3. Settings in the kiosk user's own registry ----
+# ---- Settings in the kiosk user's own registry ----
 $loadedHere = $false
 $hive = "Registry::HKEY_USERS\$sid"
 if (-not (Test-Path $hive)) {
@@ -88,11 +79,28 @@ try {
     foreach ($v in $values) { New-ItemProperty -Path $path -Name "$i" -Value $v -PropertyType String -Force | Out-Null; $i++ }
   }
 
-  # Edge instead of the desktop.
-  Set-Value "$hive\Software\Microsoft\Windows NT\CurrentVersion\Winlogon" 'Shell' $shell
-  # No Task Manager.
-  Set-Value "$hive\Software\Microsoft\Windows\CurrentVersion\Policies\System" 'DisableTaskMgr' 1 'DWord'
+  # An earlier version of this script replaced the desktop with Edge - undo that.
+  Remove-ItemProperty -Path "$hive\Software\Microsoft\Windows NT\CurrentVersion\Winlogon" -Name 'Shell' -ErrorAction SilentlyContinue
 
+  # Open Edge with the two sites at sign-in.
+  $pages = $StartPages -join ' '
+  Set-Value "$hive\Software\Microsoft\Windows\CurrentVersion\Run" 'ClassKiosk' "`"$Edge`" --start-maximized --no-first-run $pages"
+
+  # Only the allowed programs can be started; no Run box, Control Panel/Settings or drives.
+  $explorerPol = "$hive\Software\Microsoft\Windows\CurrentVersion\Policies\Explorer"
+  Set-Value $explorerPol 'RestrictRun' 1 'DWord'
+  Set-List "$explorerPol\RestrictRun" $AllowedPrograms
+  Set-Value $explorerPol 'NoRun' 1 'DWord'
+  Set-Value $explorerPol 'NoControlPanel' 1 'DWord'
+  Set-Value $explorerPol 'NoViewOnDrive' 67108863 'DWord'
+  Set-Value "$hive\Software\Microsoft\Windows\CurrentVersion\Policies\System" 'DisableTaskMgr' 1 'DWord'
+  Set-Value "$hive\Software\Policies\Microsoft\Windows\System" 'DisableCMD' 1 'DWord'
+
+  # Touch keyboard: button on the taskbar, and it opens by itself in a text box.
+  Set-Value "$hive\Software\Microsoft\TabletTip\1.7" 'TipbandDesiredVisibility' 1 'DWord'
+  Set-Value "$hive\Software\Microsoft\TabletTip\1.7" 'EnableDesktopModeAutoInvoke' 1 'DWord'
+
+  # Edge.
   $edgePol = "$hive\Software\Policies\Microsoft\Edge"
   Set-List "$edgePol\URLBlocklist" @('*', 'edge://*', 'file://*')
   Set-List "$edgePol\URLAllowlist" $AllowedSites
@@ -102,12 +110,10 @@ try {
   Set-Value $edgePol 'AllowFileSelectionDialogs' 0 'DWord'      # no open/save file windows
   Set-Value $edgePol 'BrowserAddProfileEnabled' 0 'DWord'
   Set-Value $edgePol 'BrowserGuestModeEnabled' 0 'DWord'
-  Set-Value $edgePol 'BrowserSignin' 0 'DWord'
   Set-Value $edgePol 'HideFirstRunExperience' 1 'DWord'
   Set-Value $edgePol 'HubsSidebarEnabled' 0 'DWord'
-  Set-Value $edgePol 'StartupBoostEnabled' 0 'DWord'
-  Set-Value $edgePol 'BackgroundModeEnabled' 0 'DWord'
-  Set-Value $edgePol 'PasswordManagerEnabled' 1 'DWord'         # Edge may save the site passwords (e.g. Mashov)
+  Set-Value $edgePol 'PasswordManagerEnabled' 1 'DWord'         # keep saved usernames and passwords
+  Set-Value $edgePol 'ClearBrowsingDataOnExit' 0 'DWord'        # never wipe the site's data
 } finally {
   if ($loadedHere) {
     [gc]::Collect(); [gc]::WaitForPendingFinalizers()
@@ -115,10 +121,11 @@ try {
   }
 }
 
-# ---- 4. Sign in to the kiosk user automatically when the computer starts ----
+# ---- Sign in to the kiosk user automatically ----
 if (-not $NoAutoLogin) {
+  $pw = Read-Host -AsSecureString "The Windows password of '$KioskUser' (for automatic sign-in; Enter if it has none)"
+  $plain = [Runtime.InteropServices.Marshal]::PtrToStringAuto([Runtime.InteropServices.Marshal]::SecureStringToBSTR($pw))
   $winlogon = 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon'
-  $plain = [Runtime.InteropServices.Marshal]::PtrToStringAuto([Runtime.InteropServices.Marshal]::SecureStringToBSTR($Password))
   Set-ItemProperty $winlogon 'AutoAdminLogon' '1'
   Set-ItemProperty $winlogon 'DefaultUserName' $KioskUser
   Set-ItemProperty $winlogon 'DefaultDomainName' $env:COMPUTERNAME
@@ -126,5 +133,5 @@ if (-not $NoAutoLogin) {
 }
 
 Write-Host ''
-Write-Host 'Done. Restart the computer - it will open straight into the kiosk.'
-Write-Host 'To get out of the kiosk: Ctrl+Alt+Del -> Switch user.'
+Write-Host "Done. Restart the computer - it signs in to '$KioskUser' and opens the class site."
+Write-Host 'Maintenance: Start -> the user picture -> Sign out (or Switch user) -> the administrator account.'
