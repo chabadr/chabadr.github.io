@@ -331,6 +331,7 @@ import { getFirestore, doc, getDoc, setDoc, addDoc, deleteDoc, collection, query
 import { firebaseConfig, isFirebaseConfigured } from "./firebase-config.js";
 import { sms4freeConfig } from "./sms-config.js";
 import { mountPageNav } from "./page-nav.js";
+import { setSaveFailedBanner } from "./save-banner.js";
 
 const STORAGE_KEY = 'classroom-points-v1';
 const FIRESTORE_COLLECTION = 'classroom_points';
@@ -698,20 +699,35 @@ async function renderPhonesTab(container){
     const sort = { key: null, dir: 1 };
     const pendingSaves = new Map();
     let inFlight = 0;
+    // A phone that failed to save stays as typed, the big "שמירה נכשלה"
+    // notice stays up, and it is retried until it goes through (a save that
+    // hangs offline counts as failed after 8 seconds).
+    const failedFields = new Map();
+    let stalledSaves = 0;
+    const refreshBanner = () => setSaveFailedBanner(failedFields.size > 0 || stalledSaves > 0);
 
     async function saveField(r, role){
-      pendingSaves.delete(r.key + ':' + role);
+      const k = r.key + ':' + role;
+      pendingSaves.delete(k);
       inFlight++;
       saveStatus.textContent = 'שומר…';
+      let stalled = false;
+      const stallTimer = setTimeout(() => { stalled = true; stalledSaves++; refreshBanner(); }, 8000);
       try{
         await setDoc(phonesDocRef, { [r.group]: { [r.id]: { [role]: normalizePhone(r[role]) } } }, { merge: true });
-        inFlight--;
-        if (inFlight === 0 && pendingSaves.size === 0) saveStatus.textContent = 'נשמר ✓';
+        failedFields.delete(k);
       } catch(e){
-        inFlight--;
-        saveStatus.textContent = 'שמירה נכשלה: ' + (e && e.message ? e.message : String(e));
+        failedFields.set(k, () => saveField(r, role));
+        scheduleSave(r, role, 5000);
       }
+      clearTimeout(stallTimer);
+      if (stalled) stalledSaves--;
+      inFlight--;
+      refreshBanner();
+      if (failedFields.size > 0) saveStatus.textContent = 'שמירה נכשלה - מנסה שוב…';
+      else if (inFlight === 0 && pendingSaves.size === 0) saveStatus.textContent = 'נשמר ✓';
     }
+    window.addEventListener('online', () => failedFields.forEach(retry => retry()));
 
     function scheduleSave(r, role, delay){
       const k = r.key + ':' + role;

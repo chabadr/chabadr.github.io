@@ -837,6 +837,7 @@ import {
 } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
 import { firebaseConfig, isFirebaseConfigured } from "./firebase-config.js";
 import { mountPageNav } from "./page-nav.js";
+import { setSaveFailedBanner } from "./save-banner.js";
 
 function showSetupNeededMessage(){
   document.body.innerHTML = '';
@@ -1087,6 +1088,7 @@ async function storageSet(value){
 }
 
 async function refreshArchiveAndRender(){
+  if (pendingArchiveOps.length || archiveOpsStalled) return;
   const [days, weeks] = await Promise.all([fetchArchiveDays(), fetchArchiveWeeks()]);
   state.archive = [...days, ...weeks];
   if (document.getElementById('frequentArchiveView').style.display !== 'none') renderFrequentFlyerView();
@@ -1096,6 +1098,7 @@ async function refreshArchiveAndRender(){
 function subscribeToRemoteStateChanges(){
   onSnapshot(stateDocRef, (snap) => {
     if (!snap.exists() || snap.metadata.hasPendingWrites) return;
+    if (mainSaveFailed || mainSaveStalled) return;
     const json = JSON.stringify(snap.data());
     if (json === lastSyncedMainJson) return;
     lastSyncedMainJson = json;
@@ -1239,21 +1242,109 @@ async function loadState(){
   state = defaultState();
 }
 
-async function saveState(){
-  try{
-    setStatus('שומר…');
-    const res = await storageSet(JSON.stringify(state));
-    if (!res){
-      setStatus('שמירה נכשלה');
-      setTimeout(() => setStatus(''), 3000);
-      return;
+// ---- Saves that fail ----
+// Nothing on screen is rolled back when a save fails: a large "שמירה נכשלה"
+// notice stays up (see save-banner.js), work can go on, and the failed saves
+// are retried every few seconds (and as soon as the connection is back)
+// until they go through. A save that simply hangs (offline) counts as failed
+// after SAVE_STALL_MS. While anything is unsaved, data arriving from other
+// devices is not drawn over this screen's unsaved changes.
+const SAVE_STALL_MS = 8000;
+const SAVE_RETRY_MS = 5000;
+let mainSaveSeq = 0;
+let mainSaveFailed = false;
+let mainSaveStalled = false;
+// Archive edits that failed, in the order they were made; each one re-reads
+// its document fresh when retried, so retrying is always safe.
+const pendingArchiveOps = [];
+let archiveOpsStalled = 0;
+let saveRetryTimer = null;
+let saveRetryRunning = false;
+
+function hasUnsavedChanges(){
+  return mainSaveFailed || mainSaveStalled || pendingArchiveOps.length > 0 || archiveOpsStalled > 0;
+}
+
+function refreshSaveBanner(){
+  setSaveFailedBanner(hasUnsavedChanges());
+}
+
+function scheduleSaveRetry(){
+  if (!saveRetryTimer) saveRetryTimer = setTimeout(retryFailedSaves, SAVE_RETRY_MS);
+}
+
+async function retryFailedSaves(){
+  clearTimeout(saveRetryTimer);
+  saveRetryTimer = null;
+  if (saveRetryRunning) return;
+  saveRetryRunning = true;
+  const hadArchiveOps = pendingArchiveOps.length > 0;
+  while (pendingArchiveOps.length){
+    try{
+      await pendingArchiveOps[0]();
+      pendingArchiveOps.shift();
+    } catch(e){
+      break;
     }
+  }
+  if (mainSaveFailed) await saveState();
+  saveRetryRunning = false;
+  refreshSaveBanner();
+  if (pendingArchiveOps.length || mainSaveFailed) scheduleSaveRetry();
+  else if (hadArchiveOps) refreshArchiveAndRender();
+}
+
+window.addEventListener('online', () => { if (hasUnsavedChanges()) retryFailedSaves(); });
+
+async function saveState(){
+  const seq = ++mainSaveSeq;
+  setStatus('שומר…');
+  const stallTimer = setTimeout(() => {
+    if (seq !== mainSaveSeq) return;
+    mainSaveStalled = true;
+    refreshSaveBanner();
+  }, SAVE_STALL_MS);
+  const res = await storageSet(JSON.stringify(state));
+  clearTimeout(stallTimer);
+  // A newer save already carries everything this one had.
+  if (seq !== mainSaveSeq) return;
+  mainSaveStalled = false;
+  if (!res){
+    mainSaveFailed = true;
+    setStatus('שמירה נכשלה');
+    scheduleSaveRetry();
+  } else {
+    mainSaveFailed = false;
+    setStatus('נשמר');
+    setTimeout(() => setStatus(''), 1200);
+  }
+  refreshSaveBanner();
+}
+
+// Runs one archive edit; if it fails it is queued for retry (and so is any
+// later edit, to keep them in order) instead of being dropped.
+async function runArchiveSave(op){
+  if (pendingArchiveOps.length){
+    pendingArchiveOps.push(op);
+    refreshSaveBanner();
+    scheduleSaveRetry();
+    return;
+  }
+  setStatus('שומר…');
+  let stalled = false;
+  const stallTimer = setTimeout(() => { stalled = true; archiveOpsStalled++; refreshSaveBanner(); }, SAVE_STALL_MS);
+  try{
+    await op();
     setStatus('נשמר');
     setTimeout(() => setStatus(''), 1200);
   } catch(e){
-    setStatus('שגיאת שמירה');
-    setTimeout(() => setStatus(''), 3000);
+    pendingArchiveOps.push(op);
+    setStatus('שמירה נכשלה');
+    scheduleSaveRetry();
   }
+  clearTimeout(stallTimer);
+  if (stalled) archiveOpsStalled--;
+  refreshSaveBanner();
 }
 
 function studentTotal(student){
@@ -1711,60 +1802,37 @@ async function doResetGuarded(){
 // happens to hold - so an edit here can't silently undo someone else's
 // newer change to the same day/week.
 async function updateWeekStudentRecord(weekKey, studentId, mutatorFn){
-  try{
-    setStatus('שומר…');
-    await runTransaction(firestoreDb, async (tx) => {
-      const ref = weekDocRef(weekKey);
-      const snap = await tx.get(ref);
-      let data = snap.exists() ? snap.data() : {
-        type: 'weekly', title: 'הנוסע המתמיד', weekKey: weekKey,
-        weekStart: getWeekStart(new Date(weekKey + 'T12:00:00')).toISOString(),
-        date: new Date().toISOString(), students: [], weekParsha: null
-      };
-      if (!Array.isArray(data.students)) data.students = [];
-      let rec = data.students.find(s => s.id === studentId);
-      if (!rec){ rec = { id: studentId, days: {} }; data.students.push(rec); }
-      mutatorFn(rec);
-      tx.set(ref, data);
-    });
-    setStatus('נשמר');
-    setTimeout(() => setStatus(''), 1200);
-  } catch(e){
-    reportArchiveSaveFailure(e);
-  }
-}
-
-// A failed archive edit must not look saved: say so clearly and redraw the
-// tables from what the server actually holds.
-function reportArchiveSaveFailure(e){
-  setStatus('שמירה נכשלה');
-  setTimeout(() => setStatus(''), 3000);
-  showModal('השינוי בארכיון לא נשמר (' + (e && e.message ? e.message : String(e)) + '). בדקו את החיבור לאינטרנט ונסו שוב.', { showCancel: false, confirmText: 'הבנתי' });
-  refreshArchiveAndRender();
+  await runArchiveSave(() => runTransaction(firestoreDb, async (tx) => {
+    const ref = weekDocRef(weekKey);
+    const snap = await tx.get(ref);
+    let data = snap.exists() ? snap.data() : {
+      type: 'weekly', title: 'הנוסע המתמיד', weekKey: weekKey,
+      weekStart: getWeekStart(new Date(weekKey + 'T12:00:00')).toISOString(),
+      date: new Date().toISOString(), students: [], weekParsha: null
+    };
+    if (!Array.isArray(data.students)) data.students = [];
+    let rec = data.students.find(s => s.id === studentId);
+    if (!rec){ rec = { id: studentId, days: {} }; data.students.push(rec); }
+    mutatorFn(rec);
+    tx.set(ref, data);
+  }));
 }
 
 async function updateDailyArchiveRecord(dayKey, studentId, isExtra, mutatorFn){
-  try{
-    setStatus('שומר…');
-    await runTransaction(firestoreDb, async (tx) => {
-      const snap = await tx.get(dailyArchiveDocRef);
-      const data = snap.exists() ? snap.data() : { days: [] };
-      const days = Array.isArray(data.days) ? data.days : [];
-      const entry = days.find(e => dayKeyOf(e.date) === dayKey);
-      if (!entry) return;
-      if (isExtra && !Array.isArray(entry.metivtaExtraStudents)) entry.metivtaExtraStudents = [];
-      if (!isExtra && !Array.isArray(entry.students)) entry.students = [];
-      const list = isExtra ? entry.metivtaExtraStudents : entry.students;
-      let rec = list.find(x => x.id === studentId);
-      if (!rec){ rec = { id: studentId }; list.push(rec); }
-      mutatorFn(rec);
-      tx.set(dailyArchiveDocRef, { days });
-    });
-    setStatus('נשמר');
-    setTimeout(() => setStatus(''), 1200);
-  } catch(e){
-    reportArchiveSaveFailure(e);
-  }
+  await runArchiveSave(() => runTransaction(firestoreDb, async (tx) => {
+    const snap = await tx.get(dailyArchiveDocRef);
+    const data = snap.exists() ? snap.data() : { days: [] };
+    const days = Array.isArray(data.days) ? data.days : [];
+    const entry = days.find(e => dayKeyOf(e.date) === dayKey);
+    if (!entry) return;
+    if (isExtra && !Array.isArray(entry.metivtaExtraStudents)) entry.metivtaExtraStudents = [];
+    if (!isExtra && !Array.isArray(entry.students)) entry.students = [];
+    const list = isExtra ? entry.metivtaExtraStudents : entry.students;
+    let rec = list.find(x => x.id === studentId);
+    if (!rec){ rec = { id: studentId }; list.push(rec); }
+    mutatorFn(rec);
+    tx.set(dailyArchiveDocRef, { days });
+  }));
 }
 
 // A day is archived (and the board starts fresh) at 01:00 at night - by the
