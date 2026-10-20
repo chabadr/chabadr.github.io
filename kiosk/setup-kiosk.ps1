@@ -96,9 +96,9 @@ try {
   Set-Value "$hive\Software\Microsoft\Windows\CurrentVersion\Policies\System" 'DisableTaskMgr' 1 'DWord'
   Set-Value "$hive\Software\Policies\Microsoft\Windows\System" 'DisableCMD' 1 'DWord'
 
-  # Touch keyboard: button on the taskbar, and it opens by itself in a text box.
+  # On-screen keyboard button on the taskbar (works with the mouse - there is
+  # no physical keyboard).
   Set-Value "$hive\Software\Microsoft\TabletTip\1.7" 'TipbandDesiredVisibility' 1 'DWord'
-  Set-Value "$hive\Software\Microsoft\TabletTip\1.7" 'EnableDesktopModeAutoInvoke' 1 'DWord'
 
   # Edge.
   $edgePol = "$hive\Software\Policies\Microsoft\Edge"

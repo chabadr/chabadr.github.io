@@ -101,7 +101,7 @@ export function mountPageNav({ getCurrent, onNavigate }){
     list.appendChild(a);
   });
 
-  // Reloading the page without a keyboard (touch screen kiosk).
+  // Reloading the page with the mouse only (the kiosk has no keyboard).
   const reload = document.createElement('a');
   reload.className = 'page-nav-option page-nav-reload';
   reload.href = '#';
