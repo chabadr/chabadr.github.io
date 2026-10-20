@@ -333,6 +333,8 @@ import { sms4freeConfig } from "./sms-config.js";
 import { mountPageNav } from "./page-nav.js";
 import { setSaveFailedBanner, describeSaveError, SAVE_STALLED_REASON } from "./save-banner.js";
 
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
+
 const STORAGE_KEY = 'classroom-points-v1';
 const FIRESTORE_COLLECTION = 'classroom_points';
 const ACCESS_CODE = '963';

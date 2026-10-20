@@ -24,6 +24,11 @@ function todayStr(){
   return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
 }
 
+function activityDayStr(){
+  const d = new Date(Date.now() - AUTO_RESET_HOUR * 3600000);
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+}
+
 function getWeekStart(date){
   const d = new Date(date);
   d.setHours(0, 0, 0, 0);
@@ -60,6 +65,9 @@ function metivtaDayScore(f){
 }
 
 function mergeEarlierDailyEntry(target, earlier){
+  const times = { ...(earlier.editTimes || {}) };
+  Object.entries(target.editTimes || {}).forEach(([k, t]) => { times[k] = Math.max(times[k] || 0, t); });
+  target.editTimes = times;
   const sumCats = (a, b) => {
     const out = { ...(b || {}) };
     Object.keys(a || {}).forEach(k => { out[k] = (a[k] || 0) + (out[k] || 0); });
@@ -99,7 +107,11 @@ function computeDailyResetUpdate(mainData, dailyDays, weeklyEntry){
     metivtaExtraStudents: (mainData.metivtaExtra || []).map(s => ({
       id: s.id,
       metivtaFlags: { ...(s.metivtaFlags || defaultMetivtaFlags) }
-    }))
+    })),
+    // The day's cell edit times ('d:' keys) move with it into the archive, so
+    // a late edit of this day is still judged against them; whole-site
+    // settings ('g:' keys) stay on the board.
+    editTimes: Object.fromEntries(Object.entries(mainData.editTimes || {}).filter(([k]) => k.startsWith('d:')))
   };
 
   let days = Array.isArray(dailyDays) ? dailyDays.slice() : [];
@@ -219,19 +231,15 @@ function computeDailyResetUpdate(mainData, dailyDays, weeklyEntry){
     s.metivtaFlags = { ok: false, late: false, leftEarly: false, disturbCount: 0 };
   });
   newMainData.lastAutoResetDate = todayStr();
+  newMainData.lastArchivedDay = mainData.lastActivityDate || null;
   newMainData.lastActivityDate = null;
+  newMainData.editTimes = Object.fromEntries(Object.entries(mainData.editTimes || {}).filter(([k]) => !k.startsWith('d:')));
 
   return { newMainData, newDailyDays: days, newWeeklyEntry: weeklyEntryOut, weekKey };
 }
 
 function isLiveDayDueForArchive(data){
-  if (!data.lastActivityDate) return false;
-  const today = todayStr();
-  if (data.lastActivityDate >= today) return false;
-  const y = new Date();
-  y.setDate(y.getDate() - 1);
-  const yesterday = y.getFullYear() + '-' + String(y.getMonth() + 1).padStart(2, '0') + '-' + String(y.getDate()).padStart(2, '0');
-  return data.lastActivityDate < yesterday || new Date().getHours() >= AUTO_RESET_HOUR;
+  return !!data.lastActivityDate && data.lastActivityDate < activityDayStr();
 }
 
 module.exports = { computeDailyResetUpdate, isLiveDayDueForArchive, getWeekKey, todayStr };

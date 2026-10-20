@@ -833,7 +833,8 @@
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-app.js";
 import {
-  getFirestore, doc, getDoc, getDocs, collection, setDoc, onSnapshot, runTransaction,
+  getFirestore, initializeFirestore, persistentLocalCache, persistentMultipleTabManager,
+  doc, getDoc, getDocs, collection, setDoc, onSnapshot, runTransaction,
 } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
 import { firebaseConfig, isFirebaseConfigured } from "./firebase-config.js";
 import { mountPageNav } from "./page-nav.js";
@@ -941,15 +942,7 @@ function metivtaFullName(id, isExtra){
 }
 
 function setMetivtaNamePart(id, isExtra, part, value){
-  if (isExtra){
-    if (!state.metivtaExtraNames || typeof state.metivtaExtraNames !== 'object') state.metivtaExtraNames = {};
-  } else if (!state.metivtaNames || typeof state.metivtaNames !== 'object'){
-    state.metivtaNames = {};
-  }
-  const map = isExtra ? state.metivtaExtraNames : state.metivtaNames;
-  const entry = normalizeMetivtaNameEntry(map[id]);
-  entry[part] = value;
-  map[id] = entry;
+  commitOp({ kind: 'mname', group: isExtra ? 'extra' : 'main', sid: id, part, value });
 }
 
 // "כיתה" (class) per student, main group defaults to 2 and the extra group
@@ -961,13 +954,7 @@ function metivtaClassValue(id, isExtra){
 }
 
 function setMetivtaClassValue(id, isExtra, value){
-  if (isExtra){
-    if (!state.metivtaExtraClass || typeof state.metivtaExtraClass !== 'object') state.metivtaExtraClass = {};
-    state.metivtaExtraClass[id] = value;
-  } else {
-    if (!state.metivtaClass || typeof state.metivtaClass !== 'object') state.metivtaClass = {};
-    state.metivtaClass[id] = value;
-  }
+  commitOp({ kind: 'mclass', group: isExtra ? 'extra' : 'main', sid: id, value });
 }
 
 function metivtaStudentName(id){
@@ -979,7 +966,18 @@ const STORAGE_KEY = 'classroom-points-v1';
 const FIRESTORE_COLLECTION = 'classroom_points';
 
 const firebaseApp = isFirebaseConfigured ? initializeApp(firebaseConfig) : null;
-const firestoreDb = firebaseApp ? getFirestore(firebaseApp) : null;
+// The data is also kept in this browser (IndexedDB), so the site opens with
+// the last known data even without internet. Falls back to memory only if
+// the browser doesn't allow it.
+const firestoreDb = firebaseApp ? (() => {
+  try{
+    return initializeFirestore(firebaseApp, { localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() }) });
+  } catch(e){
+    return getFirestore(firebaseApp);
+  }
+})() : null;
+
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
 
 // Data model: the archive (daily point-history + the weekly "הנוסע המתמיד"
 // entries) lives in its own documents, separate from the live, constantly-
@@ -998,7 +996,7 @@ function weekDocRef(weekKey){
   return doc(firestoreDb, FIRESTORE_COLLECTION, STORAGE_KEY, 'archiveWeeks', weekKey);
 }
 
-let lastSyncedMainJson = null;
+let lastServerMainJson = null;
 
 async function fetchArchiveDays(){
   try{
@@ -1055,62 +1053,35 @@ async function migrateArchiveSplitIfNeeded(mainData){
   }
 }
 
-// Deliberately does not swallow errors into a null return - a transient
-// read failure must never look identical to "this document genuinely
-// doesn't exist yet", because loadState() treats the latter as license to
-// start from a blank slate. Confusing the two let a normal page load, on a
-// bad network blip, silently initialize with empty data that a single
-// subsequent save would then write over the real board.
-async function storageGet(){
-  const snap = await getDoc(stateDocRef);
-  if (!snap.exists()) return null;
-  let mainData = snap.data();
-  if (!mainData.archiveSplitV1){
-    mainData = await migrateArchiveSplitIfNeeded(mainData);
-  }
-  lastSyncedMainJson = JSON.stringify(mainData);
-  const [days, weeks] = await Promise.all([fetchArchiveDays(), fetchArchiveWeeks()]);
-  mainData = JSON.parse(JSON.stringify(mainData));
-  mainData.archive = [...days, ...weeks];
-  return { value: JSON.stringify(mainData) };
+async function fetchArchiveWeeksMap(){
+  const map = {};
+  (await fetchArchiveWeeks()).forEach(w => { if (w && w.weekKey) map[w.weekKey] = w; });
+  return map;
 }
 
-async function storageSet(value){
-  try{
-    const body = JSON.parse(value);
-    delete body.archive;
-    await setDoc(stateDocRef, body);
-    lastSyncedMainJson = JSON.stringify(body);
-    return { ok: true };
-  } catch(e){
-    return { ok: false, error: e };
-  }
-}
-
+// Re-reads the archive documents (another device may have archived a day or
+// edited the archive) and redraws.
 async function refreshArchiveAndRender(){
-  if (pendingArchiveOps.length || archiveOpsStalled) return;
-  const [days, weeks] = await Promise.all([fetchArchiveDays(), fetchArchiveWeeks()]);
-  state.archive = [...days, ...weeks];
-  if (document.getElementById('frequentArchiveView').style.display !== 'none') renderFrequentFlyerView();
-  if (document.getElementById('metivtaView').style.display !== 'none') renderMetivtaView();
+  if (!serverSnap) return;
+  const [days, weeks] = await Promise.all([fetchArchiveDays(), fetchArchiveWeeksMap()]);
+  serverSnap.dailyDays = days;
+  serverSnap.weeks = weeks;
+  rebuildViewAndRender();
 }
 
 function subscribeToRemoteStateChanges(){
   onSnapshot(stateDocRef, (snap) => {
     if (!snap.exists() || snap.metadata.hasPendingWrites) return;
-    if (mainSaveFailed || mainSaveStalled) return;
-    const json = JSON.stringify(snap.data());
-    if (json === lastSyncedMainJson) return;
-    lastSyncedMainJson = json;
-    let parsed;
-    try{ parsed = JSON.parse(json); } catch(e){ return; }
-    if (!parsed || !Array.isArray(parsed.students) || parsed.students.length !== TOTAL_STUDENTS) return;
-    parsed.archive = Array.isArray(state && state.archive) ? state.archive : [];
-    state = parsed;
-    render();
+    const data = snap.data();
+    if (!data || !Array.isArray(data.students) || data.students.length !== TOTAL_STUDENTS) return;
+    const json = JSON.stringify(data);
+    if (json === lastServerMainJson) return;
+    lastServerMainJson = json;
+    serverSnap.main = data;
+    rebuildViewAndRender();
     refreshArchiveAndRender();
   }, (err) => {
-    // realtime sync unavailable; local get/set on next load still works
+    // realtime sync unavailable; changes are still synced by syncPendingOps
   });
 }
 
@@ -1154,204 +1125,535 @@ function setStatus(msg){
   if (el) el.textContent = msg;
 }
 
-async function loadState(){
-  const result = await storageGet();
-  if (result && result.value){
-    const parsed = JSON.parse(result.value);
-    if (parsed && Array.isArray(parsed.students) && parsed.students.length === TOTAL_STUDENTS){
-      if (!Array.isArray(parsed.mergedActive) || parsed.mergedActive.length !== MERGE_GROUPS.length){
-        parsed.mergedActive = MERGE_GROUPS.map(g => g[0]);
-      }
-      if (parsed.minusShopActive !== 'minus' && parsed.minusShopActive !== 'shop'){
-        parsed.minusShopActive = 'minus';
-      }
-      parsed.students.forEach(s => {
-        if (typeof s.purchases !== 'number') s.purchases = 0;
-        if (!s.cats) s.cats = {};
-        if (typeof s.cats.c5 !== 'number') s.cats.c5 = 0;
-        if (typeof s.cats.c6 !== 'number') s.cats.c6 = 0;
-        if (typeof s.cats.c7 !== 'number') s.cats.c7 = 0;
-        if (typeof s.cats.c8 !== 'number') s.cats.c8 = 0;
-        if (!s.frequent) s.frequent = { mikvaot: 0, rambam: 0 };
-        if (!s.frequentFrozen) s.frequentFrozen = { mikvaot: s.frequent.mikvaot || 0, rambam: s.frequent.rambam || 0 };
-        if (!s.metivta) s.metivta = { attendance: 0, behavior: 0 };
-        if (!s.metivtaFrozen) s.metivtaFrozen = { attendance: s.metivta.attendance || 0, behavior: s.metivta.behavior || 0 };
-        if (typeof s.c5Total !== 'number') s.c5Total = 0;
-        if (typeof s.minusTotal !== 'number') s.minusTotal = 0;
-      });
-      if (!Array.isArray(parsed.metivtaExtra) || parsed.metivtaExtra.length !== 23){
-        const existing = Array.isArray(parsed.metivtaExtra) ? parsed.metivtaExtra : [];
-        const byId = {};
-        existing.forEach(s => { byId[s.id] = s; });
-        const metivtaExtra = [];
-        for (let i = 1; i <= 23; i++){
-          metivtaExtra.push(byId[i] || { id: i, metivta: { attendance: 0, behavior: 0 }, metivtaFrozen: { attendance: 0, behavior: 0 } });
-        }
-        parsed.metivtaExtra = metivtaExtra;
-      }
-      if (!Array.isArray(parsed.archive)) parsed.archive = [];
-      {
-        const dailyEntries = parsed.archive.filter(e => e.type !== 'weekly');
-        const weeklyEntries = parsed.archive.filter(e => e.type === 'weekly');
-        const MAX_DAILY = 90;
-        const MAX_WEEKLY = 26;
-        if (dailyEntries.length > MAX_DAILY || weeklyEntries.length > MAX_WEEKLY){
-          const keptDaily = dailyEntries.slice(0, MAX_DAILY);
-          const keptWeekly = weeklyEntries.slice(0, MAX_WEEKLY);
-          parsed.archive = parsed.archive.filter(e => keptDaily.includes(e) || keptWeekly.includes(e));
-        }
-      }
-      if (!parsed.testWeekCleanupDone){
-        const cleanupPrevWeekStart = getWeekStart(new Date());
-        cleanupPrevWeekStart.setDate(cleanupPrevWeekStart.getDate() - 7);
-        const cleanupPrevWeekKey = getWeekKey(cleanupPrevWeekStart);
-        parsed.archive = parsed.archive.filter(e => !(e.type === 'weekly' && e.weekKey === cleanupPrevWeekKey));
-        parsed.testWeekCleanupDone = true;
-      }
-      if (!parsed.fixTzaali20260908){
-        const tzaali = parsed.students.find(s => s.id === 1);
-        if (tzaali){
-          let plusReduceLeft = 32;
-          const c5TotalReduce = Math.min(plusReduceLeft, tzaali.c5Total || 0);
-          tzaali.c5Total = (tzaali.c5Total || 0) - c5TotalReduce;
-          plusReduceLeft -= c5TotalReduce;
-          if (plusReduceLeft > 0 && tzaali.cats){
-            const c5Reduce = Math.min(plusReduceLeft, tzaali.cats.c5 || 0);
-            tzaali.cats.c5 = (tzaali.cats.c5 || 0) - c5Reduce;
-          }
-          tzaali.minusTotal = Math.min(0, (tzaali.minusTotal || 0) + 28);
-        }
-        parsed.fixTzaali20260908 = true;
-      }
-      if (typeof parsed.lastActivityDate === 'undefined') parsed.lastActivityDate = null;
-      if (typeof parsed.lastAutoResetDate === 'undefined') parsed.lastAutoResetDate = null;
-      if (!parsed.metivtaNames || typeof parsed.metivtaNames !== 'object') parsed.metivtaNames = {};
-      if (!parsed.metivtaExtraNames || typeof parsed.metivtaExtraNames !== 'object') parsed.metivtaExtraNames = {};
-      if (!parsed.metivtaClass || typeof parsed.metivtaClass !== 'object') parsed.metivtaClass = {};
-      if (!parsed.metivtaExtraClass || typeof parsed.metivtaExtraClass !== 'object') parsed.metivtaExtraClass = {};
-      if (!Array.isArray(parsed.metivtaArchivedKeys)) parsed.metivtaArchivedKeys = [];
-      state = parsed;
-      return;
-    }
-    // The document exists but its shape is unexpected - treat this as an
-    // error (see storageGet's comment) rather than silently starting blank.
-    throw new Error('הנתונים שנטענו מהשרת אינם בפורמט תקין');
+// Fills in fields missing from older saved data. Works on a copy - used both
+// for what is shown and for what a sync transaction writes back.
+function normalizeMain(raw){
+  const parsed = JSON.parse(JSON.stringify(raw));
+  delete parsed.archive;
+  if (!Array.isArray(parsed.mergedActive) || parsed.mergedActive.length !== MERGE_GROUPS.length){
+    parsed.mergedActive = MERGE_GROUPS.map(g => g[0]);
   }
-  // storageGet() returned null only because the document genuinely doesn't
-  // exist yet - the one legitimate case for starting from a blank board.
-  state = defaultState();
+  if (parsed.minusShopActive !== 'minus' && parsed.minusShopActive !== 'shop'){
+    parsed.minusShopActive = 'minus';
+  }
+  parsed.students.forEach(s => {
+    if (typeof s.purchases !== 'number') s.purchases = 0;
+    if (!s.cats) s.cats = {};
+    CATEGORIES.forEach(c => { if (typeof s.cats[c.key] !== 'number') s.cats[c.key] = 0; });
+    if (!s.frequent) s.frequent = { mikvaot: 0, rambam: 0 };
+    if (!s.frequentFrozen) s.frequentFrozen = { mikvaot: s.frequent.mikvaot || 0, rambam: s.frequent.rambam || 0 };
+    if (!s.metivta) s.metivta = { attendance: 0, behavior: 0 };
+    if (!s.metivtaFrozen) s.metivtaFrozen = { attendance: s.metivta.attendance || 0, behavior: s.metivta.behavior || 0 };
+    if (typeof s.c5Total !== 'number') s.c5Total = 0;
+    if (typeof s.minusTotal !== 'number') s.minusTotal = 0;
+    if (typeof s.cumulative !== 'number') s.cumulative = 0;
+  });
+  if (!Array.isArray(parsed.metivtaExtra) || parsed.metivtaExtra.length !== 23){
+    const existing = Array.isArray(parsed.metivtaExtra) ? parsed.metivtaExtra : [];
+    const byId = {};
+    existing.forEach(s => { byId[s.id] = s; });
+    const metivtaExtra = [];
+    for (let i = 1; i <= 23; i++){
+      metivtaExtra.push(byId[i] || { id: i, metivta: { attendance: 0, behavior: 0 }, metivtaFrozen: { attendance: 0, behavior: 0 } });
+    }
+    parsed.metivtaExtra = metivtaExtra;
+  }
+  if (typeof parsed.lastActivityDate === 'undefined') parsed.lastActivityDate = null;
+  if (typeof parsed.lastAutoResetDate === 'undefined') parsed.lastAutoResetDate = null;
+  ['metivtaNames', 'metivtaExtraNames', 'metivtaClass', 'metivtaExtraClass', 'editTimes'].forEach(k => {
+    if (!parsed[k] || typeof parsed[k] !== 'object' || Array.isArray(parsed[k])) parsed[k] = {};
+  });
+  if (!Array.isArray(parsed.metivtaArchivedKeys)) parsed.metivtaArchivedKeys = [];
+  if (!Array.isArray(parsed.recentOpIds)) parsed.recentOpIds = [];
+  return parsed;
 }
 
-// ---- Saves that fail ----
-// Nothing on screen is rolled back when a save fails: a large "שמירה נכשלה"
-// notice stays up (see save-banner.js), work can go on, and the failed saves
-// are retried every few seconds (and as soon as the connection is back)
-// until they go through. A save that simply hangs (offline) counts as failed
-// after SAVE_STALL_MS. While anything is unsaved, data arriving from other
-// devices is not drawn over this screen's unsaved changes.
+function emptyMainDoc(){
+  const d = defaultState();
+  delete d.archive;
+  return d;
+}
+
+// Deliberately does not swallow a failed read into "no data" - a transient
+// read failure must never look identical to "this document genuinely
+// doesn't exist yet", which is the one case that starts from a blank board.
+async function loadState(){
+  const snap = await getDoc(stateDocRef);
+  let main = snap.exists() ? snap.data() : null;
+  if (main && !main.archiveSplitV1) main = await migrateArchiveSplitIfNeeded(main);
+  if (main && !(Array.isArray(main.students) && main.students.length === TOTAL_STUDENTS)){
+    throw new Error('הנתונים שנטענו מהשרת אינם בפורמט תקין');
+  }
+  if (main) lastServerMainJson = JSON.stringify(main);
+  const [days, weeks] = await Promise.all([fetchArchiveDays(), fetchArchiveWeeksMap()]);
+  serverSnap = { main: main || emptyMainDoc(), dailyDays: days, weeks };
+  rebuildView();
+}
+
+// ---- Saving: every change is a small operation ----
+// A click never writes the whole board. Each change becomes an operation
+// ("student 3, 8:10 -> 3 points") that is kept in this browser's storage
+// until the server has it, so nothing is lost offline, on a refresh or when
+// the computer is switched off. Syncing replays the waiting operations, in
+// a transaction, on top of the server's current data - other computers'
+// changes are never overwritten wholesale.
+//
+// - Last edit wins: an operation that sets a cell carries the time it was
+//   made, and every document keeps the time of each cell's latest edit
+//   (editTimes). An older edit that arrives late never replaces a newer one.
+// - Additive changes (minus points, purchases, closing the "+" round) are
+//   applied as they are, so changes from two computers add up.
+// - Each operation is applied once: the main document remembers the ids of
+//   recently applied operations (recentOpIds).
+// - An operation is dated by the day it was made (days switch at 01:00). If
+//   that day was already archived by the time it reaches the server, it is
+//   applied to that day in the archive instead of to today's board; if the
+//   board still holds an earlier day, that day is archived first.
+//
+// What is drawn is always: the last copy read from the server (serverSnap)
+// + the operations still waiting (pendingOps).
+const PENDING_OPS_KEY = 'classroom-pending-ops-v1';
+const MAX_RECENT_OP_IDS = 400;
+const SYNC_BATCH = 40;
 const SAVE_STALL_MS = 8000;
 const SAVE_RETRY_MS = 5000;
-let mainSaveSeq = 0;
-let mainSaveFailed = false;
-let mainSaveStalled = false;
-// Archive edits that failed, in the order they were made; each one re-reads
-// its document fresh when retried, so retrying is always safe.
-const pendingArchiveOps = [];
-let archiveOpsStalled = 0;
-let saveRetryTimer = null;
-let saveRetryRunning = false;
+
+let serverSnap = null; // { main, dailyDays, weeks: { weekKey: doc } }
+let pendingOps = loadPendingOps();
+let syncRunning = false;
+let syncTimer = null;
+let syncFailed = false;
+let syncStalled = false;
 let lastSaveFailureReason = '';
+let lastViewJson = '';
+
+function loadPendingOps(){
+  try{
+    const list = JSON.parse(localStorage.getItem(PENDING_OPS_KEY) || '[]');
+    return Array.isArray(list) ? list : [];
+  } catch(e){
+    return [];
+  }
+}
+
+function persistPendingOps(){
+  try{ localStorage.setItem(PENDING_OPS_KEY, JSON.stringify(pendingOps)); } catch(e){}
+}
+
+// Another tab of the site on this computer changed the waiting list.
+window.addEventListener('storage', (e) => {
+  if (e.key !== PENDING_OPS_KEY) return;
+  pendingOps = loadPendingOps();
+  if (serverSnap) rebuildViewAndRender();
+});
+
+// Kinds that change today's board (dated by the day they were made).
+const DAY_OP_KINDS = new Set(['cat', 'minus', 'purchase', 'resetCol', 'freq', 'mflags']);
+
+function newOpId(){
+  return Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10);
+}
+
+function commitOp(op){
+  op.id = newOpId();
+  op.t = Date.now();
+  if (DAY_OP_KINDS.has(op.kind)) op.day = activityDayStr();
+  pendingOps.push(op);
+  persistPendingOps();
+  rebuildViewAndRender();
+  scheduleSync(0);
+}
+
+function cloneSnap(snap){
+  return JSON.parse(JSON.stringify(snap));
+}
+
+function rebuildView(){
+  const applied = new Set(serverSnap.main.recentOpIds || []);
+  if (pendingOps.some(o => applied.has(o.id))){
+    pendingOps = pendingOps.filter(o => !applied.has(o.id));
+    persistPendingOps();
+  }
+  const snap = cloneSnap(serverSnap);
+  snap.main = normalizeMain(snap.main);
+  applyOpsToSnapshot(snap, pendingOps);
+  const view = snap.main;
+  view.archive = [...snap.dailyDays, ...Object.values(snap.weeks)];
+  state = view;
+}
+
+// Redraws only when what is shown actually changed, so a sync that merely
+// confirms what is already on screen doesn't close an open dropdown.
+function rebuildViewAndRender(){
+  rebuildView();
+  const json = JSON.stringify(state);
+  refreshSaveBanner();
+  if (json === lastViewJson) return;
+  lastViewJson = json;
+  renderAll();
+}
+
+function renderAll(){
+  render();
+  if (document.getElementById('frequentArchiveView').style.display !== 'none') renderFrequentFlyerView();
+  if (document.getElementById('metivtaView').style.display !== 'none') renderMetivtaView();
+}
+
+// ---- applying operations (pure: the same code builds what is shown and
+// what a sync transaction writes) ----
+
+function acceptEdit(holder, cellKey, t){
+  if (!holder.editTimes || typeof holder.editTimes !== 'object') holder.editTimes = {};
+  if ((holder.editTimes[cellKey] || 0) > t) return false;
+  holder.editTimes[cellKey] = t;
+  return true;
+}
+
+function latestArchivedDay(dailyDays){
+  return (dailyDays || []).reduce((max, e) => {
+    const k = dayKeyOf(e.date);
+    return k > max ? k : max;
+  }, '');
+}
+
+// Where an operation made on day `day` belongs right now.
+function routeDay(snap, day){
+  const live = snap.main.lastActivityDate;
+  if (live) return day === live ? 'live' : (day > live ? 'reset' : 'archived');
+  const lastArchived = snap.main.lastArchivedDay || latestArchivedDay(snap.dailyDays);
+  return (lastArchived && day <= lastArchived) ? 'archived' : 'live';
+}
+
+function applyOpsToSnapshot(snap, ops){
+  const touched = { main: false, daily: false, weeks: new Set() };
+  const done = new Set(snap.main.recentOpIds || []);
+  ops.forEach(op => {
+    if (done.has(op.id)) return;
+    applyOp(snap, op, touched);
+    done.add(op.id);
+    snap.main.recentOpIds = [...(snap.main.recentOpIds || []), op.id].slice(-MAX_RECENT_OP_IDS);
+    touched.main = true;
+  });
+  return touched;
+}
+
+function applyOp(snap, op, touched){
+  const main = snap.main;
+  if (op.kind === 'weekCell') return applyWeekCellOp(snap, op, touched);
+  if (op.kind === 'archiveCell') return applyArchiveCellOp(snap, op, touched);
+  if (!DAY_OP_KINDS.has(op.kind)) return applyGlobalOp(main, op);
+  let route = routeDay(snap, op.day);
+  if (route === 'reset'){
+    archiveLiveDayInSnapshot(snap, touched);
+    route = routeDay(snap, op.day);
+  }
+  if (route === 'live'){
+    applyLiveOp(snap.main, op);
+    snap.main.lastActivityDate = op.day;
+  } else {
+    applyArchivedDayOp(snap, op, touched);
+  }
+}
+
+function archiveLiveDayInSnapshot(snap, touched){
+  const live = snap.main.lastActivityDate;
+  const weekKey = getWeekKey(new Date(live + 'T12:00:00'));
+  const r = computeDailyResetUpdate(snap.main, snap.dailyDays, snap.weeks[weekKey] || null);
+  snap.main = r.newMainData;
+  snap.dailyDays = r.newDailyDays;
+  snap.weeks[weekKey] = r.newWeeklyEntry;
+  touched.daily = true;
+  touched.weeks.add(weekKey);
+}
+
+function opTargetList(main, group){
+  return group === 'extra' ? main.metivtaExtra : main.students;
+}
+
+function applyLiveOp(main, op){
+  const st = op.sid ? opTargetList(main, op.group).find(x => x.id === op.sid) : null;
+  if (op.kind === 'cat'){
+    if (st && acceptEdit(main, 'd:cat:' + op.sid + ':' + op.key, op.t)) st.cats[op.key] = op.value;
+  } else if (op.kind === 'minus'){
+    if (st) st.minusTotal = Math.min(0, (st.minusTotal || 0) + op.delta);
+  } else if (op.kind === 'purchase'){
+    if (st){ st.cumulative = (st.cumulative || 0) - PURCHASE_COST; st.purchases = (st.purchases || 0) + 1; }
+  } else if (op.kind === 'resetCol'){
+    const category = CATEGORIES.find(c => c.key === op.key);
+    main.students.forEach(s => {
+      s.cumulative = (s.cumulative || 0) + (s.cats[op.key] || 0);
+      if (category && category.cumulativeKey) s[category.cumulativeKey] = (s[category.cumulativeKey] || 0) + (s.cats[op.key] || 0);
+      s.cats[op.key] = 0;
+    });
+  } else if (op.kind === 'freq'){
+    if (st && acceptEdit(main, 'd:freq:' + op.sid + ':' + op.key, op.t)){
+      if (!st.frequent) st.frequent = { mikvaot: 0, rambam: 0 };
+      if (!st.frequentFrozen) st.frequentFrozen = { mikvaot: 0, rambam: 0 };
+      if (!!st.frequent[op.key] !== op.on){
+        st.frequent[op.key] = op.on ? 2 : 0;
+        st.frequentFrozen[op.key] = (st.frequentFrozen[op.key] || 0) + (op.on ? 2 : -2);
+      }
+    }
+  } else if (op.kind === 'mflags'){
+    if (st && acceptEdit(main, 'd:mflags:' + op.group + ':' + op.sid, op.t)) st.metivtaFlags = { ...op.flags };
+  }
+}
+
+function applyGlobalOp(main, op){
+  if (op.kind === 'pref'){
+    if (!acceptEdit(main, 'g:pref:' + op.key, op.t)) return;
+    if (op.key === 'minusShopActive') main.minusShopActive = op.value;
+    else if (op.key.startsWith('mergedActive.')) main.mergedActive[parseInt(op.key.split('.')[1], 10)] = op.value;
+  } else if (op.kind === 'mname'){
+    if (!acceptEdit(main, 'g:mname:' + op.group + ':' + op.sid + ':' + op.part, op.t)) return;
+    const map = op.group === 'extra' ? main.metivtaExtraNames : main.metivtaNames;
+    const entry = normalizeMetivtaNameEntry(map[op.sid]);
+    entry[op.part] = op.value;
+    map[op.sid] = entry;
+  } else if (op.kind === 'mclass'){
+    if (!acceptEdit(main, 'g:mclass:' + op.group + ':' + op.sid, op.t)) return;
+    (op.group === 'extra' ? main.metivtaExtraClass : main.metivtaClass)[op.sid] = op.value;
+  } else if (op.kind === 'marchived'){
+    if (!acceptEdit(main, 'g:marchived:' + op.key, op.t)) return;
+    const set = new Set(main.metivtaArchivedKeys || []);
+    if (op.archived) set.add(op.key); else set.delete(op.key);
+    main.metivtaArchivedKeys = [...set];
+  }
+}
+
+const DEFAULT_METIVTA_FLAGS = { ok: false, late: false, leftEarly: false, disturbCount: 0 };
+
+// The archived day entry for `day`, created (empty) if that day never
+// reached the server's archive - e.g. a day used only on an offline computer.
+function ensureArchivedDay(snap, day, touched){
+  let entry = snap.dailyDays.find(e => dayKeyOf(e.date) === day);
+  if (!entry){
+    entry = {
+      date: new Date(day + 'T12:00:00').toISOString(),
+      students: snap.main.students.map(s => ({ id: s.id, cats: Object.fromEntries(CATEGORIES.map(c => [c.key, 0])), purchases: 0, minusTotal: 0, metivtaFlags: { ...DEFAULT_METIVTA_FLAGS } })),
+      metivtaExtraStudents: (snap.main.metivtaExtra || []).map(s => ({ id: s.id, metivtaFlags: { ...DEFAULT_METIVTA_FLAGS } }))
+    };
+    snap.dailyDays.push(entry);
+    snap.dailyDays.sort((a, b) => new Date(b.date) - new Date(a.date));
+  }
+  touched.daily = true;
+  return entry;
+}
+
+function ensureArchivedRecord(entry, group, sid){
+  const key = group === 'extra' ? 'metivtaExtraStudents' : 'students';
+  if (!Array.isArray(entry[key])) entry[key] = [];
+  let rec = entry[key].find(x => x.id === sid);
+  if (!rec){
+    rec = group === 'extra' ? { id: sid, metivtaFlags: { ...DEFAULT_METIVTA_FLAGS } }
+      : { id: sid, cats: Object.fromEntries(CATEGORIES.map(c => [c.key, 0])), purchases: 0, minusTotal: 0, metivtaFlags: { ...DEFAULT_METIVTA_FLAGS } };
+    entry[key].push(rec);
+  }
+  if (group !== 'extra' && !rec.cats) rec.cats = {};
+  return rec;
+}
+
+function ensureWeekDoc(snap, weekKey, touched){
+  if (!snap.weeks[weekKey]){
+    const ws = new Date(weekKey + 'T12:00:00');
+    snap.weeks[weekKey] = {
+      type: 'weekly', title: 'הנוסע המתמיד', weekKey,
+      weekStart: getWeekStart(ws).toISOString(), date: new Date(weekKey + 'T12:00:00').toISOString(),
+      students: [], weekParsha: null
+    };
+  }
+  touched.weeks.add(weekKey);
+  const week = snap.weeks[weekKey];
+  if (!Array.isArray(week.students)) week.students = [];
+  return week;
+}
+
+function ensureWeekStudent(week, sid){
+  let rec = week.students.find(x => x.id === sid);
+  if (!rec){ rec = { id: sid, days: {} }; week.students.push(rec); }
+  if (!rec.days) rec.days = {};
+  return rec;
+}
+
+// The weekly (הנוסע המתמיד) values of one archived day that come straight
+// from that day's board - same formulas as computeDailyResetUpdate.
+function weeklyValueFromDay(field, rec){
+  const cats = rec.cats || {};
+  if (field === 'morning') return Math.round((cats.c1 || 0) * (2 / 3));
+  if (field === 'tefila') return (cats.c7 || 0) + (cats.c3 || 0);
+  if (field === 'bonus') return (rec.minusTotal || 0) === 0 ? 1 : 0;
+  if (field === 'metivtaVal') return metivtaDayScore(rec.metivtaFlags || DEFAULT_METIVTA_FLAGS);
+  return 0;
+}
+
+function refreshWeeklyFromDay(snap, day, sid, rec, fields, t, touched){
+  const week = ensureWeekDoc(snap, getWeekKey(new Date(day + 'T12:00:00')), touched);
+  const ws = ensureWeekStudent(week, sid);
+  if (!ws.days[day]) ws.days[day] = {};
+  fields.forEach(f => {
+    if (acceptEdit(week, 'w:' + sid + ':' + f + ':' + day, t)) ws.days[day][f] = weeklyValueFromDay(f, rec);
+  });
+}
+
+// A board change that reaches the server after its day was already archived.
+function applyArchivedDayOp(snap, op, touched){
+  if (op.kind === 'resetCol') return;
+  if (op.kind === 'freq'){
+    const week = ensureWeekDoc(snap, getWeekKey(new Date(op.day + 'T12:00:00')), touched);
+    const ws = ensureWeekStudent(week, op.sid);
+    const field = op.key === 'rambam' ? 'rambamVal' : 'mikvaotVal';
+    if (!ws.days[op.day]) ws.days[op.day] = {};
+    if (!acceptEdit(week, 'w:' + op.sid + ':' + field + ':' + op.day, op.t)) return;
+    const cur = ws.days[op.day][field] || 0;
+    if (op.on && cur < 2) ws.days[op.day][field] = cur + 2;
+    if (!op.on && cur >= 2) ws.days[op.day][field] = cur - 2;
+    return;
+  }
+  const entry = ensureArchivedDay(snap, op.day, touched);
+  const group = op.group === 'extra' ? 'extra' : 'main';
+  const rec = ensureArchivedRecord(entry, group, op.sid);
+  if (op.kind === 'cat'){
+    if (!acceptEdit(entry, 'd:cat:' + op.sid + ':' + op.key, op.t)) return;
+    rec.cats[op.key] = op.value;
+    refreshWeeklyFromDay(snap, op.day, op.sid, rec, ['morning', 'tefila'], op.t, touched);
+  } else if (op.kind === 'minus'){
+    rec.minusTotal = Math.min(0, (rec.minusTotal || 0) + op.delta);
+    refreshWeeklyFromDay(snap, op.day, op.sid, rec, ['bonus'], op.t, touched);
+  } else if (op.kind === 'purchase'){
+    rec.purchases = (rec.purchases || 0) + 1;
+  } else if (op.kind === 'mflags'){
+    if (!acceptEdit(entry, 'd:mflags:' + group + ':' + op.sid, op.t)) return;
+    rec.metivtaFlags = { ...op.flags };
+    if (group === 'main') refreshWeeklyFromDay(snap, op.day, op.sid, rec, ['metivtaVal'], op.t, touched);
+  }
+}
+
+// Editing a הנוסע המתמיד cell by hand (target = a day, or null for a
+// whole-week field such as the parents' answers).
+function applyWeekCellOp(snap, op, touched){
+  const week = ensureWeekDoc(snap, op.weekKey, touched);
+  const ws = ensureWeekStudent(week, op.sid);
+  if (!acceptEdit(week, 'w:' + op.sid + ':' + op.field + ':' + (op.target || 'week'), op.t)) return;
+  if (op.target){
+    if (!ws.days[op.target]) ws.days[op.target] = {};
+    ws.days[op.target][op.field] = op.value;
+  } else {
+    ws[op.field] = op.value;
+  }
+}
+
+// Editing an archived day of the class board or the Metivta by hand.
+// field: 'cat:<key>' | 'purchases' | 'minusTotal' | 'metivtaFlags'.
+function applyArchiveCellOp(snap, op, touched){
+  const entry = snap.dailyDays.find(e => dayKeyOf(e.date) === op.target);
+  if (!entry) return;
+  touched.daily = true;
+  const group = op.group === 'extra' ? 'extra' : 'main';
+  const rec = ensureArchivedRecord(entry, group, op.sid);
+  const cellKey = op.field === 'metivtaFlags' ? 'd:mflags:' + group + ':' + op.sid
+    : op.field.startsWith('cat:') ? 'd:cat:' + op.sid + ':' + op.field.slice(4)
+    : 'd:' + op.field + ':' + op.sid;
+  if (!acceptEdit(entry, cellKey, op.t)) return;
+  if (op.field === 'metivtaFlags') rec.metivtaFlags = { ...op.value };
+  else if (op.field.startsWith('cat:')) rec.cats[op.field.slice(4)] = op.value;
+  else rec[op.field] = op.value;
+}
+
+// Which archive documents a sync transaction must read for these operations
+// (reading one too many is harmless; one too few is not).
+function archiveDocsNeeded(main, ops){
+  let daily = false;
+  const weekKeys = new Set();
+  const live = main.lastActivityDate;
+  const weekOf = (day) => getWeekKey(new Date(day + 'T12:00:00'));
+  ops.forEach(op => {
+    if (op.kind === 'weekCell'){ weekKeys.add(op.weekKey); return; }
+    if (op.kind === 'archiveCell'){ daily = true; weekKeys.add(weekOf(op.target)); return; }
+    if (!DAY_OP_KINDS.has(op.kind)) return;
+    if (live && op.day === live) return;
+    if (!live && main.lastArchivedDay && op.day > main.lastArchivedDay) return;
+    daily = true;
+    weekKeys.add(weekOf(op.day));
+    if (live) weekKeys.add(weekOf(live));
+  });
+  return { daily, weekKeys: [...weekKeys] };
+}
+
+// ---- syncing ----
 
 function hasUnsavedChanges(){
-  return mainSaveFailed || mainSaveStalled || pendingArchiveOps.length > 0 || archiveOpsStalled > 0;
+  return pendingOps.length > 0 && (syncFailed || syncStalled);
 }
 
 function refreshSaveBanner(){
   setSaveFailedBanner(hasUnsavedChanges(), lastSaveFailureReason);
 }
 
-function scheduleSaveRetry(){
-  if (!saveRetryTimer) saveRetryTimer = setTimeout(retryFailedSaves, SAVE_RETRY_MS);
+function scheduleSync(delay){
+  clearTimeout(syncTimer);
+  syncTimer = setTimeout(syncPendingOps, delay);
 }
 
-async function retryFailedSaves(){
-  clearTimeout(saveRetryTimer);
-  saveRetryTimer = null;
-  if (saveRetryRunning) return;
-  saveRetryRunning = true;
-  const hadArchiveOps = pendingArchiveOps.length > 0;
-  while (pendingArchiveOps.length){
-    try{
-      await pendingArchiveOps[0]();
-      pendingArchiveOps.shift();
-    } catch(e){
-      lastSaveFailureReason = describeSaveError(e);
-      break;
-    }
-  }
-  if (mainSaveFailed) await saveState();
-  saveRetryRunning = false;
-  refreshSaveBanner();
-  if (pendingArchiveOps.length || mainSaveFailed) scheduleSaveRetry();
-  else if (hadArchiveOps) refreshArchiveAndRender();
-}
+window.addEventListener('online', () => scheduleSync(0));
 
-window.addEventListener('online', () => { if (hasUnsavedChanges()) retryFailedSaves(); });
-
-async function saveState(){
-  const seq = ++mainSaveSeq;
+async function syncPendingOps(){
+  syncTimer = null;
+  if (syncRunning || !pendingOps.length || !firestoreDb || !serverSnap) return;
+  syncRunning = true;
+  const batch = pendingOps.slice(0, SYNC_BATCH);
   setStatus('שומר…');
   const stallTimer = setTimeout(() => {
-    if (seq !== mainSaveSeq) return;
-    mainSaveStalled = true;
+    syncStalled = true;
     lastSaveFailureReason = SAVE_STALLED_REASON;
     refreshSaveBanner();
   }, SAVE_STALL_MS);
-  const res = await storageSet(JSON.stringify(state));
-  clearTimeout(stallTimer);
-  // A newer save already carries everything this one had.
-  if (seq !== mainSaveSeq) return;
-  mainSaveStalled = false;
-  if (!res || !res.ok){
-    mainSaveFailed = true;
-    lastSaveFailureReason = describeSaveError(res && res.error);
-    setStatus('שמירה נכשלה');
-    scheduleSaveRetry();
-  } else {
-    mainSaveFailed = false;
-    setStatus('נשמר');
-    setTimeout(() => setStatus(''), 1200);
-  }
-  refreshSaveBanner();
-}
-
-// Runs one archive edit; if it fails it is queued for retry (and so is any
-// later edit, to keep them in order) instead of being dropped.
-async function runArchiveSave(op){
-  if (pendingArchiveOps.length){
-    pendingArchiveOps.push(op);
-    refreshSaveBanner();
-    scheduleSaveRetry();
-    return;
-  }
-  setStatus('שומר…');
-  let stalled = false;
-  const stallTimer = setTimeout(() => { stalled = true; archiveOpsStalled++; lastSaveFailureReason = SAVE_STALLED_REASON; refreshSaveBanner(); }, SAVE_STALL_MS);
+  let result = null;
   try{
-    await op();
-    setStatus('נשמר');
-    setTimeout(() => setStatus(''), 1200);
+    result = await runTransaction(firestoreDb, async (tx) => {
+      const mainSnap = await tx.get(stateDocRef);
+      const main = normalizeMain(mainSnap.exists() ? mainSnap.data() : emptyMainDoc());
+      if (main.students.length !== TOTAL_STUDENTS) throw new Error('הנתונים בשרת אינם בפורמט תקין');
+      const need = archiveDocsNeeded(main, batch);
+      let dailyDays = null;
+      if (need.daily){
+        const ds = await tx.get(dailyArchiveDocRef);
+        dailyDays = ds.exists() && Array.isArray(ds.data().days) ? ds.data().days : [];
+      }
+      const weeks = {};
+      for (const wk of need.weekKeys){
+        const w = await tx.get(weekDocRef(wk));
+        if (w.exists()) weeks[wk] = w.data();
+      }
+      const snap = { main, dailyDays: dailyDays || [], weeks };
+      const touched = applyOpsToSnapshot(snap, batch);
+      tx.set(stateDocRef, snap.main);
+      if (touched.daily && dailyDays !== null) tx.set(dailyArchiveDocRef, { days: snap.dailyDays });
+      touched.weeks.forEach(wk => tx.set(weekDocRef(wk), snap.weeks[wk]));
+      return { snap, touched, readDaily: dailyDays !== null };
+    });
   } catch(e){
+    syncFailed = true;
     lastSaveFailureReason = describeSaveError(e);
-    pendingArchiveOps.push(op);
     setStatus('שמירה נכשלה');
-    scheduleSaveRetry();
   }
   clearTimeout(stallTimer);
-  if (stalled) archiveOpsStalled--;
-  refreshSaveBanner();
+  syncStalled = false;
+  if (result){
+    syncFailed = false;
+    const ids = new Set(batch.map(o => o.id));
+    pendingOps = pendingOps.filter(o => !ids.has(o.id));
+    persistPendingOps();
+    serverSnap.main = result.snap.main;
+    lastServerMainJson = JSON.stringify(result.snap.main);
+    if (result.readDaily) serverSnap.dailyDays = result.snap.dailyDays;
+    result.touched.weeks.forEach(wk => { serverSnap.weeks[wk] = result.snap.weeks[wk]; });
+    setStatus('נשמר');
+    setTimeout(() => setStatus(''), 1200);
+  }
+  syncRunning = false;
+  rebuildViewAndRender();
+  if (pendingOps.length) scheduleSync(syncFailed ? SAVE_RETRY_MS : 0);
 }
-
 function studentTotal(student){
   const todayCats = CATEGORIES.reduce((sum, c) => sum + (student.cats[c.key] || 0), 0);
   const todayPurchaseCost = (student.purchases || 0) * PURCHASE_COST;
@@ -1393,10 +1695,7 @@ function toggleCell(studentId, catKey){
   const student = state.students.find(s => s.id === studentId);
   if (!student) return;
   const category = CATEGORIES.find(c => c.key === catKey);
-  student.cats[catKey] = student.cats[catKey] ? 0 : category.value;
-  markActivity();
-  render();
-  saveState();
+  commitOp({ kind: 'cat', group: 'main', sid: studentId, key: catKey, value: student.cats[catKey] ? 0 : category.value });
 }
 
 const PURCHASE_COST = 8;
@@ -1443,15 +1742,11 @@ function showModal(message, options){
 }
 
 function setMergedActive(groupIndex, key){
-  state.mergedActive[groupIndex] = key;
-  render();
-  saveState();
+  commitOp({ kind: 'pref', key: 'mergedActive.' + groupIndex, value: key });
 }
 
 function setMinusShopActive(value){
-  state.minusShopActive = value;
-  render();
-  saveState();
+  commitOp({ kind: 'pref', key: 'minusShopActive', value });
 }
 
 function resetColumn(catKey){
@@ -1459,29 +1754,14 @@ function resetColumn(catKey){
   showModal('לאפס את טור "' + category.label + '"? הנקודות שנצברו יתווספו לסה"כ הכולל.', {
     confirmText: 'אישור',
     cancelText: 'ביטול',
-    onConfirm: async () => {
-      state.students.forEach(s => {
-        s.cumulative += (s.cats[catKey] || 0);
-        if (category.cumulativeKey){
-          s[category.cumulativeKey] = (s[category.cumulativeKey] || 0) + (s.cats[catKey] || 0);
-        }
-        s.cats[catKey] = 0;
-      });
-      render();
-      await saveState();
-    }
+    onConfirm: () => commitOp({ kind: 'resetCol', key: catKey })
   });
 }
 
 function adjustMinus(studentId, delta){
   const student = state.students.find(s => s.id === studentId);
   if (!student) return;
-  let newTotal = (student.minusTotal || 0) + delta;
-  if (newTotal > 0) newTotal = 0;
-  student.minusTotal = newTotal;
-  markActivity();
-  render();
-  saveState();
+  commitOp({ kind: 'minus', group: 'main', sid: studentId, delta });
 }
 
 function showMinusPicker(studentId){
@@ -1552,13 +1832,7 @@ function makePurchase(studentId){
   showModal('לאשר קניה תמורת ' + PURCHASE_COST + ' נקודות?', {
     confirmText: 'אישור',
     cancelText: 'ביטול',
-    onConfirm: () => {
-      student.cumulative -= PURCHASE_COST;
-      student.purchases = (student.purchases || 0) + 1;
-      markActivity();
-      render();
-      saveState();
-    }
+    onConfirm: () => commitOp({ kind: 'purchase', group: 'main', sid: studentId })
   });
 }
 
@@ -1567,8 +1841,11 @@ function todayStr(){
   return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
 }
 
-function markActivity(){
-  state.lastActivityDate = todayStr();
+// The day a change belongs to. Days switch at 01:00 at night (the nightly
+// reset), so a change made at 00:30 still belongs to the day before.
+function activityDayStr(){
+  const d = new Date(Date.now() - AUTO_RESET_HOUR * 3600000);
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
 }
 
 function getWeekStart(date){
@@ -1584,6 +1861,9 @@ function getWeekKey(date){
 }
 
 function mergeEarlierDailyEntry(target, earlier){
+  const times = { ...(earlier.editTimes || {}) };
+  Object.entries(target.editTimes || {}).forEach(([k, t]) => { times[k] = Math.max(times[k] || 0, t); });
+  target.editTimes = times;
   const sumCats = (a, b) => {
     const out = { ...(b || {}) };
     Object.keys(a || {}).forEach(k => { out[k] = (a[k] || 0) + (out[k] || 0); });
@@ -1629,7 +1909,11 @@ function computeDailyResetUpdate(mainData, dailyDays, weeklyEntry){
     metivtaExtraStudents: (mainData.metivtaExtra || []).map(s => ({
       id: s.id,
       metivtaFlags: { ...(s.metivtaFlags || defaultMetivtaFlags) }
-    }))
+    })),
+    // The day's cell edit times ('d:' keys) move with it into the archive, so
+    // a late edit of this day is still judged against them; whole-site
+    // settings ('g:' keys) stay on the board.
+    editTimes: Object.fromEntries(Object.entries(mainData.editTimes || {}).filter(([k]) => k.startsWith('d:')))
   };
 
   let days = Array.isArray(dailyDays) ? dailyDays.slice() : [];
@@ -1749,7 +2033,9 @@ function computeDailyResetUpdate(mainData, dailyDays, weeklyEntry){
     s.metivtaFlags = { ok: false, late: false, leftEarly: false, disturbCount: 0 };
   });
   newMainData.lastAutoResetDate = todayStr();
+  newMainData.lastArchivedDay = mainData.lastActivityDate || null;
   newMainData.lastActivityDate = null;
+  newMainData.editTimes = Object.fromEntries(Object.entries(mainData.editTimes || {}).filter(([k]) => !k.startsWith('d:')));
 
   return { newMainData, newDailyDays: days, newWeeklyEntry: weeklyEntryOut, weekKey };
 }
@@ -1761,8 +2047,8 @@ async function doResetGuarded(){
     await runTransaction(firestoreDb, async (tx) => {
       const mainSnap = await tx.get(stateDocRef);
       if (!mainSnap.exists()) return;
-      const mainData = mainSnap.data();
-      if (!Array.isArray(mainData.students) || mainData.students.length !== TOTAL_STUDENTS) return;
+      if (!Array.isArray(mainSnap.data().students) || mainSnap.data().students.length !== TOTAL_STUDENTS) return;
+      const mainData = normalizeMain(mainSnap.data());
       // Re-decide from the fresh server copy, never from this device's
       // in-memory state: a device that slept since yesterday still holds
       // yesterday's lastActivityDate, and its overdue 01:00 timer used to
@@ -1789,71 +2075,18 @@ async function doResetGuarded(){
     // transaction failed (offline, etc.) - render whatever is in memory so the UI isn't stuck
   }
   if (outcome){
-    const days = outcome.dailyDays !== null ? outcome.dailyDays : await fetchArchiveDays();
-    const weeks = await fetchArchiveWeeks();
-    const newState = JSON.parse(JSON.stringify(outcome.mainData));
-    newState.archive = [...days, ...weeks];
-    state = newState;
-    lastSyncedMainJson = JSON.stringify(outcome.mainData);
+    serverSnap.main = outcome.mainData;
+    lastServerMainJson = JSON.stringify(outcome.mainData);
+    serverSnap.dailyDays = outcome.dailyDays !== null ? outcome.dailyDays : await fetchArchiveDays();
+    serverSnap.weeks = await fetchArchiveWeeksMap();
   }
-  render();
-  renderFrequentFlyerView();
-  renderMetivtaView();
+  rebuildViewAndRender();
 }
 
-// Manual archive edits (from the teacher's access-code-gated archive UI)
-// re-read the specific small document fresh before changing it, instead of
-// pushing back whatever this device's in-memory copy of the whole archive
-// happens to hold - so an edit here can't silently undo someone else's
-// newer change to the same day/week.
-async function updateWeekStudentRecord(weekKey, studentId, mutatorFn){
-  await runArchiveSave(() => runTransaction(firestoreDb, async (tx) => {
-    const ref = weekDocRef(weekKey);
-    const snap = await tx.get(ref);
-    let data = snap.exists() ? snap.data() : {
-      type: 'weekly', title: 'הנוסע המתמיד', weekKey: weekKey,
-      weekStart: getWeekStart(new Date(weekKey + 'T12:00:00')).toISOString(),
-      date: new Date().toISOString(), students: [], weekParsha: null
-    };
-    if (!Array.isArray(data.students)) data.students = [];
-    let rec = data.students.find(s => s.id === studentId);
-    if (!rec){ rec = { id: studentId, days: {} }; data.students.push(rec); }
-    mutatorFn(rec);
-    tx.set(ref, data);
-  }));
-}
-
-async function updateDailyArchiveRecord(dayKey, studentId, isExtra, mutatorFn){
-  await runArchiveSave(() => runTransaction(firestoreDb, async (tx) => {
-    const snap = await tx.get(dailyArchiveDocRef);
-    const data = snap.exists() ? snap.data() : { days: [] };
-    const days = Array.isArray(data.days) ? data.days : [];
-    const entry = days.find(e => dayKeyOf(e.date) === dayKey);
-    if (!entry) return;
-    if (isExtra && !Array.isArray(entry.metivtaExtraStudents)) entry.metivtaExtraStudents = [];
-    if (!isExtra && !Array.isArray(entry.students)) entry.students = [];
-    const list = isExtra ? entry.metivtaExtraStudents : entry.students;
-    let rec = list.find(x => x.id === studentId);
-    if (!rec){ rec = { id: studentId }; list.push(rec); }
-    mutatorFn(rec);
-    tx.set(dailyArchiveDocRef, { days });
-  }));
-}
-
-// A day is archived (and the board starts fresh) at 01:00 at night - by the
-// server's scheduled function (functions/index.js, dailyReset) even when no
-// page is open; an open page also tries at 01:00, and a page opened later
-// catches up. Keep in sync with isLiveDayDueForArchive in functions/index.js.
 const AUTO_RESET_HOUR = 1;
 
 function isLiveDayDueForArchive(data){
-  if (!data.lastActivityDate) return false;
-  const today = todayStr();
-  if (data.lastActivityDate >= today) return false;
-  const y = new Date();
-  y.setDate(y.getDate() - 1);
-  const yesterday = y.getFullYear() + '-' + String(y.getMonth() + 1).padStart(2, '0') + '-' + String(y.getDate()).padStart(2, '0');
-  return data.lastActivityDate < yesterday || new Date().getHours() >= AUTO_RESET_HOUR;
+  return !!data.lastActivityDate && data.lastActivityDate < activityDayStr();
 }
 
 function checkAutoReset(){
@@ -2221,14 +2454,7 @@ function showMetivta(){
 function toggleFrequent(studentId, key){
   const student = state.students.find(s => s.id === studentId);
   if (!student) return;
-  if (!student.frequent) student.frequent = { mikvaot: 0, rambam: 0 };
-  if (!student.frequentFrozen) student.frequentFrozen = { mikvaot: 0, rambam: 0 };
-  const turningOn = !student.frequent[key];
-  student.frequent[key] = turningOn ? 2 : 0;
-  student.frequentFrozen[key] = (student.frequentFrozen[key] || 0) + (turningOn ? 2 : -2);
-  markActivity();
-  render();
-  saveState();
+  commitOp({ kind: 'freq', group: 'main', sid: studentId, key, on: !(student.frequent && student.frequent[key]) });
 }
 
 let selectedWeeklyKey = null;
@@ -2393,7 +2619,7 @@ function metivtaDayScoreLegacyAware(s){
 function toggleMetivtaOk(studentId, isExtra){
   const student = findMetivtaStatusStudent(studentId, isExtra);
   if (!student) return;
-  const f = ensureMetivtaFlags(student);
+  const f = { ...ensureMetivtaFlags(student) };
   if (f.late || f.leftEarly || f.disturbCount > 0){
     f.late = false;
     f.leftEarly = false;
@@ -2402,15 +2628,18 @@ function toggleMetivtaOk(studentId, isExtra){
   } else {
     f.ok = !f.ok;
   }
-  markActivity();
-  renderMetivtaView();
-  saveState();
+  commitMetivtaFlags(studentId, isExtra, f);
+}
+
+function commitMetivtaFlags(studentId, isExtra, flags){
+  commitOp({ kind: 'mflags', group: isExtra ? 'extra' : 'main', sid: studentId, flags: { ...flags } });
 }
 
 function showMetivtaStatusExceptionsModal(studentId, isExtra){
   const student = findMetivtaStatusStudent(studentId, isExtra);
   if (!student) return;
-  const f = ensureMetivtaFlags(student);
+  // The modal's own copy of the flags; every change is committed whole.
+  const f = { ...ensureMetivtaFlags(student) };
 
   const overlay = document.createElement('div');
   overlay.className = 'modal-overlay';
@@ -2425,9 +2654,7 @@ function showMetivtaStatusExceptionsModal(studentId, isExtra){
 
   function applyChange(){
     f.ok = false;
-    markActivity();
-    renderMetivtaView();
-    saveState();
+    commitMetivtaFlags(studentId, isExtra, f);
   }
 
   const toggleRow = document.createElement('div');
@@ -2502,8 +2729,6 @@ function buildMetivtaEditableCell(value, promptLabel, onSave){
       const next = prompt(promptLabel + ':', value);
       if (next === null) return;
       onSave(next.trim());
-      saveState();
-      renderMetivtaView();
     });
   });
   return td;
@@ -2567,12 +2792,8 @@ function shrinkCellTextToFit(cell){
 function moveSelectedMetivtaRows(keys, toArchive){
   if (keys.length === 0) return;
   requireArchiveEditAccess(() => {
-    const archived = metivtaArchivedKeySet();
-    keys.forEach(k => { if (toArchive) archived.add(k); else archived.delete(k); });
-    state.metivtaArchivedKeys = [...archived];
     keys.forEach(k => metivtaSelectedKeys.delete(k));
-    saveState();
-    renderMetivtaView();
+    keys.forEach(k => commitOp({ kind: 'marchived', key: k, archived: toArchive }));
   });
 }
 
@@ -2963,15 +3184,10 @@ function buildMetivtaTable({ days, archivedKeys, archiveTable, availableWidth })
         td.textContent = metivtaDayLabelLegacyAware(rec);
         td.style.cursor = 'pointer';
         td.addEventListener('click', () => {
-          const targetRec = rec || row.ensureRecord(entry);
-          if (!targetRec) return;
-          const flags = ensureMetivtaFlags(targetRec);
+          const flags = { ...DEFAULT_METIVTA_FLAGS, ...((rec && rec.metivtaFlags) || {}) };
           const dayKey = dayKeyOf(entry.date);
           promptEditArchiveMetivtaFlags(flags, () => {
-            updateDailyArchiveRecord(dayKey, row.id, row.isExtra, (fresh) => {
-              fresh.metivtaFlags = { ...flags };
-            });
-            renderMetivtaView();
+            commitOp({ kind: 'archiveCell', target: dayKey, group: row.isExtra ? 'extra' : 'main', sid: row.id, field: 'metivtaFlags', value: { ...flags } });
           });
         });
       }
@@ -3419,10 +3635,7 @@ function renderWeeklyEntryInto(entry, container, allWeeklyEntries){
         td.style.cursor = 'pointer';
         td.addEventListener('click', () => {
           requireArchiveEditAccess(() => {
-            s[field] = !s[field];
-            const newVal = s[field];
-            updateWeekStudentRecord(entry.weekKey, s.id, (rec) => { rec[field] = newVal; });
-            renderFrequentFlyerView();
+            commitOp({ kind: 'weekCell', weekKey: entry.weekKey, sid: s.id, field, target: null, value: !s[field] });
           });
         });
       } else if (kind === 'weekly-number'){
@@ -3430,9 +3643,7 @@ function renderWeeklyEntryInto(entry, container, allWeeklyEntries){
         td.style.cursor = 'pointer';
         td.addEventListener('click', () => {
           promptEditArchiveValue(val, (newVal) => {
-            s[field] = newVal;
-            updateWeekStudentRecord(entry.weekKey, s.id, (rec) => { rec[field] = newVal; });
-            renderFrequentFlyerView();
+            commitOp({ kind: 'weekCell', weekKey: entry.weekKey, sid: s.id, field, target: null, value: newVal });
           });
         });
       } else {
@@ -3441,15 +3652,7 @@ function renderWeeklyEntryInto(entry, container, allWeeklyEntries){
           td.style.cursor = 'pointer';
           td.addEventListener('click', () => {
             promptEditArchiveValue(val, (newVal) => {
-              if (!s.days) s.days = {};
-              if (!s.days[viewMode]) s.days[viewMode] = {};
-              s.days[viewMode][field] = newVal;
-              updateWeekStudentRecord(entry.weekKey, s.id, (rec) => {
-                if (!rec.days) rec.days = {};
-                if (!rec.days[viewMode]) rec.days[viewMode] = {};
-                rec.days[viewMode][field] = newVal;
-              });
-              renderFrequentFlyerView();
+              commitOp({ kind: 'weekCell', weekKey: entry.weekKey, sid: s.id, field, target: viewMode, value: newVal });
             });
           });
         }
@@ -3738,29 +3941,11 @@ function renderTodayHistoryTable(container){
         td.addEventListener('click', () => {
           if (!s) return;
           const dayKey = dayKeyOf(entry.date);
-          if (activeKey === 'shop'){
-            promptEditArchiveValue(s.purchases || 0, (newVal) => {
-              s.purchases = newVal;
-              updateDailyArchiveRecord(dayKey, student.id, false, (rec) => { rec.purchases = newVal; });
-              render();
-            });
-          } else if (activeKey === 'minus'){
-            promptEditArchiveValue(s.minusTotal || 0, (newVal) => {
-              s.minusTotal = newVal;
-              updateDailyArchiveRecord(dayKey, student.id, false, (rec) => { rec.minusTotal = newVal; });
-              render();
-            });
-          } else {
-            promptEditArchiveValue(cats[activeKey] || 0, (newVal) => {
-              if (!s.cats) s.cats = {};
-              s.cats[activeKey] = newVal;
-              updateDailyArchiveRecord(dayKey, student.id, false, (rec) => {
-                if (!rec.cats) rec.cats = {};
-                rec.cats[activeKey] = newVal;
-              });
-              render();
-            });
-          }
+          const field = activeKey === 'shop' ? 'purchases' : activeKey === 'minus' ? 'minusTotal' : 'cat:' + activeKey;
+          const current = activeKey === 'shop' ? (s.purchases || 0) : activeKey === 'minus' ? (s.minusTotal || 0) : (cats[activeKey] || 0);
+          promptEditArchiveValue(current, (newVal) => {
+            commitOp({ kind: 'archiveCell', target: dayKey, group: 'main', sid: student.id, field, value: newVal });
+          });
         });
       }
       tr.appendChild(td);
@@ -3951,132 +4136,6 @@ function armScreensaverIdleTimer(){
 
 armScreensaverIdleTimer();
 
-function dedupDailyArchiveEntries(){
-  if (state.dailyArchiveDedupedV1) return;
-  if (!Array.isArray(state.archive)) { state.dailyArchiveDedupedV1 = true; saveState(); return; }
-
-  const byDayKey = {};
-  const order = [];
-  state.archive.forEach(e => {
-    if (e.type === 'weekly') return;
-    const k = dayKeyOf(e.date);
-    if (!byDayKey[k]){ byDayKey[k] = []; order.push(k); }
-    byDayKey[k].push(e);
-  });
-
-  const merged = [];
-  order.forEach(k => {
-    const entries = byDayKey[k];
-    if (entries.length === 1){
-      merged.push(entries[0]);
-      return;
-    }
-    const base = entries[0];
-    const combined = {
-      date: base.date,
-      students: state.students.map(s => {
-        const cats = { c1: 0, c2: 0, c3: 0, c4: 0, c5: 0, c6: 0, c7: 0, c8: 0 };
-        let purchases = 0, minusTotal = 0, metivtaAttendance = 0, metivtaBehavior = 0;
-        entries.forEach(e => {
-          const es = (e.students || []).find(x => x.id === s.id);
-          if (!es) return;
-          CATEGORIES.forEach(c => { cats[c.key] += (es.cats && es.cats[c.key]) || 0; });
-          purchases += es.purchases || 0;
-          minusTotal += es.minusTotal || 0;
-          metivtaAttendance += es.metivtaAttendance || 0;
-          metivtaBehavior += es.metivtaBehavior || 0;
-        });
-        return { id: s.id, cats, purchases, minusTotal, metivtaSum: metivtaAttendance + metivtaBehavior, metivtaAttendance, metivtaBehavior };
-      }),
-      metivtaExtraStudents: (state.metivtaExtra || []).map(s => {
-        let metivtaAttendance = 0, metivtaBehavior = 0;
-        entries.forEach(e => {
-          const es = (e.metivtaExtraStudents || []).find(x => x.id === s.id);
-          if (!es) return;
-          metivtaAttendance += es.metivtaAttendance || 0;
-          metivtaBehavior += es.metivtaBehavior || 0;
-        });
-        return { id: s.id, metivtaSum: metivtaAttendance + metivtaBehavior, metivtaAttendance, metivtaBehavior };
-      })
-    };
-    merged.push(combined);
-  });
-
-  state.archive = state.archive.filter(e => e.type === 'weekly').concat(merged);
-  state.dailyArchiveDedupedV1 = true;
-  saveState();
-}
-
-function isEmptyDailyEntry(e){
-  const allStudentsEmpty = (e.students || []).every(s => {
-    const catsEmpty = !s.cats || Object.values(s.cats).every(v => !v);
-    return catsEmpty && !s.purchases && !s.minusTotal && !s.metivtaAttendance && !s.metivtaBehavior;
-  });
-  const allExtraEmpty = (e.metivtaExtraStudents || []).every(s => !s.metivtaAttendance && !s.metivtaBehavior);
-  return allStudentsEmpty && allExtraEmpty;
-}
-
-function removeEmptyPlaceholderDays(){
-  if (state.emptyPlaceholdersRemovedV1) return;
-  if (Array.isArray(state.archive)){
-    state.archive = state.archive.filter(e => e.type === 'weekly' || !isEmptyDailyEntry(e));
-  }
-  state.emptyPlaceholdersRemovedV1 = true;
-  saveState();
-}
-
-function importWeek20260905Data(){
-  if (state.importedWeek20260905v2) return;
-  if (Array.isArray(state.archive)){
-    state.archive = state.archive.filter(e => !(e.type === 'weekly' && e.weekKey === '2026-09-05'));
-  }
-  const importData = {
-    'צאלי': [0,3,2,1,2,4], 'ישרוליק': [2,3,0,2,0,4], 'נתנאל': [0,3,0,2,2,4],
-    'מענדי ה.': [2,3,2,2,2,3], 'מענדי ח.': [0,3,0,2,0,4], 'אלעאי': [0,3,0,2,2,0],
-    'יהונתן': [2,3,2,2,2,3], 'איתן': [0,3,0,2,2,0], 'מענדי ל.': [2,3,0,2,2,4],
-    'שלוימי': [2,3,0,2,2,0], 'מוישלה': [2,3,0,2,2,4], 'לוי ס.': [2,3,2,2,2,0],
-    'שמוליק ע.': [2,2,0,2,0,0], 'מולי': [0,3,0,2,2,0], 'שלום': [0,2,0,2,0,0],
-    'חננאל': [2,3,2,2,2,4], 'שמוליק צ.': [0,3,2,2,2,4], 'אושר': [0,3,2,2,2,1],
-    'שמעון': [2,3,2,2,2,4], 'מוטי': [2,3,2,2,2,4], 'לוי ק.': [2,1,2,2,2,0],
-    'נועם': [0,3,2,2,2,4], 'משה': [2,3,2,2,0,2]
-  };
-  const nameToId = {};
-  STUDENT_NAMES.forEach((n, idx) => { nameToId[n] = idx + 1; });
-  const importWeekStartD = getWeekStart(new Date());
-  const importWeekKey = getWeekKey(new Date());
-  if (!Array.isArray(state.archive)) state.archive = [];
-  let wEntry = state.archive.find(e => e.type === 'weekly' && e.weekKey === importWeekKey);
-  if (!wEntry){
-    wEntry = {
-      type: 'weekly',
-      title: 'הנוסע המתמיד',
-      weekKey: importWeekKey,
-      weekStart: importWeekStartD.toISOString(),
-      date: new Date().toISOString(),
-      students: []
-    };
-    state.archive.push(wEntry);
-  }
-  Object.keys(importData).forEach(name => {
-    const id = nameToId[name];
-    if (!id) return;
-    const [morningVal, tefilaVal, mikvaotVal, bonusVal, rambamVal, metivtaVal] = importData[name];
-    let ws = wEntry.students.find(x => x.id === id);
-    if (!ws){
-      ws = { id: id, morning: 0, tefila: 0, mikve: 0, minusDelta: 0, bonus: 0 };
-      wEntry.students.push(ws);
-    }
-    ws.morning = morningVal;
-    ws.tefila = tefilaVal;
-    ws.mikvaotVal = mikvaotVal;
-    ws.bonus = bonusVal;
-    ws.rambamVal = rambamVal;
-    ws.metivtaVal = metivtaVal;
-  });
-  state.importedWeek20260905v2 = true;
-  saveState();
-}
-
 function showStartupError(e){
   const msg = (e && e.stack) ? e.stack : String(e);
   const banner = document.createElement('div');
@@ -4101,9 +4160,7 @@ async function initApp(){
   try{
     setStatus('טוען…');
     await loadState();
-    importWeek20260905Data();
-    dedupDailyArchiveEntries();
-    removeEmptyPlaceholderDays();
+    lastViewJson = JSON.stringify(state);
     render();
     renderFrequentFlyerView();
     if (new URLSearchParams(location.search).get('view') === 'metivta'){
@@ -4121,6 +4178,8 @@ async function initApp(){
     checkAutoReset();
     scheduleNextAutoResetCheck();
     subscribeToRemoteStateChanges();
+    // Changes left waiting from an earlier visit (e.g. made offline).
+    if (pendingOps.length) scheduleSync(0);
 
     if (document.fonts && document.fonts.ready){
       document.fonts.ready.then(() => {
