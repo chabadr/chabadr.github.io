@@ -107,7 +107,7 @@ try {
   Set-Value $edgePol 'HubsSidebarEnabled' 0 'DWord'
   Set-Value $edgePol 'StartupBoostEnabled' 0 'DWord'
   Set-Value $edgePol 'BackgroundModeEnabled' 0 'DWord'
-  Set-Value $edgePol 'PasswordManagerEnabled' 0 'DWord'         # never save the Mashov password here
+  Set-Value $edgePol 'PasswordManagerEnabled' 1 'DWord'         # Edge may save the site passwords (e.g. Mashov)
 } finally {
   if ($loadedHere) {
     [gc]::Collect(); [gc]::WaitForPendingFinalizers()
