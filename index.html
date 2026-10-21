@@ -416,6 +416,23 @@
     cursor: pointer;
     white-space: nowrap;
   }
+  .heb-cal{ max-width: 380px; }
+  .heb-cal-head{ display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+  .heb-cal-title{ font-family: 'Frank Ruhl Libre', serif; font-weight: 700; font-size: 20px; }
+  .heb-cal-nav{ font-size: 24px; width: 40px; height: 36px; border: 1px solid var(--line); border-radius: 8px; background: #fff; cursor: pointer; }
+  .heb-cal-nav:disabled{ opacity: 0.3; cursor: default; }
+  .heb-cal-grid{ display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; }
+  .heb-cal-weekday{ font-size: 12px; font-weight: 700; color: var(--ink-soft); text-align: center; padding: 2px 0; }
+  .heb-cal-day{
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    height: 46px; border: 1px solid var(--line); border-radius: 8px; background: #fff; cursor: pointer;
+    font-family: 'Rubik', sans-serif; color: var(--ink);
+  }
+  .heb-cal-day:hover:not(:disabled){ background: var(--gold-bg); border-color: var(--gold); }
+  .heb-cal-day:disabled{ opacity: 0.35; cursor: default; }
+  .heb-cal-day.shown{ background: var(--green-bg); opacity: 0.8; }
+  .heb-cal-day .heb{ font-size: 16px; font-weight: 700; }
+  .heb-cal-day .greg{ font-size: 10px; color: var(--ink-soft); }
   .header-group{
     display: flex;
     align-items: center;
@@ -1354,6 +1371,12 @@ function applyOp(snap, op, touched){
   const main = snap.main;
   if (op.kind === 'weekCell') return applyWeekCellOp(snap, op, touched);
   if (op.kind === 'archiveCell') return applyArchiveCellOp(snap, op, touched);
+  if (op.kind === 'addMetivtaDay'){
+    // A past day added as a Metivta column (the board may not have been
+    // used that day); it stays shown even before any mark is entered.
+    ensureArchivedDay(snap, op.target, touched).metivtaAddedDay = true;
+    return;
+  }
   if (!DAY_OP_KINDS.has(op.kind)) return applyGlobalOp(main, op);
   let route = routeDay(snap, op.day);
   if (route === 'reset'){
@@ -1591,13 +1614,19 @@ function applyArchiveCellOp(snap, op, touched){
     : op.field.startsWith('cat:') ? 'd:cat:' + op.sid + ':' + op.field.slice(4)
     : 'd:' + op.field + ':' + op.sid;
   if (!acceptEdit(entry, cellKey, op.t)) return;
+  // הנוסע המתמיד takes these from the archived day, so it follows the edit.
   if (op.field === 'metivtaFlags'){
     rec.metivtaFlags = { ...op.value };
+    if (group === 'main') refreshWeeklyFromDay(snap, op.target, op.sid, rec, ['metivtaVal'], op.t, touched);
     refreshZ1FromDay(snap, op.target, group, op.sid, op.value, op.t, touched);
     return;
   }
   if (op.field.startsWith('cat:')) rec.cats[op.field.slice(4)] = op.value;
   else rec[op.field] = op.value;
+  const derived = op.field === 'cat:c1' ? ['morning']
+    : (op.field === 'cat:c7' || op.field === 'cat:c3') ? ['tefila']
+    : op.field === 'minusTotal' ? ['bonus'] : [];
+  if (group === 'main' && derived.length) refreshWeeklyFromDay(snap, op.target, op.sid, rec, derived, op.t, touched);
 }
 
 // Which archive documents a sync transaction must read for these operations
@@ -1610,6 +1639,7 @@ function archiveDocsNeeded(main, ops){
   ops.forEach(op => {
     if (op.kind === 'weekCell'){ weekKeys.add(op.weekKey); return; }
     if (op.kind === 'archiveCell'){ daily = true; weekKeys.add(weekOf(op.target)); return; }
+    if (op.kind === 'addMetivtaDay'){ daily = true; return; }
     if (!DAY_OP_KINDS.has(op.kind)) return;
     if (live && op.day === live) return;
     if (!live && main.lastArchivedDay && op.day > main.lastArchivedDay) return;
@@ -2825,7 +2855,7 @@ function renderMetivtaView(){
   el.innerHTML = '';
   if (!Array.isArray(state.metivtaExtra)) state.metivtaExtra = [];
 
-  const pastDays = getDisplayArchive().filter(e => e.type !== 'weekly' && !e.isLive && metivtaEntryHasData(e));
+  const pastDays = getDisplayArchive().filter(e => e.type !== 'weekly' && !e.isLive && (metivtaEntryHasData(e) || e.metivtaAddedDay));
   const allDays = [buildMetivtaTodayEntry(), ...pastDays];
   const days = metivtaVisibleDayCount === null ? allDays : allDays.slice(0, metivtaVisibleDayCount);
   const archivedKeys = metivtaArchivedKeySet();
@@ -3042,6 +3072,132 @@ function buildMetivtaSortBtn(key){
   return btn;
 }
 
+// ---- Adding a past day to the Metivta table: a Hebrew-calendar picker ----
+function hebrewNumberLetters(n){
+  const hundreds = ['', 'ק', 'ר', 'ש', 'ת', 'תק', 'תר', 'תש', 'תת', 'תתק'];
+  const tens = ['', 'י', 'כ', 'ל', 'מ', 'נ', 'ס', 'ע', 'פ', 'צ'];
+  const ones = ['', 'א', 'ב', 'ג', 'ד', 'ה', 'ו', 'ז', 'ח', 'ט'];
+  let rest = n % 100;
+  let out = hundreds[Math.floor((n % 1000) / 100)];
+  if (rest === 15) out += 'טו';
+  else if (rest === 16) out += 'טז';
+  else out += tens[Math.floor(rest / 10)] + ones[rest % 10];
+  return out.length > 1 ? out.slice(0, -1) + '"' + out.slice(-1) : out + "'";
+}
+
+function hebrewDateInfo(d){
+  const parts = new Intl.DateTimeFormat('he-IL-u-ca-hebrew', { day: 'numeric', month: 'long', year: 'numeric' }).formatToParts(d);
+  const get = (t) => (parts.find(p => p.type === t) || {}).value || '';
+  return { day: parseInt(get('day'), 10), month: get('month'), year: parseInt(get('year'), 10) };
+}
+
+// The days (local noon) of the Hebrew month that `anchor` falls in.
+function hebrewMonthDays(anchor){
+  const first = new Date(anchor);
+  first.setHours(12, 0, 0, 0);
+  while (hebrewDateInfo(first).day > 1) first.setDate(first.getDate() - 1);
+  const month = hebrewDateInfo(first).month;
+  const days = [];
+  const d = new Date(first);
+  while (hebrewDateInfo(d).month === month){
+    days.push(new Date(d));
+    d.setDate(d.getDate() + 1);
+  }
+  return days;
+}
+
+function showHebrewDayPicker(shownDays){
+  const shown = new Set(shownDays.map(e => dayKeyOf(e.date)));
+  const today = activityDayStr();
+  let anchor = new Date();
+  anchor.setDate(anchor.getDate() - 1);
+
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  const box = document.createElement('div');
+  box.className = 'modal-box heb-cal';
+  overlay.appendChild(box);
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+
+  function draw(){
+    box.innerHTML = '';
+    const days = hebrewMonthDays(anchor);
+    const info = hebrewDateInfo(days[0]);
+    const head = document.createElement('div');
+    head.className = 'heb-cal-head';
+    const prev = document.createElement('button');
+    prev.type = 'button';
+    prev.className = 'heb-cal-nav';
+    prev.textContent = '›';
+    prev.title = 'החודש הקודם';
+    prev.addEventListener('click', () => { anchor = new Date(days[0]); anchor.setDate(anchor.getDate() - 1); draw(); });
+    const next = document.createElement('button');
+    next.type = 'button';
+    next.className = 'heb-cal-nav';
+    next.textContent = '‹';
+    next.title = 'החודש הבא';
+    const after = new Date(days[days.length - 1]);
+    after.setDate(after.getDate() + 1);
+    next.disabled = dayKeyOf(after.toISOString()) >= today;
+    next.addEventListener('click', () => { anchor = after; draw(); });
+    const title = document.createElement('div');
+    title.className = 'heb-cal-title';
+    title.textContent = info.month + ' ' + hebrewNumberLetters(info.year);
+    head.appendChild(prev);
+    head.appendChild(title);
+    head.appendChild(next);
+    box.appendChild(head);
+
+    const grid = document.createElement('div');
+    grid.className = 'heb-cal-grid';
+    ['א', 'ב', 'ג', 'ד', 'ה', 'ו', 'ש'].forEach(n => {
+      const h = document.createElement('div');
+      h.className = 'heb-cal-weekday';
+      h.textContent = n;
+      grid.appendChild(h);
+    });
+    for (let i = 0; i < days[0].getDay(); i++) grid.appendChild(document.createElement('div'));
+    days.forEach(d => {
+      const key = dayKeyOf(d.toISOString());
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'heb-cal-day' + (shown.has(key) ? ' shown' : '');
+      btn.innerHTML = '<span class="heb">' + hebrewDayLetters(hebrewDateInfo(d).day) + '</span><span class="greg">' + d.getDate() + '.' + (d.getMonth() + 1) + '</span>';
+      btn.disabled = key >= today || d.getDay() >= 5 || shown.has(key); // no Metivta on Friday/Shabbat
+      btn.title = shown.has(key) ? 'כבר מופיע בטבלה' : '';
+      btn.addEventListener('click', () => {
+        overlay.remove();
+        addMetivtaPastDay(key);
+      });
+      grid.appendChild(btn);
+    });
+    box.appendChild(grid);
+
+    const close = document.createElement('button');
+    close.type = 'button';
+    close.className = 'modal-btn modal-btn-cancel';
+    close.style.marginTop = '12px';
+    close.textContent = 'סגור';
+    close.addEventListener('click', () => overlay.remove());
+    box.appendChild(close);
+  }
+  draw();
+  document.body.appendChild(overlay);
+}
+
+function addMetivtaPastDay(dayKey){
+  commitOp({ kind: 'addMetivtaDay', target: dayKey });
+  // Make sure the new column is inside the number of days shown.
+  const shownKeys = getDisplayArchive()
+    .filter(e => e.type !== 'weekly' && !e.isLive && (metivtaEntryHasData(e) || e.metivtaAddedDay))
+    .map(e => dayKeyOf(e.date));
+  const index = shownKeys.indexOf(dayKey) + 1; // +1 for today's column
+  if (metivtaVisibleDayCount !== null && index >= metivtaVisibleDayCount){
+    metivtaVisibleDayCount = index + 1 > 15 ? null : index + 1;
+    renderMetivtaView();
+  }
+}
+
 function buildMetivtaTable({ days, archivedKeys, archiveTable, availableWidth }){
   const wrap = document.createElement('div');
   wrap.className = 'archive-entry';
@@ -3099,6 +3255,15 @@ function buildMetivtaTable({ days, archivedKeys, archiveTable, availableWidth })
       metivtaVisibleDayCount = k;
       renderMetivtaView();
     }));
+  }
+  if (!archiveTable){
+    const addDayBtn = document.createElement('button');
+    addDayBtn.type = 'button';
+    addDayBtn.className = 'metivta-move-btn';
+    addDayBtn.textContent = '+ יום קודם';
+    addDayBtn.title = 'הוספת טור ליום שעבר';
+    addDayBtn.addEventListener('click', () => requireArchiveEditAccess(() => showHebrewDayPicker(days)));
+    headerGroup.appendChild(addDayBtn);
   }
   if (selectedHere.length > 0){
     const moveBtn = document.createElement('button');
@@ -3716,6 +3881,52 @@ async function backfillZ1HistoryIfNeeded(){
   }
 }
 
+// One time: the Metivta column of הנוסע המתמיד now follows the Metivta table,
+// also for past days - copy each archived day's Metivta mark into its week.
+// Days without a mark in the Metivta table keep what the week has.
+async function backfillWeeklyMetivtaIfNeeded(){
+  if (!serverSnap || serverSnap.main.metivtaWeeklySyncV1 || !firestoreDb) return;
+  try{
+    await runTransaction(firestoreDb, async (tx) => {
+      const mainSnap = await tx.get(stateDocRef);
+      if (!mainSnap.exists()) return;
+      const main = normalizeMain(mainSnap.data());
+      if (main.metivtaWeeklySyncV1) return;
+      const ds = await tx.get(dailyArchiveDocRef);
+      const days = ds.exists() && Array.isArray(ds.data().days) ? ds.data().days : [];
+      const weekKeys = [...new Set(days.map(e => getWeekKey(new Date(dayKeyOf(e.date) + 'T12:00:00'))))];
+      const weeks = {};
+      for (const wk of weekKeys){
+        const w = await tx.get(weekDocRef(wk));
+        if (w.exists()) weeks[wk] = w.data();
+      }
+      const changed = new Set();
+      days.forEach(entry => {
+        const day = dayKeyOf(entry.date);
+        const wk = getWeekKey(new Date(day + 'T12:00:00'));
+        const week = weeks[wk];
+        if (!week || !Array.isArray(week.students)) return;
+        (entry.students || []).forEach(rec => {
+          if (!metivtaRecordHasFlags(rec)) return;
+          const ws = week.students.find(x => x.id === rec.id);
+          if (!ws) return;
+          if (!ws.days) ws.days = {};
+          if (!ws.days[day]) ws.days[day] = {};
+          const val = metivtaDayScore(rec.metivtaFlags);
+          if (ws.days[day].metivtaVal !== val){ ws.days[day].metivtaVal = val; changed.add(wk); }
+        });
+      });
+      changed.forEach(wk => tx.set(weekDocRef(wk), weeks[wk]));
+      main.metivtaWeeklySyncV1 = true;
+      tx.set(stateDocRef, main);
+    });
+    serverSnap.main.metivtaWeeklySyncV1 = true;
+    await refreshArchiveAndRender();
+  } catch(e){
+    // tried again on the next load
+  }
+}
+
 function fitTextSpan(td, text){
   const span = document.createElement('span');
   span.className = 'ff-fit';
@@ -3909,14 +4120,9 @@ function renderWeeklyEntryInto(entry, container, allWeeklyEntries){
         });
       } else {
         valueSpans.push(fitTextSpan(td, val || ''));
-        if (isDayView){
-          td.style.cursor = 'pointer';
-          td.addEventListener('click', () => {
-            promptEditArchiveValue(val, (newVal) => {
-              commitOp({ kind: 'weekCell', weekKey: entry.weekKey, sid: s.id, field, target: viewMode, value: newVal });
-            });
-          });
-        }
+        // Taken from the board: corrected in the class archive (or, for
+        // מתיבתא, the Metivta table) - not editable here.
+        td.title = field === 'metivtaVal' ? 'מתעדכן מטבלת המתיבתא' : 'מתעדכן מטבלת הארכיון של הכיתה';
       }
       tr.appendChild(td);
     });
@@ -4067,7 +4273,24 @@ async function exportArchiveDaysCSV(days, allOptions, groupType){
 
 let todayArchiveSortIndex = null;
 
+// מקוואות/רמב"ם of an archived day live in its week document (they are
+// checkmarks counted per day, not class points).
+const ARCHIVE_WEEKLY_KEYS = { mikvaot: 'mikvaotVal', rambam: 'rambamVal' };
+
+function archivedWeeklyDayValue(entry, studentId, field){
+  const day = dayKeyOf(entry.date);
+  const weekKey = getWeekKey(new Date(day + 'T12:00:00'));
+  const week = (state.archive || []).find(e => e.type === 'weekly' && e.weekKey === weekKey);
+  const rec = week && (week.students || []).find(x => x.id === studentId);
+  return (rec && rec.days && rec.days[day] && rec.days[day][field]) || 0;
+}
+
+function dayHasClassData(entry){
+  return (entry.students || []).some(s => CATEGORIES.some(c => (s.cats || {})[c.key]) || s.purchases || s.minusTotal);
+}
+
 function getTodayArchiveValue(entry, studentId, activeKey){
+  if (ARCHIVE_WEEKLY_KEYS[activeKey]) return archivedWeeklyDayValue(entry, studentId, ARCHIVE_WEEKLY_KEYS[activeKey]);
   const s = entry.students.find(x => x.id === studentId);
   const cats = (s && s.cats) || {};
   if (activeKey === 'total') return CATEGORIES.reduce((sum, c) => sum + (cats[c.key] || 0), 0) + ((s && s.minusTotal) || 0);
@@ -4080,11 +4303,13 @@ function renderTodayHistoryTable(container){
   todayHistoryContainerEl = container;
   container.innerHTML = '';
 
-  const days = getDisplayArchive().filter(e => e.type !== 'weekly' && !e.isLive);
+  const days = getDisplayArchive().filter(e => e.type !== 'weekly' && !e.isLive && !(e.metivtaAddedDay && !dayHasClassData(e)));
 
   const allOptions = [
     { key: 'total', label: 'סה"כ' },
     ...MERGE_GROUPS[1].filter(k => !isFrequentToggleKey(k)).map(k => ({ key: k, label: categoryLabel(k) })),
+    { key: 'mikvaot', label: 'מקוואות' },
+    { key: 'rambam', label: 'רמב"ם' },
     ...MERGE_GROUPS[0].map(k => ({ key: k, label: categoryLabel(k) })),
     { key: 'minus', label: '-' },
     { key: 'shop', label: '🛒' }
@@ -4186,7 +4411,9 @@ function renderTodayHistoryTable(container){
       const activeKey = getHistoryActive('archive_shared', groupType, allOptions[0].key);
 
       let val;
-      if (activeKey === 'total'){
+      if (ARCHIVE_WEEKLY_KEYS[activeKey]){
+        val = archivedWeeklyDayValue(entry, student.id, ARCHIVE_WEEKLY_KEYS[activeKey]);
+      } else if (activeKey === 'total'){
         val = CATEGORIES.reduce((sum, c) => sum + (cats[c.key] || 0), 0) + ((s && s.minusTotal) || 0);
       } else if (activeKey === 'shop'){
         val = -((s && s.purchases || 0) * PURCHASE_COST);
@@ -4200,8 +4427,14 @@ function renderTodayHistoryTable(container){
       if (activeKey !== 'total'){
         td.style.cursor = 'pointer';
         td.addEventListener('click', () => {
-          if (!s) return;
           const dayKey = dayKeyOf(entry.date);
+          if (ARCHIVE_WEEKLY_KEYS[activeKey]){
+            promptEditArchiveValue(val, (newVal) => {
+              commitOp({ kind: 'weekCell', weekKey: getWeekKey(new Date(dayKey + 'T12:00:00')), sid: student.id, field: ARCHIVE_WEEKLY_KEYS[activeKey], target: dayKey, value: newVal });
+            });
+            return;
+          }
+          if (!s) return;
           const field = activeKey === 'shop' ? 'purchases' : activeKey === 'minus' ? 'minusTotal' : 'cat:' + activeKey;
           const current = activeKey === 'shop' ? (s.purchases || 0) : activeKey === 'minus' ? (s.minusTotal || 0) : (cats[activeKey] || 0);
           promptEditArchiveValue(current, (newVal) => {
@@ -4502,7 +4735,7 @@ async function initApp(){
     subscribeToRemoteStateChanges();
     // Changes left waiting from an earlier visit (e.g. made offline).
     if (pendingOps.length) scheduleSync(0);
-    backfillZ1HistoryIfNeeded();
+    backfillZ1HistoryIfNeeded().then(backfillWeeklyMetivtaIfNeeded);
 
     if (document.fonts && document.fonts.ready){
       document.fonts.ready.then(() => {
