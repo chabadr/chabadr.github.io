@@ -750,14 +750,14 @@ function appendRosterNameCells(tr, r, withArchiveMark){
 
 // ---------- Tab: משתנים (phones + parent links) ----------
 async function renderPhonesTab(container){
-  // The מתיבתא ז1 page is not in the page menu - it is opened from here.
+  // The הנוסע המתמיד ז1 page is not in the page menu - it is opened from here.
   const z1Row = document.createElement('div');
   z1Row.className = 'hint';
-  z1Row.append('מתיבתא ז1: ');
+  z1Row.append('הנוסע המתמיד ז1: ');
   const z1Link = document.createElement('a');
-  z1Link.href = new URL('index.html?view=z1', location.href).href;
+  z1Link.href = new URL('z1', location.href).href;
   z1Link.target = '_blank';
-  z1Link.textContent = z1Link.href;
+  z1Link.textContent = z1Link.href.replace(/^https?:\/\//, '');
   z1Link.style.direction = 'ltr';
   z1Link.style.color = 'var(--ink)';
   z1Row.appendChild(z1Link);

@@ -1323,10 +1323,41 @@ function rebuildViewAndRender(){
 }
 
 function renderAll(){
+  // Redrawing empties the tables for a moment, which would scroll the page
+  // back to the top - keep it (and any scrolled table) where it was.
+  const keep = captureScrollPositions();
   render();
   if (document.getElementById('frequentArchiveView').style.display !== 'none') renderFrequentFlyerView();
   if (document.getElementById('metivtaView').style.display !== 'none') renderMetivtaView();
   if (document.getElementById('z1View').style.display !== 'none') renderZ1View();
+  restoreScrollPositions(keep);
+}
+
+// Redraws a table without moving the page (see renderAll).
+function keepScroll(draw){
+  const keep = captureScrollPositions();
+  draw();
+  restoreScrollPositions(keep);
+}
+
+function captureScrollPositions(){
+  const inner = [];
+  document.querySelectorAll('body *').forEach(el => {
+    if (el.scrollTop || el.scrollLeft){
+      const same = el.className ? document.getElementsByClassName(el.className.split(' ')[0]) : [];
+      inner.push({ cls: el.className, index: [...same].indexOf(el), top: el.scrollTop, left: el.scrollLeft });
+    }
+  });
+  return { x: window.scrollX, y: window.scrollY, inner };
+}
+
+function restoreScrollPositions(keep){
+  keep.inner.forEach(k => {
+    if (!k.cls) return;
+    const el = document.getElementsByClassName(k.cls.split(' ')[0])[k.index];
+    if (el){ el.scrollTop = k.top; el.scrollLeft = k.left; }
+  });
+  if (window.scrollX !== keep.x || window.scrollY !== keep.y) window.scrollTo(keep.x, keep.y);
 }
 
 // ---- applying operations (pure: the same code builds what is shown and
@@ -2628,6 +2659,10 @@ function weekMissingDayNames(entry){
 }
 
 function renderFrequentFlyerView(){
+  keepScroll(() => renderFrequentFlyerViewNow());
+}
+
+function renderFrequentFlyerViewNow(){
   const el = document.getElementById('frequentArchiveView');
   el.innerHTML = '';
 
@@ -2853,6 +2888,10 @@ let metivtaArchiveOpen = false;
 const metivtaSelectedKeys = new Set();
 
 function renderMetivtaView(){
+  keepScroll(() => renderMetivtaViewNow());
+}
+
+function renderMetivtaViewNow(){
   const el = document.getElementById('metivtaView');
   el.innerHTML = '';
   if (!Array.isArray(state.metivtaExtra)) state.metivtaExtra = [];
@@ -3738,10 +3777,14 @@ async function exportZ1CSV(entry, mode){
     const str = String(cell);
     return /[",\n]/.test(str) ? '"' + str.replace(/"/g, '""') + '"' : str;
   }).join(',')).join('\r\n');
-  await saveCsvFile('מתיבתא-ז1_' + entry.weekKey + (mode === 'total' ? '' : '_' + mode) + '.csv', csv);
+  await saveCsvFile('הנוסע-המתמיד-ז1_' + entry.weekKey + (mode === 'total' ? '' : '_' + mode) + '.csv', csv);
 }
 
 function renderZ1View(){
+  keepScroll(() => renderZ1ViewNow());
+}
+
+function renderZ1ViewNow(){
   const el = document.getElementById('z1View');
   el.innerHTML = '';
   const weeks = getDisplayArchive().filter(e => e.type === 'weekly' && Array.isArray(e.z1Students) && e.z1Students.length);
@@ -3750,7 +3793,7 @@ function renderZ1View(){
   if (weeks.length === 0){
     const empty = document.createElement('div');
     empty.className = 'archive-date';
-    empty.textContent = 'מתיבתא ז1 · אין עדיין נתונים';
+    empty.textContent = 'הנוסע המתמיד ז1 · אין עדיין נתונים';
     header.appendChild(empty);
     el.appendChild(header);
     return;
@@ -3764,7 +3807,7 @@ function renderZ1View(){
   const group = document.createElement('div');
   group.className = 'header-group';
   const title = document.createElement('span');
-  title.textContent = 'מתיבתא ז1';
+  title.textContent = 'הנוסע המתמיד ז1';
   group.appendChild(title);
   const sep = document.createElement('span');
   sep.textContent = '·';
@@ -4302,6 +4345,10 @@ function getTodayArchiveValue(entry, studentId, activeKey){
 }
 
 function renderTodayHistoryTable(container){
+  keepScroll(() => renderTodayHistoryTableNow(container));
+}
+
+function renderTodayHistoryTableNow(container){
   todayHistoryContainerEl = container;
   container.innerHTML = '';
 
@@ -4707,8 +4754,8 @@ async function initApp(){
     // The מתיבתא ז1 page has no menu - nothing on it leads to the rest of the site.
     const isZ1Page = new URLSearchParams(location.search).get('view') === 'z1';
     if (isZ1Page){
-      document.title = 'מתיבתא ז1';
-      // Installed as an app, this page is its own app ("מתיבתא ז1").
+      document.title = 'הנוסע המתמיד ז1';
+      // Installed as an app, this page is its own app ("הנוסע המתמיד ז1").
       document.querySelector('link[rel="manifest"]').href = 'manifest-z1.webmanifest';
       ['boards', 'todaySummary', 'frequentArchiveView'].forEach(id => { document.getElementById(id).style.display = 'none'; });
     }
