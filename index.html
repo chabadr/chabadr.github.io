@@ -4,6 +4,9 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>כיתה ז</title>
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#22304A">
+<link rel="icon" href="icons/icon-192.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Frank+Ruhl+Libre:wght@500;700;900&family=Rubik:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
@@ -4470,6 +4473,8 @@ async function initApp(){
     const isZ1Page = new URLSearchParams(location.search).get('view') === 'z1';
     if (isZ1Page){
       document.title = 'מתיבתא ז1';
+      // Installed as an app, this page is its own app ("מתיבתא ז1").
+      document.querySelector('link[rel="manifest"]').href = 'manifest-z1.webmanifest';
       ['boards', 'todaySummary', 'frequentArchiveView'].forEach(id => { document.getElementById(id).style.display = 'none'; });
     }
     // The menu (with its refresh option) is there even while waiting to load.

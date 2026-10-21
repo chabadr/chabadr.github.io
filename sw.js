@@ -6,6 +6,7 @@
 const CACHE = 'class-site-v1';
 const CORE = [
   './', 'index.html', 'admin.html', 'page-nav.js', 'save-banner.js', 'firebase-config.js', 'sms-config.js',
+  'manifest.webmanifest', 'manifest-z1.webmanifest', 'icons/icon-192.png', 'icons/icon-512.png',
   'https://www.gstatic.com/firebasejs/10.13.0/firebase-app.js',
   'https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js'
 ];
