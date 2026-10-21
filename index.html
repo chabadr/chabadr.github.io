@@ -971,7 +971,12 @@ const firebaseApp = isFirebaseConfigured ? initializeApp(firebaseConfig) : null;
 // the browser doesn't allow it.
 const firestoreDb = firebaseApp ? (() => {
   try{
-    return initializeFirestore(firebaseApp, { localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() }) });
+    return initializeFirestore(firebaseApp, {
+      localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() }),
+      // Plain requests instead of a streaming connection - the streaming one
+      // is what internet filters and school networks most often break.
+      experimentalForceLongPolling: true
+    });
   } catch(e){
     return getFirestore(firebaseApp);
   }
@@ -3985,6 +3990,7 @@ function computeSortScore(student){
 }
 
 function render(){
+  if (!state) return;
   const boardsEl = document.getElementById('boards');
   boardsEl.innerHTML = '';
   const half = Math.ceil(TOTAL_STUDENTS / 2);
@@ -4101,6 +4107,7 @@ function currentView(){
 // someone is on the Metivta page it does nothing, so there is no automatic
 // page switching away from it.
 function enterScreensaver(){
+  if (!state) return;
   if (screensaverActive) return;
   if (currentView() !== 'main') return;
   screensaverActive = true;
@@ -4184,7 +4191,13 @@ function hideLoadWaitNotice(){
 async function loadStateUntilConnected(){
   for (;;){
     try{
-      await loadState();
+      // A load that just hangs (no answer, no error) shows the notice too.
+      const slow = setTimeout(() => showLoadWaitNotice('השרת לא עונה - כנראה אין חיבור לאינטרנט, או שהרשת חוסמת את שרת הנתונים'), 8000);
+      try{
+        await loadState();
+      } finally {
+        clearTimeout(slow);
+      }
       hideLoadWaitNotice();
       return;
     } catch(e){
