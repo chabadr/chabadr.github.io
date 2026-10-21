@@ -45,5 +45,11 @@ if ((Get-ItemProperty $winlogon -ErrorAction SilentlyContinue).DefaultUserName -
   Remove-ItemProperty $winlogon -Name 'DefaultPassword' -ErrorAction SilentlyContinue
 }
 Remove-Item -Path "$env:SystemDrive\Kiosk" -Recurse -Force -ErrorAction SilentlyContinue
+if ($profilePath) {
+  $names = @((-join [char[]](0x05DB, 0x05D9, 0x05EA, 0x05D4, 0x20, 0x05D6)), (-join [char[]](0x05DE, 0x05E9, 0x05D5, 0x05D1)))
+  foreach ($d in @("$profilePath\Desktop", "$profilePath\OneDrive\Desktop")) {
+    foreach ($n in $names) { Remove-Item -Path "$d\$n.lnk" -Force -ErrorAction SilentlyContinue }
+  }
+}
 
 Write-Host 'Kiosk removed. Restart the computer.'

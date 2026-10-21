@@ -13,7 +13,8 @@
     the taskbar stays, so the network (Wi-Fi) button and the on-screen
     keyboard button are there, and Edge's own refresh button is on its toolbar;
   - Task Manager, the command prompt, Control Panel/Settings, the Run box
-    and browsing the drives are blocked.
+    and browsing the drives are blocked;
+  - desktop shortcuts open each site again if its window was closed.
   Everything applies to that user only. Keep (or let this script create) a
   separate administrator account for maintenance - that is where you undo
   it, with remove-kiosk.ps1.
@@ -121,6 +122,33 @@ try {
     [gc]::Collect(); [gc]::WaitForPendingFinalizers()
     & reg.exe unload 'HKU\KioskSetup' | Out-Null
   }
+}
+
+# ---- Desktop shortcuts: open each site again if its window was closed ----
+$kioskDir = "$env:SystemDrive\Kiosk"
+New-Item -ItemType Directory -Force -Path $kioskDir | Out-Null
+$classIcon = "$kioskDir\class.ico"
+try { Invoke-WebRequest -Uri 'https://chabadr.github.io/icons/icon.ico' -OutFile $classIcon -UseBasicParsing } catch { $classIcon = $null }
+# The kiosk user's desktop folder (it may have been moved, e.g. to OneDrive).
+$desktop = "$profilePath\Desktop"
+& reg.exe load "HKU\KioskShell" "$profilePath\NTUSER.DAT" 2>$null | Out-Null
+foreach ($root in @("Registry::HKEY_USERS\$sid", 'Registry::HKEY_USERS\KioskShell')) {
+  $folders = Get-ItemProperty "$root\Software\Microsoft\Windows\CurrentVersion\Explorer\User Shell Folders" -ErrorAction SilentlyContinue
+  if ($folders -and $folders.Desktop) { $desktop = $folders.Desktop -replace '%USERPROFILE%', $profilePath; break }
+}
+[gc]::Collect(); [gc]::WaitForPendingFinalizers()
+& reg.exe unload 'HKU\KioskShell' 2>$null | Out-Null
+New-Item -ItemType Directory -Force -Path $desktop | Out-Null
+# Hebrew names, written as character codes so this file stays plain ASCII.
+$className = -join [char[]](0x05DB, 0x05D9, 0x05EA, 0x05D4, 0x20, 0x05D6)   # kita zayin
+$mashovName = -join [char[]](0x05DE, 0x05E9, 0x05D5, 0x05D1)              # mashov
+$shell = New-Object -ComObject WScript.Shell
+foreach ($sc in @(@{ Name = $className; Url = $StartPages[0]; Icon = $classIcon }, @{ Name = $mashovName; Url = $StartPages[1]; Icon = $null })) {
+  $lnk = $shell.CreateShortcut("$desktop\$($sc.Name).lnk")
+  $lnk.TargetPath = $Edge
+  $lnk.Arguments = "--app=$($sc.Url) --start-maximized"
+  if ($sc.Icon) { $lnk.IconLocation = $sc.Icon } else { $lnk.IconLocation = "$Edge,0" }
+  $lnk.Save()
 }
 
 # ---- Sign in to the kiosk user automatically ----
