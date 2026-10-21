@@ -214,6 +214,27 @@ function computeDailyResetUpdate(mainData, dailyDays, weeklyEntry){
     ws.metivtaVal = (ws.metivtaVal || 0) - (prevDay ? prevDay.metivtaVal || 0 : 0) + dayMetivtaVal;
   });
 
+  // מתיבתא ז1: the day's Metivta score of every student now in class ז1
+  // (either group, unless moved to the Metivta page's archive table), kept
+  // in the same week document under z1Students, keyed 'main-<id>'/'extra-<id>'.
+  if (!Array.isArray(weeklyEntryOut.z1Students)) weeklyEntryOut.z1Students = [];
+  const z1Archived = new Set(mainData.metivtaArchivedKeys || []);
+  [['main', mainData.students || [], mainData.metivtaClass || {}, 2], ['extra', mainData.metivtaExtra || [], mainData.metivtaExtraClass || {}, 1]].forEach(([group, list, classMap, defaultClass]) => {
+    list.forEach(s => {
+      const raw = classMap[s.id];
+      const cls = String((raw === undefined || raw === null || raw === '') ? defaultClass : raw).replace(/^ז\s*/, '');
+      const key = group + '-' + s.id;
+      if (cls !== '1' || z1Archived.has(key)) return;
+      let zr = weeklyEntryOut.z1Students.find(x => x.key === key);
+      if (!zr){ zr = { key, days: {} }; weeklyEntryOut.z1Students.push(zr); }
+      if (!zr.days) zr.days = {};
+      const prevZ1 = zr.days[entryDayKey];
+      zr.days[entryDayKey] = {
+        metivtaVal: (prevZ1 && !metivtaRecordHasFlags(s)) ? (prevZ1.metivtaVal || 0) : metivtaDayScore(s.metivtaFlags || defaultMetivtaFlags)
+      };
+    });
+  });
+
   const newMainData = JSON.parse(JSON.stringify(mainData));
   newMainData.students.forEach(s => {
     const daily = CATEGORIES.reduce((sum, c) => sum + (s.cats[c.key] || 0), 0);

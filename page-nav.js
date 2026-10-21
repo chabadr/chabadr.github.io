@@ -59,6 +59,7 @@ const NAV_CSS = `
 export const PAGES = [
   { key: 'main', label: 'כיתה', href: 'index.html' },
   { key: 'metivta', label: 'מתיבתא', href: 'index.html?view=metivta' },
+  { key: 'z1', label: 'מתיבתא ז1', href: 'index.html?view=z1' },
   { key: 'admin', label: 'ניהול', href: 'admin.html' }
 ];
 

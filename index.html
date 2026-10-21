@@ -828,6 +828,8 @@
   <div class="archive-view" id="frequentArchiveView" style="padding: 0 20px 20px;"></div>
 
   <div class="archive-view" id="metivtaView" style="display:none; padding: 20px 20px;"></div>
+
+  <div class="archive-view" id="z1View" style="display:none; padding: 20px 20px;"></div>
 </div>
 
 <script type="module">
@@ -1304,6 +1306,7 @@ function renderAll(){
   render();
   if (document.getElementById('frequentArchiveView').style.display !== 'none') renderFrequentFlyerView();
   if (document.getElementById('metivtaView').style.display !== 'none') renderMetivtaView();
+  if (document.getElementById('z1View').style.display !== 'none') renderZ1View();
 }
 
 // ---- applying operations (pure: the same code builds what is shown and
@@ -1502,6 +1505,29 @@ function refreshWeeklyFromDay(snap, day, sid, rec, fields, t, touched){
   });
 }
 
+// Whether a student is in class ז1 right now (and not in the Metivta archive).
+function isZ1Student(main, group, sid){
+  const map = (group === 'extra' ? main.metivtaExtraClass : main.metivtaClass) || {};
+  const raw = map[sid];
+  const cls = String((raw === undefined || raw === null || raw === '') ? (group === 'extra' ? 1 : 2) : raw).replace(/^ז\s*/, '');
+  return cls === '1' && !(main.metivtaArchivedKeys || []).includes(group + '-' + sid);
+}
+
+// The מתיבתא ז1 value of an archived day follows a corrected Metivta mark.
+function refreshZ1FromDay(snap, day, group, sid, flags, t, touched){
+  const key = group + '-' + sid;
+  const week = ensureWeekDoc(snap, getWeekKey(new Date(day + 'T12:00:00')), touched);
+  if (!Array.isArray(week.z1Students)) week.z1Students = [];
+  let zr = week.z1Students.find(x => x.key === key);
+  if (!zr){
+    if (!isZ1Student(snap.main, group, sid)) return;
+    zr = { key, days: {} };
+    week.z1Students.push(zr);
+  }
+  if (!zr.days) zr.days = {};
+  if (acceptEdit(week, 'w:z1:' + key + ':metivtaVal:' + day, t)) zr.days[day] = { metivtaVal: metivtaDayScore(flags || DEFAULT_METIVTA_FLAGS) };
+}
+
 // A board change that reaches the server after its day was already archived.
 function applyArchivedDayOp(snap, op, touched){
   if (op.kind === 'resetCol') return;
@@ -1532,6 +1558,7 @@ function applyArchivedDayOp(snap, op, touched){
     if (!acceptEdit(entry, 'd:mflags:' + group + ':' + op.sid, op.t)) return;
     rec.metivtaFlags = { ...op.flags };
     if (group === 'main') refreshWeeklyFromDay(snap, op.day, op.sid, rec, ['metivtaVal'], op.t, touched);
+    refreshZ1FromDay(snap, op.day, group, op.sid, op.flags, op.t, touched);
   }
 }
 
@@ -1561,8 +1588,12 @@ function applyArchiveCellOp(snap, op, touched){
     : op.field.startsWith('cat:') ? 'd:cat:' + op.sid + ':' + op.field.slice(4)
     : 'd:' + op.field + ':' + op.sid;
   if (!acceptEdit(entry, cellKey, op.t)) return;
-  if (op.field === 'metivtaFlags') rec.metivtaFlags = { ...op.value };
-  else if (op.field.startsWith('cat:')) rec.cats[op.field.slice(4)] = op.value;
+  if (op.field === 'metivtaFlags'){
+    rec.metivtaFlags = { ...op.value };
+    refreshZ1FromDay(snap, op.target, group, op.sid, op.value, op.t, touched);
+    return;
+  }
+  if (op.field.startsWith('cat:')) rec.cats[op.field.slice(4)] = op.value;
   else rec[op.field] = op.value;
 }
 
@@ -2021,6 +2052,27 @@ function computeDailyResetUpdate(mainData, dailyDays, weeklyEntry){
     ws.mikvaotVal = currentMikvaot - ws.baselineMikvaot;
     ws.rambamVal = currentRambam - ws.baselineRambam;
     ws.metivtaVal = (ws.metivtaVal || 0) - (prevDay ? prevDay.metivtaVal || 0 : 0) + dayMetivtaVal;
+  });
+
+  // מתיבתא ז1: the day's Metivta score of every student now in class ז1
+  // (either group, unless moved to the Metivta page's archive table), kept
+  // in the same week document under z1Students, keyed 'main-<id>'/'extra-<id>'.
+  if (!Array.isArray(weeklyEntryOut.z1Students)) weeklyEntryOut.z1Students = [];
+  const z1Archived = new Set(mainData.metivtaArchivedKeys || []);
+  [['main', mainData.students || [], mainData.metivtaClass || {}, 2], ['extra', mainData.metivtaExtra || [], mainData.metivtaExtraClass || {}, 1]].forEach(([group, list, classMap, defaultClass]) => {
+    list.forEach(s => {
+      const raw = classMap[s.id];
+      const cls = String((raw === undefined || raw === null || raw === '') ? defaultClass : raw).replace(/^ז\s*/, '');
+      const key = group + '-' + s.id;
+      if (cls !== '1' || z1Archived.has(key)) return;
+      let zr = weeklyEntryOut.z1Students.find(x => x.key === key);
+      if (!zr){ zr = { key, days: {} }; weeklyEntryOut.z1Students.push(zr); }
+      if (!zr.days) zr.days = {};
+      const prevZ1 = zr.days[entryDayKey];
+      zr.days[entryDayKey] = {
+        metivtaVal: (prevZ1 && !metivtaRecordHasFlags(s)) ? (prevZ1.metivtaVal || 0) : metivtaDayScore(s.metivtaFlags || defaultMetivtaFlags)
+      };
+    });
   });
 
   const newMainData = JSON.parse(JSON.stringify(mainData));
@@ -2507,6 +2559,7 @@ async function lookupMissingParshaNames(weeklyEntries){
     if (!found) return;
     try{ localStorage.setItem(PARSHA_CACHE_KEY, JSON.stringify(parshaNameCache)); } catch(e){}
     if (document.getElementById('frequentArchiveView').style.display !== 'none') renderFrequentFlyerView();
+    if (document.getElementById('z1View').style.display !== 'none') renderZ1View();
   } catch(e){
     // best-effort only - the date fallback label stays
   }
@@ -3314,8 +3367,20 @@ document.addEventListener('scroll', (e) => {
 // One dropdown, nested: the outer list is the parshas/weeks; clicking a
 // parsha expands a sub-list of that week's days (or "total") right under it,
 // instead of opening a second, separate dropdown.
-function buildWeekDaySelectDropdown(allWeeklyEntries, selectedEntry){
-  const currentMode = weeklyArchiveViewMode[selectedEntry.weekKey] || 'total';
+// ctx: where the picked week/day is kept and what to redraw - the
+// הנוסע המתמיד table by default, the מתיבתא ז1 page passes its own.
+const FREQUENT_WEEK_PICKER = {
+  modes: weeklyArchiveViewMode,
+  select: (weekKey, mode) => {
+    selectedWeeklyKey = weekKey;
+    weeklyArchiveViewMode[weekKey] = mode;
+    renderFrequentFlyerView();
+  }
+};
+
+function buildWeekDaySelectDropdown(allWeeklyEntries, selectedEntry, ctx){
+  ctx = ctx || FREQUENT_WEEK_PICKER;
+  const currentMode = ctx.modes[selectedEntry.weekKey] || 'total';
 
   const list = document.createElement('div');
   list.className = 'merged-dropdown-list merged-dropdown-list-right';
@@ -3336,10 +3401,8 @@ function buildWeekDaySelectDropdown(allWeeklyEntries, selectedEntry){
     parshaMain.appendChild(parshaLabel);
     parshaMain.addEventListener('click', (e) => {
       e.stopPropagation();
-      selectedWeeklyKey = weekEntry.weekKey;
-      weeklyArchiveViewMode[weekEntry.weekKey] = 'total';
       document.querySelectorAll('.merged-dropdown-list.open').forEach(l => l.classList.remove('open'));
-      renderFrequentFlyerView();
+      ctx.select(weekEntry.weekKey, 'total');
     });
 
     const expandBtn = document.createElement('span');
@@ -3364,10 +3427,8 @@ function buildWeekDaySelectDropdown(allWeeklyEntries, selectedEntry){
       dayOpt.textContent = label;
       dayOpt.addEventListener('click', (e) => {
         e.stopPropagation();
-        selectedWeeklyKey = weekEntry.weekKey;
-        weeklyArchiveViewMode[weekEntry.weekKey] = value;
         document.querySelectorAll('.merged-dropdown-list.open').forEach(l => l.classList.remove('open'));
-        renderFrequentFlyerView();
+        ctx.select(weekEntry.weekKey, value);
       });
       subList.appendChild(dayOpt);
     };
@@ -3460,6 +3521,196 @@ function fitNamesColumnWidth(th, names){
   const padding = (parseFloat(cs.paddingLeft) || 0) + (parseFloat(cs.paddingRight) || 0);
   const border = (parseFloat(cs.borderLeftWidth) || 0) + (parseFloat(cs.borderRightWidth) || 0);
   th.style.width = Math.ceil(maxWidth + padding + border + 4) + 'px';
+}
+
+// ---- מתיבתא ז1 ----
+// A page of its own (index.html?view=z1, no menu - nothing leads from it to
+// the rest of the site): the הנוסע המתמיד table with only the Metivta
+// column, for the students of class ז1. Its data is z1Students in each
+// archiveWeeks document, written at every day change (computeDailyResetUpdate)
+// and kept in step when an archived Metivta mark is corrected.
+const Z1_PICKER_MODES = {};
+let z1SelectedWeekKey = null;
+let z1Sort = null; // null | 'name' | 'value'
+
+function z1KeyName(key){
+  const [group, id] = key.split('-');
+  return metivtaFullName(parseInt(id, 10), group === 'extra');
+}
+
+function z1DayValue(day){
+  return day ? Math.max(0, day.metivtaVal || 0) : 0;
+}
+
+// Past Sunday-Thursday school days (no Metivta on Friday) on which nobody
+// in ז1 has a Metivta mark.
+function z1MissingDayNames(entry){
+  const weekStartD = new Date(entry.weekStart);
+  const today = todayStr();
+  const missing = [];
+  for (let i = 0; i < 5; i++){
+    const d = new Date(weekStartD);
+    d.setDate(d.getDate() + i);
+    const k = dayKeyOf(d.toISOString());
+    if (k >= today) break;
+    if (!entry.z1Students.some(r => r.days && r.days[k] && r.days[k].metivtaVal >= 0)) missing.push(HEBREW_WEEKDAY_NAMES[i]);
+  }
+  return missing;
+}
+
+async function exportZ1CSV(entry, mode){
+  const rows = [['שם', 'מתיבתא']];
+  entry.z1Students.forEach(r => {
+    const v = mode === 'total' ? Object.values(r.days || {}).reduce((sum, d) => sum + z1DayValue(d), 0) : z1DayValue((r.days || {})[mode]);
+    rows.push([z1KeyName(r.key), v]);
+  });
+  const csv = rows.map(row => row.map(cell => {
+    const str = String(cell);
+    return /[",\n]/.test(str) ? '"' + str.replace(/"/g, '""') + '"' : str;
+  }).join(',')).join('\r\n');
+  await saveCsvFile('מתיבתא-ז1_' + entry.weekKey + (mode === 'total' ? '' : '_' + mode) + '.csv', csv);
+}
+
+function renderZ1View(){
+  const el = document.getElementById('z1View');
+  el.innerHTML = '';
+  const weeks = getDisplayArchive().filter(e => e.type === 'weekly' && Array.isArray(e.z1Students) && e.z1Students.length);
+  const header = document.createElement('div');
+  header.className = 'archive-entry';
+  if (weeks.length === 0){
+    const empty = document.createElement('div');
+    empty.className = 'archive-date';
+    empty.textContent = 'מתיבתא ז1 · אין עדיין נתונים';
+    header.appendChild(empty);
+    el.appendChild(header);
+    return;
+  }
+  if (!z1SelectedWeekKey || !weeks.find(w => w.weekKey === z1SelectedWeekKey)) z1SelectedWeekKey = weeks[0].weekKey;
+  const entry = weeks.find(w => w.weekKey === z1SelectedWeekKey);
+  const mode = Z1_PICKER_MODES[entry.weekKey] || 'total';
+
+  const dateEl = document.createElement('div');
+  dateEl.className = 'archive-date weekly-header-row weekly-header-row-nowrap';
+  const group = document.createElement('div');
+  group.className = 'header-group';
+  const title = document.createElement('span');
+  title.textContent = 'מתיבתא ז1';
+  group.appendChild(title);
+  const sep = document.createElement('span');
+  sep.textContent = '·';
+  group.appendChild(sep);
+  group.appendChild(buildWeekDaySelectDropdown(weeks, entry, {
+    modes: Z1_PICKER_MODES,
+    select: (weekKey, m) => { z1SelectedWeekKey = weekKey; Z1_PICKER_MODES[weekKey] = m; renderZ1View(); }
+  }));
+  const missing = z1MissingDayNames(entry);
+  if (missing.length){
+    const sep2 = document.createElement('span');
+    sep2.textContent = '·';
+    group.appendChild(sep2);
+    const m = document.createElement('span');
+    m.className = 'missing-days';
+    m.textContent = 'ימים חסרים: ' + missing.join(', ');
+    group.appendChild(m);
+  }
+  dateEl.appendChild(group);
+  const exportBtn = document.createElement('button');
+  exportBtn.className = 'export-btn';
+  exportBtn.textContent = 'אקסל';
+  exportBtn.addEventListener('click', () => exportZ1CSV(entry, mode));
+  dateEl.appendChild(exportBtn);
+  header.appendChild(dateEl);
+
+  const valueOf = (r) => mode === 'total'
+    ? Object.values(r.days || {}).reduce((sum, d) => sum + z1DayValue(d), 0)
+    : z1DayValue((r.days || {})[mode]);
+  let rows = entry.z1Students.slice();
+  if (z1Sort === 'value') rows.sort((a, b) => valueOf(b) - valueOf(a));
+  if (z1Sort === 'name') rows.sort((a, b) => z1KeyName(a.key).localeCompare(z1KeyName(b.key), 'he'));
+
+  const table = document.createElement('table');
+  table.className = 'archive-table z1-table';
+  const thead = document.createElement('thead');
+  const trh = document.createElement('tr');
+  [['שם', 'name'], ['מתיבתא', 'value']].forEach(([label, key]) => {
+    const th = document.createElement('th');
+    th.style.cursor = 'pointer';
+    th.textContent = label + (z1Sort === key ? ' ▼' : '');
+    th.addEventListener('click', () => { z1Sort = key; renderZ1View(); });
+    trh.appendChild(th);
+  });
+  thead.appendChild(trh);
+  table.appendChild(thead);
+  const tbody = document.createElement('tbody');
+  rows.forEach(r => {
+    const tr = document.createElement('tr');
+    const nameTd = document.createElement('td');
+    nameTd.textContent = z1KeyName(r.key);
+    tr.appendChild(nameTd);
+    const valTd = document.createElement('td');
+    valTd.textContent = valueOf(r) || '';
+    tr.appendChild(valTd);
+    tbody.appendChild(tr);
+  });
+  table.appendChild(tbody);
+  const scrollWrap = document.createElement('div');
+  scrollWrap.className = 'table-scroll';
+  scrollWrap.appendChild(table);
+  header.appendChild(scrollWrap);
+  el.appendChild(header);
+}
+
+function showZ1(){
+  ['boards', 'todaySummary', 'frequentArchiveView', 'metivtaView'].forEach(id => { document.getElementById(id).style.display = 'none'; });
+  document.getElementById('z1View').style.display = 'block';
+  renderZ1View();
+}
+
+// One time: fill מתיבתא ז1 for the days already in the daily archive, from
+// each day's Metivta marks, for the students now in ז1. Days a week already
+// holds are left as they are.
+async function backfillZ1HistoryIfNeeded(){
+  if (!serverSnap || serverSnap.main.z1HistoryV1 || !firestoreDb) return;
+  try{
+    await runTransaction(firestoreDb, async (tx) => {
+      const mainSnap = await tx.get(stateDocRef);
+      if (!mainSnap.exists()) return;
+      const main = normalizeMain(mainSnap.data());
+      if (main.z1HistoryV1) return;
+      const ds = await tx.get(dailyArchiveDocRef);
+      const days = ds.exists() && Array.isArray(ds.data().days) ? ds.data().days : [];
+      const weekKeys = [...new Set(days.map(e => getWeekKey(new Date(dayKeyOf(e.date) + 'T12:00:00'))))];
+      const weeks = {};
+      for (const wk of weekKeys){
+        const w = await tx.get(weekDocRef(wk));
+        if (w.exists()) weeks[wk] = w.data();
+      }
+      const snap = { main, dailyDays: days, weeks };
+      const touched = { main: false, daily: false, weeks: new Set() };
+      days.forEach(entry => {
+        const day = dayKeyOf(entry.date);
+        const week = ensureWeekDoc(snap, getWeekKey(new Date(day + 'T12:00:00')), touched);
+        if (!Array.isArray(week.z1Students)) week.z1Students = [];
+        [['main', entry.students || []], ['extra', entry.metivtaExtraStudents || []]].forEach(([group, recs]) => {
+          recs.forEach(rec => {
+            if (!isZ1Student(main, group, rec.id)) return;
+            const key = group + '-' + rec.id;
+            let zr = week.z1Students.find(x => x.key === key);
+            if (!zr){ zr = { key, days: {} }; week.z1Students.push(zr); }
+            if (!zr.days) zr.days = {};
+            if (!zr.days[day]) zr.days[day] = { metivtaVal: metivtaDayScoreLegacyAware(rec) };
+          });
+        });
+      });
+      touched.weeks.forEach(wk => tx.set(weekDocRef(wk), snap.weeks[wk]));
+      main.z1HistoryV1 = true;
+      tx.set(stateDocRef, main);
+    });
+    serverSnap.main.z1HistoryV1 = true;
+    await refreshArchiveAndRender();
+  } catch(e){
+    // tried again on the next load
+  }
 }
 
 function fitTextSpan(td, text){
@@ -4097,6 +4348,7 @@ let screensaverActive = false;
 let screensaverStateIndex = 0;
 
 function currentView(){
+  if (document.getElementById('z1View').style.display !== 'none') return 'z1';
   if (document.getElementById('metivtaView').style.display !== 'none') return 'metivta';
   return 'main';
 }
@@ -4214,8 +4466,14 @@ async function loadStateUntilConnected(){
 
 async function initApp(){
   try{
+    // The מתיבתא ז1 page has no menu - nothing on it leads to the rest of the site.
+    const isZ1Page = new URLSearchParams(location.search).get('view') === 'z1';
+    if (isZ1Page){
+      document.title = 'מתיבתא ז1';
+      ['boards', 'todaySummary', 'frequentArchiveView'].forEach(id => { document.getElementById(id).style.display = 'none'; });
+    }
     // The menu (with its refresh option) is there even while waiting to load.
-    mountPageNav({
+    if (!isZ1Page) mountPageNav({
       getCurrent: currentView,
       onNavigate: (key) => {
         if (!state) return false;
@@ -4232,18 +4490,20 @@ async function initApp(){
     if (new URLSearchParams(location.search).get('view') === 'metivta'){
       showMetivta();
     }
+    if (isZ1Page) showZ1();
     setStatus('');
     checkAutoReset();
     scheduleNextAutoResetCheck();
     subscribeToRemoteStateChanges();
     // Changes left waiting from an earlier visit (e.g. made offline).
     if (pendingOps.length) scheduleSync(0);
+    backfillZ1HistoryIfNeeded();
 
     if (document.fonts && document.fonts.ready){
       document.fonts.ready.then(() => {
         fitAllTextCells();
         if (currentView() === 'main') renderFrequentFlyerView();
-        else renderMetivtaView();
+        else if (currentView() === 'metivta') renderMetivtaView();
       });
     }
   } catch(e){
