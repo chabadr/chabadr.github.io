@@ -14,7 +14,11 @@
     keyboard button are there, and Edge's own refresh button is on its toolbar;
   - Task Manager, the command prompt, Control Panel/Settings, the Run box
     and browsing the drives are blocked;
-  - desktop shortcuts open each site again if its window was closed.
+  - desktop shortcuts open each site again if its window was closed;
+  - nothing else starts at sign-in (other startup programs would only show
+    the "restrictions in effect" message), so each site opens once;
+  - the taskbar hides itself and shows when the mouse goes to the bottom;
+  - a large mouse pointer.
   Everything applies to that user only. Keep (or let this script create) a
   separate administrator account for maintenance - that is where you undo
   it, with remove-kiosk.ps1.
@@ -22,6 +26,7 @@
 param(
   [string]$KioskUser = 'user',
   [string]$MaintenanceAdmin = 'maintenance',
+  [ValidateRange(1, 15)][int]$CursorSize = 8,
   [switch]$NoAutoLogin
 )
 $ErrorActionPreference = 'Stop'
@@ -84,13 +89,41 @@ try {
   # An earlier version of this script replaced the desktop with Edge - undo that.
   Remove-ItemProperty -Path "$hive\Software\Microsoft\Windows NT\CurrentVersion\Winlogon" -Name 'Shell' -ErrorAction SilentlyContinue
 
-  # Open each site in its own app window at sign-in.
+  # Nothing else starts at sign-in: every other startup program is blocked
+  # anyway and would only pop up "restrictions in effect", and an old Edge
+  # entry would open the site a second time. They are kept aside so that
+  # remove-kiosk.ps1 can put them back.
   $runKey = "$hive\Software\Microsoft\Windows\CurrentVersion\Run"
+  $backupKey = "$hive\Software\ClassKiosk"
+  if (-not (Test-Path "$backupKey\RunBackup")) { New-Item -Path "$backupKey\RunBackup" -Force | Out-Null }
+  $run = Get-Item -Path $runKey -ErrorAction SilentlyContinue
+  if ($run) {
+    foreach ($n in $run.GetValueNames()) {
+      if ($n -in @('ClassKiosk', 'ClassKioskMashov', '')) { continue }
+      New-ItemProperty -Path "$backupKey\RunBackup" -Name $n -Value $run.GetValue($n, $null, 'DoNotExpandEnvironmentNames') -PropertyType String -Force | Out-Null
+      Remove-ItemProperty -Path $runKey -Name $n
+    }
+  }
+  $explorerPol = "$hive\Software\Microsoft\Windows\CurrentVersion\Policies\Explorer"
+  Set-Value $explorerPol 'DisableLocalMachineRun' 1 'DWord'      # programs set to start for every user
+  Set-Value $explorerPol 'DisableLocalMachineRunOnce' 1 'DWord'
+  Set-Value $explorerPol 'DisableCurrentUserRunOnce' 1 'DWord'
+  # The all-users Startup folder: turned off for this user only.
+  $approved = "$hive\Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\StartupFolder"
+  $off = [byte[]](3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)
+  $disabledCommon = @()
+  foreach ($f in Get-ChildItem "$env:ProgramData\Microsoft\Windows\Start Menu\Programs\StartUp" -File -ErrorAction SilentlyContinue) {
+    if ($f.Name -eq 'desktop.ini') { continue }
+    Set-Value $approved $f.Name $off 'Binary'
+    $disabledCommon += $f.Name
+  }
+  Set-Value $backupKey 'DisabledCommonStartup' ([string[]]$disabledCommon) 'MultiString'
+
+  # Open each site in its own app window at sign-in.
   Set-Value $runKey 'ClassKiosk' "`"$Edge`" --app=$($StartPages[0]) --start-maximized --no-first-run"
   Set-Value $runKey 'ClassKioskMashov' "`"$Edge`" --app=$($StartPages[1]) --start-maximized --no-first-run"
 
   # Only the allowed programs can be started; no Run box, Control Panel/Settings or drives.
-  $explorerPol = "$hive\Software\Microsoft\Windows\CurrentVersion\Policies\Explorer"
   Set-Value $explorerPol 'RestrictRun' 1 'DWord'
   Set-List "$explorerPol\RestrictRun" $AllowedPrograms
   Set-Value $explorerPol 'NoRun' 1 'DWord'
@@ -102,6 +135,21 @@ try {
   # On-screen keyboard button on the taskbar (works with the mouse - there is
   # no physical keyboard).
   Set-Value "$hive\Software\Microsoft\TabletTip\1.7" 'TipbandDesiredVisibility' 1 'DWord'
+
+  # The taskbar hides itself; it shows when the mouse goes to the bottom of
+  # the screen.
+  $stuck = "$hive\Software\Microsoft\Windows\CurrentVersion\Explorer\StuckRects3"
+  $bytes = (Get-ItemProperty -Path $stuck -Name 'Settings' -ErrorAction SilentlyContinue).Settings
+  if ($bytes -and $bytes.Length -gt 8) {
+    $bytes[8] = $bytes[8] -bor 1
+    Set-Value $stuck 'Settings' $bytes 'Binary'
+  } else {
+    Write-Host 'Could not set the taskbar to hide itself - set it by hand: right-click the taskbar -> Taskbar settings -> Automatically hide the taskbar.'
+  }
+
+  # A large mouse pointer (1 = normal ... 15 = largest).
+  Set-Value "$hive\Software\Microsoft\Accessibility" 'CursorSize' $CursorSize 'DWord'
+  Set-Value "$hive\Control Panel\Cursors" 'CursorBaseSize' (32 + 16 * ($CursorSize - 1)) 'DWord'
 
   # Edge.
   $edgePol = "$hive\Software\Policies\Microsoft\Edge"
@@ -117,6 +165,8 @@ try {
   Set-Value $edgePol 'HubsSidebarEnabled' 0 'DWord'
   Set-Value $edgePol 'PasswordManagerEnabled' 1 'DWord'         # keep saved usernames and passwords
   Set-Value $edgePol 'ClearBrowsingDataOnExit' 0 'DWord'        # never wipe the site's data
+  Set-Value $edgePol 'StartupBoostEnabled' 0 'DWord'            # Edge does not reopen windows by itself at sign-in
+  Set-Value $edgePol 'BackgroundModeEnabled' 0 'DWord'
 } finally {
   if ($loadedHere) {
     [gc]::Collect(); [gc]::WaitForPendingFinalizers()
@@ -124,9 +174,19 @@ try {
   }
 }
 
-# ---- Desktop shortcuts: open each site again if its window was closed ----
 $kioskDir = "$env:SystemDrive\Kiosk"
 New-Item -ItemType Directory -Force -Path $kioskDir | Out-Null
+
+# ---- The user's own Startup folder: emptied (kept aside in C:\Kiosk) ----
+$startup = "$profilePath\AppData\Roaming\Microsoft\Windows\Start Menu\Programs\Startup"
+$startupBackup = "$kioskDir\StartupBackup"
+foreach ($f in Get-ChildItem $startup -File -ErrorAction SilentlyContinue) {
+  if ($f.Name -eq 'desktop.ini') { continue }
+  New-Item -ItemType Directory -Force -Path $startupBackup | Out-Null
+  Move-Item -Path $f.FullName -Destination $startupBackup -Force
+}
+
+# ---- Desktop shortcuts: open each site again if its window was closed ----
 $classIcon = "$kioskDir\class.ico"
 try { Invoke-WebRequest -Uri 'https://chabadr.github.io/icons/icon.ico' -OutFile $classIcon -UseBasicParsing } catch { $classIcon = $null }
 # The kiosk user's desktop folder (it may have been moved, e.g. to OneDrive).

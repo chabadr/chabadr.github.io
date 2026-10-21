@@ -25,8 +25,30 @@ try {
     Remove-ItemProperty -Path "$hive\Software\Microsoft\Windows NT\CurrentVersion\Winlogon" -Name 'Shell' -ErrorAction SilentlyContinue
     Remove-ItemProperty -Path "$hive\Software\Microsoft\Windows\CurrentVersion\Run" -Name 'ClassKiosk' -ErrorAction SilentlyContinue
     Remove-ItemProperty -Path "$hive\Software\Microsoft\Windows\CurrentVersion\Run" -Name 'ClassKioskMashov' -ErrorAction SilentlyContinue
+    # Put back the startup programs that setup-kiosk.ps1 kept aside.
+    $backupKey = "$hive\Software\ClassKiosk"
+    $saved = Get-Item -Path "$backupKey\RunBackup" -ErrorAction SilentlyContinue
+    if ($saved) {
+      foreach ($n in $saved.GetValueNames()) {
+        New-ItemProperty -Path "$hive\Software\Microsoft\Windows\CurrentVersion\Run" -Name $n -Value $saved.GetValue($n, $null, 'DoNotExpandEnvironmentNames') -PropertyType String -Force | Out-Null
+      }
+    }
+    $approved = "$hive\Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\StartupFolder"
+    foreach ($n in @((Get-ItemProperty -Path $backupKey -Name 'DisabledCommonStartup' -ErrorAction SilentlyContinue).DisabledCommonStartup)) {
+      if ($n) { Remove-ItemProperty -Path $approved -Name $n -ErrorAction SilentlyContinue }
+    }
+    Remove-Item -Path $backupKey -Recurse -Force -ErrorAction SilentlyContinue
+    # Taskbar always shown again; normal mouse pointer.
+    $stuck = "$hive\Software\Microsoft\Windows\CurrentVersion\Explorer\StuckRects3"
+    $bytes = (Get-ItemProperty -Path $stuck -Name 'Settings' -ErrorAction SilentlyContinue).Settings
+    if ($bytes -and $bytes.Length -gt 8) {
+      $bytes[8] = $bytes[8] -band 0xFE
+      New-ItemProperty -Path $stuck -Name 'Settings' -Value $bytes -PropertyType Binary -Force | Out-Null
+    }
+    if (Test-Path "$hive\Software\Microsoft\Accessibility") { New-ItemProperty -Path "$hive\Software\Microsoft\Accessibility" -Name 'CursorSize' -Value 1 -PropertyType DWord -Force | Out-Null }
+    if (Test-Path "$hive\Control Panel\Cursors") { New-ItemProperty -Path "$hive\Control Panel\Cursors" -Name 'CursorBaseSize' -Value 32 -PropertyType DWord -Force | Out-Null }
     $explorerPol = "$hive\Software\Microsoft\Windows\CurrentVersion\Policies\Explorer"
-    foreach ($n in 'RestrictRun', 'NoRun', 'NoControlPanel', 'NoViewOnDrive') { Remove-ItemProperty -Path $explorerPol -Name $n -ErrorAction SilentlyContinue }
+    foreach ($n in 'RestrictRun', 'NoRun', 'NoControlPanel', 'NoViewOnDrive', 'DisableLocalMachineRun', 'DisableLocalMachineRunOnce', 'DisableCurrentUserRunOnce') { Remove-ItemProperty -Path $explorerPol -Name $n -ErrorAction SilentlyContinue }
     Remove-Item -Path "$explorerPol\RestrictRun" -Recurse -Force -ErrorAction SilentlyContinue
     Remove-ItemProperty -Path "$hive\Software\Microsoft\Windows\CurrentVersion\Policies\System" -Name 'DisableTaskMgr' -ErrorAction SilentlyContinue
     Remove-ItemProperty -Path "$hive\Software\Policies\Microsoft\Windows\System" -Name 'DisableCMD' -ErrorAction SilentlyContinue
@@ -43,6 +65,11 @@ $winlogon = 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon'
 if ((Get-ItemProperty $winlogon -ErrorAction SilentlyContinue).DefaultUserName -eq $KioskUser) {
   Set-ItemProperty $winlogon 'AutoAdminLogon' '0'
   Remove-ItemProperty $winlogon -Name 'DefaultPassword' -ErrorAction SilentlyContinue
+}
+if ($profilePath -and (Test-Path "$env:SystemDrive\Kiosk\StartupBackup")) {
+  $startup = "$profilePath\AppData\Roaming\Microsoft\Windows\Start Menu\Programs\Startup"
+  New-Item -ItemType Directory -Force -Path $startup | Out-Null
+  Get-ChildItem "$env:SystemDrive\Kiosk\StartupBackup" -File | Move-Item -Destination $startup -Force
 }
 Remove-Item -Path "$env:SystemDrive\Kiosk" -Recurse -Force -ErrorAction SilentlyContinue
 if ($profilePath) {
