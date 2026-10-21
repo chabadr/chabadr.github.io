@@ -3,9 +3,10 @@
   Sets up the classroom computer as a kiosk on an EXISTING Windows user
   (default: "user"):
   - signs in to that user automatically when the computer starts;
-  - opens Microsoft Edge (normal mode, not InPrivate - the site keeps its
-    data, and Edge keeps saved usernames and passwords) with the class site
-    and Mashov as two tabs;
+  - opens the class site and Mashov each in its own app window of Microsoft
+    Edge (no address bar or tabs - like installed apps; normal mode, not
+    InPrivate, so the site keeps its data and Edge keeps saved usernames and
+    passwords);
   - only those sites can be opened; downloads, file dialogs, developer tools
     and InPrivate are off;
   - no other program can be started (only Edge and the on-screen keyboard);
@@ -28,7 +29,7 @@ $StartPages = @('https://chabadr.github.io/', 'https://web.mashov.info/')
 # Allowed sites, including the services the class site itself loads from.
 $AllowedSites = @('chabadr.github.io', 'mashov.info', 'googleapis.com', 'gstatic.com', 'hebcal.com', 'sms4free.co.il')
 # The only programs this user may start.
-$AllowedPrograms = @('msedge.exe', 'TabTip.exe', 'osk.exe')
+$AllowedPrograms = @('msedge.exe', 'msedge_proxy.exe', 'TabTip.exe', 'osk.exe')
 
 $Edge = @("${env:ProgramFiles(x86)}\Microsoft\Edge\Application\msedge.exe",
           "$env:ProgramFiles\Microsoft\Edge\Application\msedge.exe") | Where-Object { Test-Path $_ } | Select-Object -First 1
@@ -82,9 +83,10 @@ try {
   # An earlier version of this script replaced the desktop with Edge - undo that.
   Remove-ItemProperty -Path "$hive\Software\Microsoft\Windows NT\CurrentVersion\Winlogon" -Name 'Shell' -ErrorAction SilentlyContinue
 
-  # Open Edge with the two sites at sign-in.
-  $pages = $StartPages -join ' '
-  Set-Value "$hive\Software\Microsoft\Windows\CurrentVersion\Run" 'ClassKiosk' "`"$Edge`" --start-maximized --no-first-run $pages"
+  # Open each site in its own app window at sign-in.
+  $runKey = "$hive\Software\Microsoft\Windows\CurrentVersion\Run"
+  Set-Value $runKey 'ClassKiosk' "`"$Edge`" --app=$($StartPages[0]) --start-maximized --no-first-run"
+  Set-Value $runKey 'ClassKioskMashov' "`"$Edge`" --app=$($StartPages[1]) --start-maximized --no-first-run"
 
   # Only the allowed programs can be started; no Run box, Control Panel/Settings or drives.
   $explorerPol = "$hive\Software\Microsoft\Windows\CurrentVersion\Policies\Explorer"

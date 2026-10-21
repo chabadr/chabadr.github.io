@@ -24,6 +24,7 @@ try {
   if (Test-Path $hive) {
     Remove-ItemProperty -Path "$hive\Software\Microsoft\Windows NT\CurrentVersion\Winlogon" -Name 'Shell' -ErrorAction SilentlyContinue
     Remove-ItemProperty -Path "$hive\Software\Microsoft\Windows\CurrentVersion\Run" -Name 'ClassKiosk' -ErrorAction SilentlyContinue
+    Remove-ItemProperty -Path "$hive\Software\Microsoft\Windows\CurrentVersion\Run" -Name 'ClassKioskMashov' -ErrorAction SilentlyContinue
     $explorerPol = "$hive\Software\Microsoft\Windows\CurrentVersion\Policies\Explorer"
     foreach ($n in 'RestrictRun', 'NoRun', 'NoControlPanel', 'NoViewOnDrive') { Remove-ItemProperty -Path $explorerPol -Name $n -ErrorAction SilentlyContinue }
     Remove-Item -Path "$explorerPol\RestrictRun" -Recurse -Force -ErrorAction SilentlyContinue
