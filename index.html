@@ -2745,9 +2745,11 @@ function showMetivtaStatusExceptionsModal(studentId, isExtra){
   msg.textContent = 'סמן חריגות:';
   box.appendChild(msg);
 
+  // Every choice is saved and closes the window.
   function applyChange(){
     f.ok = false;
     commitMetivtaFlags(studentId, isExtra, f);
+    overlay.remove();
   }
 
   const toggleRow = document.createElement('div');
@@ -2806,7 +2808,7 @@ function showMetivtaStatusExceptionsModal(studentId, isExtra){
   closeBtn.className = 'modal-btn modal-btn-cancel';
   closeBtn.textContent = 'סגור';
   closeBtn.style.marginTop = '10px';
-  closeBtn.addEventListener('click', () => document.body.removeChild(overlay));
+  closeBtn.addEventListener('click', () => overlay.remove());
   box.appendChild(closeBtn);
 
   overlay.appendChild(box);
@@ -4880,6 +4882,8 @@ function promptEditArchiveMetivtaFlags(flags, onChange){
   requireArchiveEditAccess(() => {
     const overlay = document.createElement('div');
     overlay.className = 'modal-overlay';
+    // Every choice is saved and closes the window.
+    const save = () => { overlay.remove(); onChange(); };
 
     const box = document.createElement('div');
     box.className = 'modal-box';
@@ -4904,7 +4908,7 @@ function promptEditArchiveMetivtaFlags(flags, onChange){
       refreshOkBtn();
       refreshToggleBtns();
       disturbLabel.textContent = 'הפרעות: ' + flags.disturbCount;
-      onChange();
+      save();
     });
     box.appendChild(okBtn);
 
@@ -4928,7 +4932,7 @@ function promptEditArchiveMetivtaFlags(flags, onChange){
         if (flags.late || flags.leftEarly || flags.disturbCount > 0) flags.ok = false;
         refreshToggleBtns();
         refreshOkBtn();
-        onChange();
+        save();
       });
       return btn;
     }
@@ -4954,7 +4958,7 @@ function promptEditArchiveMetivtaFlags(flags, onChange){
       if (flags.disturbCount > 0) flags.disturbCount--;
       disturbLabel.textContent = 'הפרעות: ' + flags.disturbCount;
       refreshOkBtn();
-      onChange();
+      save();
     });
     disturbRow.appendChild(minusBtn);
 
@@ -4966,7 +4970,7 @@ function promptEditArchiveMetivtaFlags(flags, onChange){
       flags.ok = false;
       disturbLabel.textContent = 'הפרעות: ' + flags.disturbCount;
       refreshOkBtn();
-      onChange();
+      save();
     });
     disturbRow.appendChild(plusBtn);
     box.appendChild(disturbRow);
@@ -4975,7 +4979,7 @@ function promptEditArchiveMetivtaFlags(flags, onChange){
     closeBtn.className = 'modal-btn modal-btn-cancel';
     closeBtn.textContent = 'סגור';
     closeBtn.style.marginTop = '10px';
-    closeBtn.addEventListener('click', () => document.body.removeChild(overlay));
+    closeBtn.addEventListener('click', () => overlay.remove());
     box.appendChild(closeBtn);
 
     overlay.appendChild(box);
