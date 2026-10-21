@@ -53,13 +53,11 @@ const NAV_CSS = `
   }
   .page-nav-option:hover{ background: #FBF1D9; }
   .page-nav-option.active{ color: #B8902E; font-weight: 700; }
-  .page-nav-reload{ border-top: 1px solid #D9D2BC; }
 `;
 
 export const PAGES = [
   { key: 'main', label: 'כיתה', href: 'index.html' },
   { key: 'metivta', label: 'מתיבתא', href: 'index.html?view=metivta' },
-  { key: 'z1', label: 'מתיבתא ז1', href: 'index.html?view=z1' },
   { key: 'admin', label: 'ניהול', href: 'admin.html' }
 ];
 
@@ -101,14 +99,6 @@ export function mountPageNav({ getCurrent, onNavigate }){
     });
     list.appendChild(a);
   });
-
-  // Reloading the page with the mouse only (the kiosk has no keyboard).
-  const reload = document.createElement('a');
-  reload.className = 'page-nav-option page-nav-reload';
-  reload.href = '#';
-  reload.textContent = '⟳ רענון';
-  reload.addEventListener('click', (e) => { e.preventDefault(); location.reload(); });
-  list.appendChild(reload);
 
   btn.addEventListener('click', (e) => {
     e.stopPropagation();
