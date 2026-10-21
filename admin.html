@@ -313,6 +313,21 @@
   }
   .small-btn:disabled{ opacity: 0.5; cursor: default; }
   .select-all-row button.preset-btn.active{ background: var(--gold); color: #fff; }
+  .kiosk-steps{ margin: 0 0 12px; padding-right: 20px; font-size: 14px; line-height: 1.7; }
+  .code-wrap{ display: flex; align-items: flex-start; gap: 10px; }
+  .code-block{
+    flex: 1;
+    margin: 0;
+    padding: 10px 12px;
+    background: #22304A;
+    color: #F6F3EA;
+    border-radius: 8px;
+    direction: ltr;
+    text-align: left;
+    font-size: 13px;
+    white-space: pre;
+    overflow-x: auto;
+  }
   table.sent-table td.msg-cell{ white-space: pre-wrap; text-align: right; min-width: 220px; }
   .loading, .empty, .err{
     text-align: center;
@@ -386,7 +401,8 @@ const SMS4FREE_ERROR_MESSAGES = {
 const TABS = [
   { key: 'phones', label: 'משתנים' },
   { key: 'history', label: 'עדכוני הורים' },
-  { key: 'sms', label: 'שליחת הודעות' }
+  { key: 'sms', label: 'שליחת הודעות' },
+  { key: 'kiosk', label: 'קיוסק' }
 ];
 
 const DEFAULT_SENDER = '058-4012374';
@@ -486,6 +502,7 @@ function renderActiveTab(){
   if (activeTab === 'history') renderHistoryTab(content);
   else if (activeTab === 'phones') renderPhonesTab(content);
   else if (activeTab === 'sms') renderSmsTab(content);
+  else if (activeTab === 'kiosk') renderKioskTab(content);
 }
 
 // ---------- Tab: עדכוני הורים ----------
@@ -559,6 +576,76 @@ async function renderHistoryTab(container){
     status.className = 'err';
     status.textContent = 'שגיאה בטעינת היסטוריית התשובות: ' + (e && e.message ? e.message : String(e));
   }
+}
+
+// ---------- Tab: קיוסק ----------
+const KIOSK_SCRIPT_BASE = 'https://chabadr.github.io/kiosk/';
+
+function kioskCommand(scriptName){
+  return 'iwr ' + KIOSK_SCRIPT_BASE + scriptName + ' -OutFile $env:TEMP\\' + scriptName + '\n'
+    + 'powershell -ExecutionPolicy Bypass -File $env:TEMP\\' + scriptName;
+}
+
+function buildCodeBox(code){
+  const wrap = document.createElement('div');
+  wrap.className = 'code-wrap';
+  const pre = document.createElement('pre');
+  pre.className = 'code-block';
+  pre.textContent = code;
+  wrap.appendChild(pre);
+  const copyBtn = document.createElement('button');
+  copyBtn.type = 'button';
+  copyBtn.className = 'small-btn';
+  copyBtn.textContent = 'העתקה';
+  copyBtn.addEventListener('click', async () => {
+    try{
+      await navigator.clipboard.writeText(code);
+      copyBtn.textContent = 'הועתק ✓';
+    } catch(e){
+      const range = document.createRange();
+      range.selectNodeContents(pre);
+      const sel = window.getSelection();
+      sel.removeAllRanges();
+      sel.addRange(range);
+      copyBtn.textContent = 'סומן - להעתקה Ctrl+C';
+    }
+    setTimeout(() => { copyBtn.textContent = 'העתקה'; }, 2500);
+  });
+  wrap.appendChild(copyBtn);
+  return wrap;
+}
+
+function renderKioskTab(container){
+  const addCard = (title, steps, code) => {
+    const card = document.createElement('div');
+    card.className = 'card';
+    const h = document.createElement('div');
+    h.className = 'section-title';
+    h.textContent = title;
+    card.appendChild(h);
+    const ol = document.createElement('ol');
+    ol.className = 'kiosk-steps';
+    steps.forEach(text => {
+      const li = document.createElement('li');
+      li.textContent = text;
+      ol.appendChild(li);
+    });
+    card.appendChild(ol);
+    card.appendChild(buildCodeBox(code));
+    container.appendChild(card);
+  };
+  addCard('התקנת הקיוסק במחשב הכיתה', [
+    'מבטלים קיוסק קודם, אם יש (הגדרות ← חשבונות ← משתמשים אחרים ← קיוסק ← הסר, או מוחקים קיצור דרך של Edge).',
+    'במשתמש user: קליק ימני על שורת המשימות ← הגדרות שורת המשימות ← סמלים במגש המערכת ← מקלדת מגע: תמיד.',
+    'נכנסים לחשבון המנהל ופותחים PowerShell כמנהל (התחל ← PowerShell ← קליק ימני ← הפעל כמנהל).',
+    'מדביקים את הפקודה ולוחצים Enter. כשמתבקשת הסיסמה של user מקלידים אותה (או Enter אם אין).',
+    'מפעילים את המחשב מחדש.'
+  ], kioskCommand('setup-kiosk.ps1'));
+  addCard('ביטול הקיוסק', [
+    'נכנסים לחשבון המנהל (התחל ← תמונת המשתמש ← יציאה).',
+    'פותחים PowerShell כמנהל, מדביקים את הפקודה ולוחצים Enter.',
+    'מפעילים את המחשב מחדש.'
+  ], kioskCommand('remove-kiosk.ps1'));
 }
 
 // ---------- Shared: the Metivta student list ----------
