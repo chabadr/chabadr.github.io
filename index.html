@@ -1182,7 +1182,9 @@ async function loadState(){
   let main = snap.exists() ? snap.data() : null;
   if (main && !main.archiveSplitV1) main = await migrateArchiveSplitIfNeeded(main);
   if (main && !(Array.isArray(main.students) && main.students.length === TOTAL_STUDENTS)){
-    throw new Error('הנתונים שנטענו מהשרת אינם בפורמט תקין');
+    const err = new Error('הנתונים שנטענו מהשרת אינם בפורמט תקין');
+    err.badFormat = true;
+    throw err;
   }
   if (main) lastServerMainJson = JSON.stringify(main);
   const [days, weeks] = await Promise.all([fetchArchiveDays(), fetchArchiveWeeksMap()]);
@@ -4156,24 +4158,67 @@ function showStartupError(e){
   document.body.appendChild(banner);
 }
 
+// Shown instead of an error while the first load can't reach the data server
+// (and this computer has no saved copy yet); the load is retried by itself.
+function showLoadWaitNotice(reason){
+  let box = document.getElementById('loadWaitNotice');
+  if (!box){
+    box = document.createElement('div');
+    box.id = 'loadWaitNotice';
+    box.style.cssText = 'max-width:440px;margin:80px auto;padding:28px 24px;background:#fff;border:1px solid var(--line);'
+      + 'border-radius:14px;box-shadow:0 8px 24px rgba(34,48,74,0.08);text-align:center;font-family:Rubik,sans-serif;color:var(--ink);';
+    document.getElementById('appContent').prepend(box);
+  }
+  box.innerHTML = '<div style="font-size:22px;font-weight:800;margin-bottom:10px;">⏳ ממתין לחיבור</div>'
+    + '<div style="font-size:15px;line-height:1.6;">אי אפשר לטעון את הנתונים כרגע.</div>'
+    + '<div class="load-wait-reason" style="font-size:14px;font-weight:700;color:var(--danger);margin-top:8px;"></div>'
+    + '<div style="font-size:13px;color:var(--ink-soft);margin-top:10px;">האתר ינסה שוב לבד כל כמה שניות, ויוצג מיד כשהחיבור יחזור.</div>';
+  box.querySelector('.load-wait-reason').textContent = 'סיבה: ' + reason;
+}
+
+function hideLoadWaitNotice(){
+  const box = document.getElementById('loadWaitNotice');
+  if (box) box.remove();
+}
+
+async function loadStateUntilConnected(){
+  for (;;){
+    try{
+      await loadState();
+      hideLoadWaitNotice();
+      return;
+    } catch(e){
+      if (e && e.badFormat) throw e;
+      showLoadWaitNotice(describeSaveError(e));
+      await new Promise(resolve => {
+        const done = () => { window.removeEventListener('online', done); clearTimeout(timer); resolve(); };
+        const timer = setTimeout(done, 5000);
+        window.addEventListener('online', done);
+      });
+    }
+  }
+}
+
 async function initApp(){
   try{
+    // The menu (with its refresh option) is there even while waiting to load.
+    mountPageNav({
+      getCurrent: currentView,
+      onNavigate: (key) => {
+        if (!state) return false;
+        if (key === 'main'){ showMain(); history.replaceState(null, '', location.pathname); return true; }
+        if (key === 'metivta'){ showMetivta(); history.replaceState(null, '', location.pathname + '?view=metivta'); return true; }
+        return false;
+      }
+    });
     setStatus('טוען…');
-    await loadState();
+    await loadStateUntilConnected();
     lastViewJson = JSON.stringify(state);
     render();
     renderFrequentFlyerView();
     if (new URLSearchParams(location.search).get('view') === 'metivta'){
       showMetivta();
     }
-    mountPageNav({
-      getCurrent: currentView,
-      onNavigate: (key) => {
-        if (key === 'main'){ showMain(); history.replaceState(null, '', location.pathname); return true; }
-        if (key === 'metivta'){ showMetivta(); history.replaceState(null, '', location.pathname + '?view=metivta'); return true; }
-        return false;
-      }
-    });
     setStatus('');
     checkAutoReset();
     scheduleNextAutoResetCheck();
