@@ -251,7 +251,6 @@ function computeDailyResetUpdate(mainData, dailyDays, weeklyEntry){
     s.metivta = { attendance: 0, behavior: 0 };
     s.metivtaFlags = { ok: false, late: false, leftEarly: false, disturbCount: 0 };
   });
-  newMainData.lastAutoResetDate = todayStr();
   newMainData.lastArchivedDay = mainData.lastActivityDate || null;
   newMainData.lastActivityDate = null;
   newMainData.editTimes = Object.fromEntries(Object.entries(mainData.editTimes || {}).filter(([k]) => !k.startsWith('d:')));

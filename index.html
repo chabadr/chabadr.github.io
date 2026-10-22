@@ -67,13 +67,6 @@
     letter-spacing: 0.5px;
   }
 
-  .subtitle{
-    font-size: 14px;
-    color: var(--ink-soft);
-    margin-top: 6px;
-    font-weight: 500;
-  }
-
   .board-col{
     display: flex;
     flex-direction: column;
@@ -95,68 +88,10 @@
     min-height: 18px;
   }
 
-  button.reset-btn{
-    background: var(--paper);
-    border: 1.5px solid var(--danger);
-    color: var(--danger);
-    font-family: 'Rubik', sans-serif;
-    font-weight: 600;
-    font-size: 14px;
-    padding: 10px 20px;
-    border-radius: var(--radius);
-    cursor: pointer;
-    transition: all 0.15s ease;
-  }
-  button.reset-btn:hover{
-    background: var(--danger);
-    color: var(--paper);
-  }
-  button.reset-btn:active{ transform: scale(0.97); }
-
-  button.archive-btn{
-    background: var(--paper);
-    border: 1.5px solid var(--ink);
-    color: var(--ink);
-    font-family: 'Rubik', sans-serif;
-    font-weight: 600;
-    font-size: 14px;
-    padding: 10px 20px;
-    border-radius: var(--radius);
-    cursor: pointer;
-    transition: all 0.15s ease;
-  }
-  button.archive-btn:hover{
-    background: var(--ink);
-    color: var(--paper);
-  }
-  button.archive-btn:active{ transform: scale(0.97); }
-
   .archive-view{
     max-width: 900px;
     margin: 0 auto;
     padding: 24px 20px 60px;
-  }
-
-  .archive-header{
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 16px;
-    margin-bottom: 24px;
-    flex-wrap: wrap;
-  }
-
-  .archive-title{
-    font-family: 'Frank Ruhl Libre', serif;
-    font-size: 22px;
-    color: var(--ink);
-    margin: 0;
-  }
-
-  .archive-empty{
-    text-align: center;
-    color: var(--ink-soft);
-    padding: 40px 0;
   }
 
   .archive-entry{
@@ -255,17 +190,6 @@
     overflow-x: auto;
     overflow-y: visible;
     -webkit-overflow-scrolling: touch;
-  }
-
-  .board-title{
-    background: var(--ink);
-    color: var(--paper);
-    font-family: 'Frank Ruhl Libre', serif;
-    font-weight: 700;
-    font-size: 15px;
-    text-align: center;
-    padding: 10px;
-    letter-spacing: 0.5px;
   }
 
   table{
@@ -779,39 +703,6 @@
     col:not(.col-hide-narrow){ width: 33.33% !important; }
   }
 
-  .lock-screen{
-    min-height: 100vh;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    padding: 20px;
-  }
-
-  .lock-box{
-    background: #fff;
-    border: 1px solid var(--line);
-    border-radius: 14px;
-    box-shadow: 0 2px 0 var(--line), 0 8px 24px rgba(34,48,74,0.08);
-    padding: 32px 28px;
-    max-width: 340px;
-    width: 100%;
-    text-align: center;
-  }
-
-  .lock-title{
-    font-family: 'Frank Ruhl Libre', serif;
-    font-weight: 900;
-    font-size: 24px;
-    color: var(--ink);
-    margin: 0 0 6px;
-  }
-
-  .lock-sub{
-    font-size: 14px;
-    color: var(--ink-soft);
-    margin-bottom: 18px;
-  }
-
   .lock-input{
     width: 100%;
     font-family: 'Rubik', sans-serif;
@@ -856,7 +747,7 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-app.js";
 import {
   getFirestore, initializeFirestore, persistentLocalCache, persistentMultipleTabManager,
-  doc, getDoc, getDocs, collection, setDoc, onSnapshot, runTransaction,
+  doc, getDoc, getDocs, collection, onSnapshot, runTransaction,
 } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
 import { firebaseConfig, isFirebaseConfigured } from "./firebase-config.js";
 import { mountPageNav } from "./page-nav.js";
@@ -932,12 +823,8 @@ function studentName(id){
 // parent-update log) stays correct - only how the name is shown inside
 // Metivta's own views changes.
 //
-// Each entry is a { family, first } pair. Older saved data (and real
-// production data from before this split existed) stored a single plain
-// string here instead - normalizeMetivtaNameEntry treats that legacy string
-// as the first name, so no previously-entered custom name is lost.
+// Each entry is a { family, first } pair.
 function normalizeMetivtaNameEntry(raw){
-  if (typeof raw === 'string') return { family: '', first: raw };
   if (raw && typeof raw === 'object') return { family: raw.family || '', first: raw.first || '' };
   return { family: '', first: '' };
 }
@@ -1043,43 +930,6 @@ async function fetchArchiveWeeks(){
   return [];
 }
 
-// One-time split of a pre-existing document that still has the archive
-// embedded in it (the old format) into the new, separate archive documents.
-// A stale browser tab still running the pre-split code (loaded before this
-// change shipped, never refreshed) has no idea about archiveSplitV1 - an
-// ordinary save from it can write the main doc back without that flag,
-// making this run again long after the real split already happened. At that
-// point mainData.archive no longer exists (the first split deleted it), so
-// treating that as "there was never anything to migrate" would silently
-// wipe the already-split daily archive and weekly docs. Guard against that
-// by checking whether the daily archive doc already exists - if it does,
-// the split already happened and this only needs to stamp the flag back
-// onto the main doc, never touch the archive documents again.
-async function migrateArchiveSplitIfNeeded(mainData){
-  if (mainData.archiveSplitV1) return mainData;
-  try{
-    const alreadySplitSnap = await getDoc(dailyArchiveDocRef);
-    if (!alreadySplitSnap.exists()){
-      const oldArchive = Array.isArray(mainData.archive) ? mainData.archive : [];
-      const days = oldArchive.filter(e => e.type !== 'weekly');
-      const weeks = oldArchive.filter(e => e.type === 'weekly');
-      await setDoc(dailyArchiveDocRef, { days });
-      for (const w of weeks){
-        await setDoc(weekDocRef(w.weekKey), w);
-      }
-    }
-    const mainUpdate = JSON.parse(JSON.stringify(mainData));
-    delete mainUpdate.archive;
-    mainUpdate.archiveSplitV1 = true;
-    await setDoc(stateDocRef, mainUpdate);
-    return mainUpdate;
-  } catch(e){
-    // leave the old embedded archive in place; this will simply be retried
-    // on the next load.
-    return mainData;
-  }
-}
-
 async function fetchArchiveWeeksMap(){
   const map = {};
   (await fetchArchiveWeeks()).forEach(w => { if (w && w.weekKey) map[w.weekKey] = w; });
@@ -1144,7 +994,7 @@ function defaultState(){
   for (let i = 1; i <= 23; i++){
     metivtaExtra.push({ id: i, metivta: { attendance: 0, behavior: 0 }, metivtaFrozen: { attendance: 0, behavior: 0 }, metivtaFlags: { ok: false, late: false, leftEarly: false, disturbCount: 0 } });
   }
-  return { students, metivtaExtra, mergedActive: MERGE_GROUPS.map(g => g[0]), minusShopActive: 'minus', archive: [], lastActivityDate: null, lastAutoResetDate: null, metivtaNames: {}, metivtaExtraNames: {}, metivtaClass: {}, metivtaExtraClass: {} };
+  return { students, metivtaExtra, mergedActive: MERGE_GROUPS.map(g => g[0]), minusShopActive: 'minus', archive: [], lastActivityDate: null, metivtaNames: {}, metivtaExtraNames: {}, metivtaClass: {}, metivtaExtraClass: {} };
 }
 
 function setStatus(msg){
@@ -1186,7 +1036,6 @@ function normalizeMain(raw){
     parsed.metivtaExtra = metivtaExtra;
   }
   if (typeof parsed.lastActivityDate === 'undefined') parsed.lastActivityDate = null;
-  if (typeof parsed.lastAutoResetDate === 'undefined') parsed.lastAutoResetDate = null;
   ['metivtaNames', 'metivtaExtraNames', 'metivtaClass', 'metivtaExtraClass', 'editTimes'].forEach(k => {
     if (!parsed[k] || typeof parsed[k] !== 'object' || Array.isArray(parsed[k])) parsed[k] = {};
   });
@@ -1207,7 +1056,6 @@ function emptyMainDoc(){
 async function loadState(){
   const snap = await getDoc(stateDocRef);
   let main = snap.exists() ? snap.data() : null;
-  if (main && !main.archiveSplitV1) main = await migrateArchiveSplitIfNeeded(main);
   if (main && !(Array.isArray(main.students) && main.students.length === TOTAL_STUDENTS)){
     const err = new Error('הנתונים שנטענו מהשרת אינם בפורמט תקין');
     err.badFormat = true;
@@ -2155,7 +2003,6 @@ function computeDailyResetUpdate(mainData, dailyDays, weeklyEntry){
     s.metivta = { attendance: 0, behavior: 0 };
     s.metivtaFlags = { ok: false, late: false, leftEarly: false, disturbCount: 0 };
   });
-  newMainData.lastAutoResetDate = todayStr();
   newMainData.lastArchivedDay = mainData.lastActivityDate || null;
   newMainData.lastActivityDate = null;
   newMainData.editTimes = Object.fromEntries(Object.entries(mainData.editTimes || {}).filter(([k]) => !k.startsWith('d:')));
@@ -2716,32 +2563,19 @@ function metivtaDayScore(f){
   return score;
 }
 
-// Reads an archived day's per-student metivta record without mutating it,
-// falling back to the legacy attendance/behavior fields for days archived
-// before the flags-based report existed.
+// An archived day's per-student Metivta record: whether anything was marked,
+// what to show, and its score (-1 = no record for that day).
 function metivtaRecordHasFlags(s){
   const f = s && s.metivtaFlags;
   return !!(f && (f.ok || f.late || f.leftEarly || (f.disturbCount || 0) > 0));
 }
 
-function metivtaDayLabelLegacyAware(s){
-  if (!s) return '';
-  if (metivtaRecordHasFlags(s)) return metivtaStatusLabel(s.metivtaFlags);
-  const att = s.metivtaAttendance || 0;
-  const beh = s.metivtaBehavior || 0;
-  if (!att && !beh) return '';
-  return beh ? ('נוכחות ' + att + ', התנהגות ' + beh) : String(att);
+function metivtaRecordLabel(s){
+  return metivtaRecordHasFlags(s) ? metivtaStatusLabel(s.metivtaFlags) : '';
 }
 
-function metivtaDayScoreLegacyAware(s){
-  if (!s) return -1;
-  if (metivtaRecordHasFlags(s)) return metivtaDayScore(s.metivtaFlags);
-  // No flags recorded. A real pre-flags legacy record can still carry a
-  // meaningful positive attendance/behavior score; a record with none of
-  // that either is simply "no record for this day", which must rank below
-  // every attended day the same way metivtaDayScore's own sentinel does.
-  const legacyScore = (s.metivtaAttendance || 0) + (s.metivtaBehavior || 0);
-  return legacyScore > 0 ? legacyScore : -1;
+function metivtaRecordScore(s){
+  return metivtaRecordHasFlags(s) ? metivtaDayScore(s.metivtaFlags) : -1;
 }
 
 function toggleMetivtaOk(studentId, isExtra){
@@ -2943,7 +2777,7 @@ async function exportMetivtaArchiveCSV(days){
       const row = [metivtaStudentName(student.id)];
       days.forEach(entry => {
         const s = entry.students.find(x => x.id === student.id);
-        row.push(metivtaDayLabelLegacyAware(s));
+        row.push(metivtaRecordLabel(s));
       });
       rows.push(row);
     });
@@ -2951,7 +2785,7 @@ async function exportMetivtaArchiveCSV(days){
       const row = [metivtaExtraName(student.id)];
       days.forEach(entry => {
         const s = (entry.metivtaExtraStudents || []).find(x => x.id === student.id);
-        row.push(metivtaDayLabelLegacyAware(s));
+        row.push(metivtaRecordLabel(s));
       });
       rows.push(row);
     });
@@ -3020,7 +2854,7 @@ function buildMetivtaTodayEntry(){
 // (class points etc.) don't show up as empty Metivta columns.
 function metivtaEntryHasData(entry){
   const recs = [...(entry.students || []), ...(entry.metivtaExtraStudents || [])];
-  return recs.some(rec => metivtaDayScoreLegacyAware(rec) >= 0);
+  return recs.some(rec => metivtaRecordScore(rec) >= 0);
 }
 
 function buildMetivtaDropdown(options, activeKey, toggleClass, onPick){
@@ -3089,7 +2923,7 @@ function sortMetivtaRows(rows, visibleDays){
   } else if (key !== 'family' && key !== 'first' && key !== 'class'){
     const entry = visibleDays.find(e => metivtaDayColumnKey(e) === key);
     if (!entry) return rows;
-    numOf = (row) => metivtaDayScoreLegacyAware(row.getRecord(entry));
+    numOf = (row) => metivtaRecordScore(row.getRecord(entry));
   }
   return rows.slice().sort((a, b) => {
     if (numOf) return (numOf(a) - numOf(b)) * dir;
@@ -3450,7 +3284,7 @@ function buildMetivtaTable({ days, archivedKeys, archiveTable, availableWidth })
         });
         td.appendChild(plusBtn);
       } else {
-        td.textContent = metivtaDayLabelLegacyAware(rec);
+        td.textContent = metivtaRecordLabel(rec);
         td.style.cursor = 'pointer';
         td.addEventListener('click', () => {
           const flags = { ...DEFAULT_METIVTA_FLAGS, ...((rec && rec.metivtaFlags) || {}) };
@@ -3879,99 +3713,6 @@ function showZ1(){
   renderZ1View();
 }
 
-// One time: fill מתיבתא ז1 for the days already in the daily archive, from
-// each day's Metivta marks, for the students now in ז1. Days a week already
-// holds are left as they are.
-async function backfillZ1HistoryIfNeeded(){
-  if (!serverSnap || serverSnap.main.z1HistoryV1 || !firestoreDb) return;
-  try{
-    await runTransaction(firestoreDb, async (tx) => {
-      const mainSnap = await tx.get(stateDocRef);
-      if (!mainSnap.exists()) return;
-      const main = normalizeMain(mainSnap.data());
-      if (main.z1HistoryV1) return;
-      const ds = await tx.get(dailyArchiveDocRef);
-      const days = ds.exists() && Array.isArray(ds.data().days) ? ds.data().days : [];
-      const weekKeys = [...new Set(days.map(e => getWeekKey(new Date(dayKeyOf(e.date) + 'T12:00:00'))))];
-      const weeks = {};
-      for (const wk of weekKeys){
-        const w = await tx.get(weekDocRef(wk));
-        if (w.exists()) weeks[wk] = w.data();
-      }
-      const snap = { main, dailyDays: days, weeks };
-      const touched = { main: false, daily: false, weeks: new Set() };
-      days.forEach(entry => {
-        const day = dayKeyOf(entry.date);
-        const week = ensureWeekDoc(snap, getWeekKey(new Date(day + 'T12:00:00')), touched);
-        if (!Array.isArray(week.z1Students)) week.z1Students = [];
-        [['main', entry.students || []], ['extra', entry.metivtaExtraStudents || []]].forEach(([group, recs]) => {
-          recs.forEach(rec => {
-            if (!isZ1Student(main, group, rec.id)) return;
-            const key = group + '-' + rec.id;
-            let zr = week.z1Students.find(x => x.key === key);
-            if (!zr){ zr = { key, days: {} }; week.z1Students.push(zr); }
-            if (!zr.days) zr.days = {};
-            if (!zr.days[day]) zr.days[day] = { metivtaVal: metivtaDayScoreLegacyAware(rec) };
-          });
-        });
-      });
-      touched.weeks.forEach(wk => tx.set(weekDocRef(wk), snap.weeks[wk]));
-      main.z1HistoryV1 = true;
-      tx.set(stateDocRef, main);
-    });
-    serverSnap.main.z1HistoryV1 = true;
-    await refreshArchiveAndRender();
-  } catch(e){
-    // tried again on the next load
-  }
-}
-
-// One time: the Metivta column of הנוסע המתמיד now follows the Metivta table,
-// also for past days - copy each archived day's Metivta mark into its week.
-// Days without a mark in the Metivta table keep what the week has.
-async function backfillWeeklyMetivtaIfNeeded(){
-  if (!serverSnap || serverSnap.main.metivtaWeeklySyncV1 || !firestoreDb) return;
-  try{
-    await runTransaction(firestoreDb, async (tx) => {
-      const mainSnap = await tx.get(stateDocRef);
-      if (!mainSnap.exists()) return;
-      const main = normalizeMain(mainSnap.data());
-      if (main.metivtaWeeklySyncV1) return;
-      const ds = await tx.get(dailyArchiveDocRef);
-      const days = ds.exists() && Array.isArray(ds.data().days) ? ds.data().days : [];
-      const weekKeys = [...new Set(days.map(e => getWeekKey(new Date(dayKeyOf(e.date) + 'T12:00:00'))))];
-      const weeks = {};
-      for (const wk of weekKeys){
-        const w = await tx.get(weekDocRef(wk));
-        if (w.exists()) weeks[wk] = w.data();
-      }
-      const changed = new Set();
-      days.forEach(entry => {
-        const day = dayKeyOf(entry.date);
-        const wk = getWeekKey(new Date(day + 'T12:00:00'));
-        const week = weeks[wk];
-        if (!week || !Array.isArray(week.students)) return;
-        (entry.students || []).forEach(rec => {
-          if (!metivtaRecordHasFlags(rec)) return;
-          const ws = week.students.find(x => x.id === rec.id);
-          if (!ws) return;
-          if (!ws.days) ws.days = {};
-          if (!ws.days[day]) ws.days[day] = {};
-          const val = metivtaDayScore(rec.metivtaFlags);
-          if (ws.days[day].metivtaVal !== val){ ws.days[day].metivtaVal = val; changed.add(wk); }
-        });
-      });
-      changed.forEach(wk => tx.set(weekDocRef(wk), weeks[wk]));
-      main.metivtaWeeklySyncV1 = true;
-      tx.set(stateDocRef, main);
-    });
-    serverSnap.main.metivtaWeeklySyncV1 = true;
-    await refreshArchiveAndRender();
-  } catch(e){
-    // tried again on the next load
-  }
-}
-
 function fitTextSpan(td, text){
   const span = document.createElement('span');
   span.className = 'ff-fit';
@@ -4211,8 +3952,7 @@ function hebrewDayLetters(n){
   return tens[t] + ones[o];
 }
 
-function formatHebrewDateShort(d, opts){
-  opts = opts || {};
+function formatHebrewDateShort(d){
   const parts = new Intl.DateTimeFormat('he-IL-u-ca-hebrew', { day: 'numeric', month: 'short' }).formatToParts(d);
   let day = '';
   let month = '';
@@ -4784,7 +4524,6 @@ async function initApp(){
     subscribeToRemoteStateChanges();
     // Changes left waiting from an earlier visit (e.g. made offline).
     if (pendingOps.length) scheduleSync(0);
-    backfillZ1HistoryIfNeeded().then(backfillWeeklyMetivtaIfNeeded);
 
     if (document.fonts && document.fonts.ready){
       document.fonts.ready.then(() => {

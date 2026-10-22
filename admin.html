@@ -155,11 +155,11 @@
     overflow-x: auto;
     -webkit-overflow-scrolling: touch;
   }
-  table.data-table, table.recipients-table, table.phones-table, table.links-table, table.log-table{
+  table.data-table, table.recipients-table, table.phones-table, table.log-table{
     border-collapse: collapse;
     width: 100%;
   }
-  table.data-table th, table.recipients-table th, table.phones-table th, table.links-table th, table.log-table th{
+  table.data-table th, table.recipients-table th, table.phones-table th th, table.log-table th{
     background: var(--gold-bg);
     font-size: 13px;
     font-weight: 700;
@@ -169,19 +169,16 @@
   }
   table.log-table th{ font-size: 11.5px; padding: 6px 4px; border-left: 1px solid var(--line); white-space: normal; line-height: 1.2; }
   table.log-table th:first-child, table.log-table td:first-child{ border-left: none; }
-  table.links-table th{ text-align: right; }
   table.data-table th:first-child, table.recipients-table th:first-child, table.phones-table th:first-child{ text-align: right; }
-  table.data-table td, table.recipients-table td, table.phones-table td, table.links-table td{
+  table.data-table td, table.recipients-table td, table.phones-table td td{
     font-size: 13.5px;
     padding: 6px 10px;
     border-bottom: 1px solid var(--line);
     text-align: center;
   }
   table.log-table td{ font-size: 13px; padding: 8px 4px; border-left: 1px solid var(--line); overflow-wrap: break-word; }
-  table.links-table td{ text-align: right; font-size: 13px; }
-  table.links-table a{ color: var(--ink); word-break: break-all; }
   table.data-table td:first-child, table.recipients-table td:first-child, table.phones-table td:first-child{ text-align: right; }
-  table.data-table tr:nth-child(even), table.recipients-table tr:nth-child(even), table.phones-table tr:nth-child(even), table.links-table tr:nth-child(even), table.log-table tr:nth-child(even){ background: #FCFBF6; }
+  table.data-table tr:nth-child(even), table.recipients-table tr:nth-child(even), table.phones-table tr:nth-child(even) tr:nth-child(even), table.log-table tr:nth-child(even){ background: #FCFBF6; }
   table.phones-table input, table.data-table input{
     width: 100%;
     min-width: 70px;
@@ -345,7 +342,7 @@
 
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-app.js";
-import { getFirestore, initializeFirestore, doc, getDoc, setDoc, addDoc, deleteDoc, collection, query, orderBy, limit, getDocs } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
+import { initializeFirestore, doc, getDoc, setDoc, addDoc, deleteDoc, collection, query, orderBy, limit, getDocs } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
 import { firebaseConfig, isFirebaseConfigured } from "./firebase-config.js";
 import { sms4freeConfig } from "./sms-config.js";
 import { mountPageNav } from "./page-nav.js";
@@ -413,7 +410,6 @@ const DEFAULT_SENDER = '058-4012374';
 const app = document.getElementById('app');
 let db = null;
 let activeTab = 'phones';
-const tabLoaded = {};
 
 function normalizePhone(v){
   return (v || '').replace(/[\s-]/g, '').trim();
@@ -425,10 +421,10 @@ function metivtaRecordHasFlags(s){
 }
 
 // Keep in sync with metivtaEntryHasData in index.html (a day counts only if
-// some Metivta attendance - flags, or the pre-flags legacy score - was recorded).
+// some Metivta attendance was marked).
 function metivtaEntryHasData(entry){
   const recs = [...(entry.students || []), ...(entry.metivtaExtraStudents || [])];
-  return recs.some(r => metivtaRecordHasFlags(r) || (r.metivtaAttendance || 0) + (r.metivtaBehavior || 0) > 0);
+  return recs.some(r => metivtaRecordHasFlags(r));
 }
 
 function showCodePrompt(){
@@ -638,7 +634,7 @@ function renderKioskTab(container){
     container.appendChild(card);
   };
   addCard('התקנת הקיוסק במחשב הכיתה', [
-    'מבטלים קיוסק קודם, אם יש (הגדרות ← חשבונות ← משתמשים אחרים ← קיוסק ← הסר, או מוחקים קיצור דרך של Edge).',
+    'מבטלים קיוסק של Windows, אם יש (הגדרות ← חשבונות ← משתמשים אחרים ← קיוסק ← הסר).',
     'במשתמש user: קליק ימני על שורת המשימות ← הגדרות שורת המשימות ← סמלים במגש המערכת ← מקלדת מגע: תמיד.',
     'יוצאים מ-user (התחל ← תמונת המשתמש ← יציאה, לא "החלף משתמש"), נכנסים לחשבון המנהל ופותחים PowerShell כמנהל (התחל ← PowerShell ← קליק ימני ← הפעל כמנהל).',
     'מדביקים את הפקודה ולוחצים Enter. כשמתבקשת הסיסמה של user מקלידים אותה (או Enter אם אין).',
