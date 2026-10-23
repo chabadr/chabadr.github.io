@@ -330,13 +330,14 @@ function renderForm(initialStudentId, weeks, weeklyEntriesByKey, db){
   const weekField = document.createElement('div');
   weekField.className = 'field';
   const weekSelect = document.createElement('select');
+  // Newest week first.
   weeks.forEach((w, idx) => {
     const opt = document.createElement('option');
     opt.value = String(idx);
     opt.textContent = weekLabel(w);
-    weekSelect.appendChild(opt);
+    weekSelect.prepend(opt);
   });
-  weekSelect.selectedIndex = defaultWeekIdx;
+  weekSelect.value = String(defaultWeekIdx);
   weekField.appendChild(weekSelect);
   topFieldsRow.appendChild(weekField);
 
@@ -406,8 +407,12 @@ function renderForm(initialStudentId, weeks, weeklyEntriesByKey, db){
   });
 
   function loadValuesForWeek(){
-    const w = weeks[weekSelect.selectedIndex];
-    const rec = findStudentRecord(weeklyEntriesByKey, w.weekKey, currentStudentId());
+    const w = weeks[parseInt(weekSelect.value, 10)];
+    const found = findStudentRecord(weeklyEntriesByKey, w.weekKey, currentStudentId());
+    // A new week starts with these fields at 0 - until the parents (or the
+    // class) fill them in, the form starts full and the parents lower it.
+    const filled = found && (found.parentSubmitted || FIELDS.some(f => found[f.key]));
+    const rec = filled ? found : null;
     FIELDS.forEach(f => {
       if (f.kind === 'slider'){
         const v = rec && typeof rec[f.key] === 'number' ? rec[f.key] : 7;
@@ -441,7 +446,7 @@ function renderForm(initialStudentId, weeks, weeklyEntriesByKey, db){
     submitBtn.disabled = true;
     statusMsg.className = 'status-msg';
     statusMsg.textContent = 'שולח…';
-    const w = weeks[weekSelect.selectedIndex];
+    const w = weeks[parseInt(weekSelect.value, 10)];
     const submitStudentId = currentStudentId();
     const values = {};
     FIELDS.forEach(f => {
@@ -467,7 +472,7 @@ function renderForm(initialStudentId, weeks, weeklyEntriesByKey, db){
           studentRec = { id: submitStudentId, morning: 0, tefila: 0, mikve: 0, minusDelta: 0, bonus: 0, days: {} };
           weeklyEntry.students.push(studentRec);
         }
-        Object.assign(studentRec, values);
+        Object.assign(studentRec, values, { parentSubmitted: true });
         if (w.parsha) weeklyEntry.weekParsha = w.parsha;
         tx.set(weekRef, weeklyEntry);
       });
