@@ -13,7 +13,6 @@
 ## קבצים נוספים
 
 - `functions/` - פונקציות השרת (יום חדש ב-01:00, שליחת SMS מתוזמנת). הוראות ב-`functions/README.md`.
-- `kiosk/` - הגדרת מחשב הכיתה כקיוסק. הוראות ב-`kiosk/README.md`.
 - `firestore.rules` - חוקי הגישה ל-Firestore.
 - `sw.js`, `manifest*.webmanifest`, `icons/` - עבודה בלי אינטרנט והתקנה כאפליקציה.
 
