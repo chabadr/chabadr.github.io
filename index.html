@@ -2801,7 +2801,17 @@ async function exportMetivtaArchiveCSV(days){
   }
 }
 
-let metivtaVisibleDayCount = 5;
+// How many days the Metivta table shows - this computer remembers the last choice.
+const METIVTA_DAY_COUNT_KEY = 'metivtaVisibleDayCount';
+let metivtaVisibleDayCount = (() => {
+  try{
+    const v = localStorage.getItem(METIVTA_DAY_COUNT_KEY);
+    if (v === 'all') return null;
+    const n = parseInt(v, 10);
+    if (n >= 1 && n <= 15) return n;
+  } catch(e){}
+  return 5;
+})();
 let metivtaSort = { key: null, dir: 1 };
 let metivtaSummaryField = 'total';
 const METIVTA_VISIBLE_DAY_OPTIONS = [
@@ -3128,6 +3138,7 @@ function buildMetivtaTable({ days, archivedKeys, archiveTable, availableWidth })
     headerGroup.appendChild(viewLabel);
     headerGroup.appendChild(buildMetivtaDropdown(METIVTA_VISIBLE_DAY_OPTIONS, metivtaVisibleDayCount, '', (k) => {
       metivtaVisibleDayCount = k;
+      try{ localStorage.setItem(METIVTA_DAY_COUNT_KEY, k === null ? 'all' : String(k)); } catch(e){}
       renderMetivtaView();
     }));
   }

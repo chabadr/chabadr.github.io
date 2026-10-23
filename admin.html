@@ -296,7 +296,7 @@
   }
   .saved-templates .field-label{ margin: 0; }
   .saved-templates select{ width: auto; min-width: 180px; }
-  .small-btn, .select-all-row button.preset-btn{
+  .small-btn{
     padding: 6px 12px;
     border-radius: 8px;
     border: 1px solid var(--gold);
@@ -308,8 +308,22 @@
     font-weight: 600;
   }
   .small-btn:disabled{ opacity: 0.5; cursor: default; }
-  .select-all-row button.preset-btn.active{ background: var(--gold); color: #fff; }
-  table.sent-table td.msg-cell{ white-space: pre-wrap; text-align: right; min-width: 220px; }
+  .info-btn{
+    width: 22px; height: 22px; border-radius: 50%;
+    border: 1.5px solid var(--gold); background: #fff; color: var(--ink);
+    font-weight: 700; font-size: 13px; line-height: 1; cursor: pointer;
+    margin-inline-start: 8px; vertical-align: middle;
+  }
+  .info-btn.open{ background: var(--gold); color: #fff; }
+  .info-text{ display: none; }
+  .info-text.open{ display: block; }
+  .sent-batch{ border: 1px solid var(--line); border-radius: 8px; margin-bottom: 8px; background: #fff; }
+  .sent-batch > summary, .sent-msg > summary{ cursor: pointer; padding: 8px 12px; font-weight: 600; font-size: 13.5px; }
+  .sent-batch > summary .batch-count{ font-weight: 400; color: var(--ink-soft); margin-inline-start: 8px; }
+  .sent-batch-body{ padding: 0 12px 8px; }
+  .sent-msg{ border-top: 1px solid var(--line); }
+  .sent-msg > summary{ font-weight: 500; font-size: 13px; }
+  .sent-msg-text{ white-space: pre-wrap; font-size: 13px; padding: 4px 12px 10px; }
   .loading, .empty, .err{
     text-align: center;
     color: var(--ink-soft);
@@ -877,7 +891,11 @@ async function renderSmsTab(container){
     const settingsSnap = await getDoc(settingsDocRef);
     const settings = settingsSnap.exists() ? settingsSnap.data() : {};
     let savedTemplates = Array.isArray(settings.templates) ? settings.templates : [];
-    let frequentPreset = Array.isArray(settings.frequentFlyerRecipients) ? settings.frequentFlyerRecipients : null;
+    // The recipients list that the old "הנוסע המתמיד" button kept - it now
+    // belongs to the template of that name (until that template saves its own).
+    const legacyFrequentRecipients = Array.isArray(settings.frequentFlyerRecipients) ? settings.frequentFlyerRecipients : null;
+    const templateRecipients = (t) => Array.isArray(t.recipients) ? t.recipients
+      : (legacyFrequentRecipients && t.name.includes('הנוסע המתמיד') ? legacyFrequentRecipients : null);
 
     // --- Template card ---
     const templateCard = document.createElement('div');
@@ -885,11 +903,22 @@ async function renderSmsTab(container){
     const templateLabel = document.createElement('label');
     templateLabel.className = 'field-label';
     templateLabel.textContent = 'תבנית ההודעה';
+    const infoBtn = document.createElement('button');
+    infoBtn.type = 'button';
+    infoBtn.className = 'info-btn';
+    infoBtn.textContent = '!';
+    infoBtn.title = 'הסבר';
+    templateLabel.appendChild(infoBtn);
     templateCard.appendChild(templateLabel);
     const hint = document.createElement('div');
-    hint.className = 'hint';
-    hint.innerHTML = 'שדות משתנים זמינים: <b>{שם}</b> (השם הפרטי), <b>{קישור}</b> (קיים רק לתלמידים הרגילים), <b>{נוכחות}</b> (כמה ימים נוכח, כולל ימים עם איחור/מוקדם/הפרעה), <b>{בזמן}</b>, <b>{איחור}</b>, <b>{מוקדם}</b>, <b>{הפרעות}</b>. בטבלת הנתונים לשליחה יופיעו רק הנתונים שנמצאים בהודעה.';
+    hint.className = 'hint info-text';
+    hint.innerHTML = 'משתנים: <b>{שם}</b> פרטי, <b>{קישור}</b> הורים ז2, <b>{נוכחות}</b> ימים, <b>{בזמן}</b>, <b>{איחור}</b>, <b>{מוקדם}</b>, <b>{הפרעות}</b>.';
     templateCard.appendChild(hint);
+    infoBtn.addEventListener('click', (e) => {
+      e.preventDefault();
+      hint.classList.toggle('open');
+      infoBtn.classList.toggle('open', hint.classList.contains('open'));
+    });
     // Saved message templates (shared, stored with the site's data).
     const savedBox = document.createElement('div');
     savedBox.className = 'saved-templates';
@@ -939,18 +968,24 @@ async function renderSmsTab(container){
       await setDoc(settingsDocRef, update, { merge: true });
     }
 
+    // Choosing a template brings back its text and the parents it is sent to.
     savedSelect.addEventListener('change', () => {
       deleteTemplateBtn.disabled = !savedSelect.value;
       const t = savedTemplates.find(x => x.name === savedSelect.value);
       if (!t) return;
       templateTextarea.value = t.text;
+      const recipients = templateRecipients(t);
+      if (recipients){
+        checkedSet = new Set(recipients.filter(validCheckKey));
+        renderRecipients();
+      }
       templateTextarea.dispatchEvent(new Event('input'));
     });
     saveTemplateBtn.addEventListener('click', async () => {
       const name = (prompt('שם לתבנית:', savedSelect.value || '') || '').trim();
       if (!name) return;
       if (savedTemplates.some(t => t.name === name) && !confirm('תבנית בשם הזה כבר קיימת. להחליף אותה?')) return;
-      savedTemplates = [...savedTemplates.filter(t => t.name !== name), { name, text: templateTextarea.value }];
+      savedTemplates = [...savedTemplates.filter(t => t.name !== name), { name, text: templateTextarea.value, recipients: [...checkedSet] }];
       try{
         await saveSettings({ templates: savedTemplates });
         refreshSavedTemplates(name);
@@ -1093,48 +1128,28 @@ async function renderSmsTab(container){
     const clearAllBtn = document.createElement('button');
     clearAllBtn.type = 'button';
     clearAllBtn.textContent = 'בטל הכל';
-    const presetBtn = document.createElement('button');
-    presetBtn.type = 'button';
-    presetBtn.className = 'preset-btn';
-    presetBtn.textContent = 'הנוסע המתמיד';
     selectAllRow.appendChild(selectAllBtn);
     selectAllRow.appendChild(clearAllBtn);
-    selectAllRow.appendChild(presetBtn);
     recipientsCard.appendChild(selectAllRow);
-    const presetHint = document.createElement('div');
-    presetHint.className = 'hint';
-    recipientsCard.appendChild(presetHint);
 
     // Which parent of which student is ticked, as 'studentKey:role'.
     let checkedSet = new Set();
-    // "הנוסע המתמיד" remembers its own list of ticked parents: pressing it
-    // ticks exactly that list, and while it stays pressed every change to the
-    // ticks is saved back into the list for next week.
-    let presetActive = false;
     const validCheckKey = (k) => {
       const [studentKey, role] = k.split(':');
       const st = students.find(x => x.key === studentKey);
       return !!(st && st[role]);
     };
 
-    function refreshPresetUi(){
-      presetBtn.classList.toggle('active', presetActive);
-      presetHint.textContent = presetActive
-        ? 'רשימת "הנוסע המתמיד" פעילה - כל סימון או ביטול נשמר בה אוטומטית לפעם הבאה.'
-        : 'לחיצה על "הנוסע המתמיד" מסמנת את ההורים ששמורים ברשימה הזו (ובפעם הראשונה שומרת את הסימון הנוכחי).';
-    }
-
-    async function saveFrequentPreset(){
-      frequentPreset = [...checkedSet];
+    // While a saved template is chosen, the ticked parents are kept with it.
+    async function selectionChanged(){
+      const t = savedTemplates.find(x => x.name === savedSelect.value);
+      if (!t) return;
+      t.recipients = [...checkedSet];
       try{
-        await setDoc(settingsDocRef, { frequentFlyerRecipients: frequentPreset }, { merge: true });
+        await saveSettings({ templates: savedTemplates });
       } catch(e){
-        presetHint.textContent = 'שמירת הרשימה נכשלה: ' + (e && e.message ? e.message : String(e));
+        alert('שמירת הנמענים בתבנית נכשלה: ' + (e && e.message ? e.message : String(e)));
       }
-    }
-
-    function selectionChanged(){
-      if (presetActive) saveFrequentPreset();
     }
 
     const tableScroll = document.createElement('div');
@@ -1196,7 +1211,6 @@ async function renderSmsTab(container){
       table.appendChild(tbody);
     }
     renderRecipients();
-    refreshPresetUi();
 
     const recipientsAction = document.createElement('div');
     recipientsAction.className = 'action-bar';
@@ -1218,18 +1232,6 @@ async function renderSmsTab(container){
       renderRecipients();
       selectionChanged();
     });
-    presetBtn.addEventListener('click', () => {
-      if (presetActive){
-        presetActive = false;
-      } else {
-        presetActive = true;
-        if (frequentPreset) checkedSet = new Set(frequentPreset.filter(validCheckKey));
-        else saveFrequentPreset();
-        renderRecipients();
-      }
-      refreshPresetUi();
-    });
-
     function getSelectedRecipients(){
       const selected = [];
       table.querySelectorAll('input[type="checkbox"]:checked').forEach(cb => {
@@ -1477,6 +1479,7 @@ async function renderSmsTab(container){
       previewBtn.disabled = true;
       dataTableBtn.disabled = true;
       let okCount = 0, failCount = 0;
+      const batchId = 'b' + Date.now();
 
       for (const item of items){
         const studentKey = item.dataset.studentKey;
@@ -1493,20 +1496,20 @@ async function renderSmsTab(container){
             statusEl.textContent = 'נשלח בהצלחה ✓';
             statusEl.className = 'preview-status status-ok';
             okCount++;
-            await logSent({ phone, label, msg, sender, status: 'sent' });
+            await logSent({ phone, label, msg, sender, status: 'sent', batchId });
           } else {
             const errMsg = SMS4FREE_ERROR_MESSAGES[String(code)] || ('קוד שגיאה: ' + code);
             statusEl.textContent = 'נכשל: ' + errMsg;
             statusEl.className = 'preview-status status-err';
             failCount++;
-            await logSent({ phone, label, msg, sender, status: 'failed', error: errMsg });
+            await logSent({ phone, label, msg, sender, status: 'failed', error: errMsg, batchId });
           }
         } catch(e){
           const errMsg = 'שגיאת רשת (' + (e && e.message ? e.message : String(e)) + ')';
           statusEl.textContent = 'נכשל: ' + errMsg + ' - ייתכן שזה חסימת CORS של שרת ה-SMS';
           statusEl.className = 'preview-status status-err';
           failCount++;
-          await logSent({ phone, label, msg, sender, status: 'failed', error: errMsg });
+          await logSent({ phone, label, msg, sender, status: 'failed', error: errMsg, batchId });
         }
       }
 
@@ -1540,6 +1543,7 @@ async function renderSmsTab(container){
 
       scheduleBtn.disabled = true;
       sendBtn.disabled = true;
+      const batchId = 'b' + Date.now();
       try{
         for (const item of items){
           const studentKey = item.dataset.studentKey;
@@ -1549,7 +1553,7 @@ async function renderSmsTab(container){
           const msg = item.querySelector('textarea').value;
           const label = student.name + ' - ' + (role === 'father' ? 'אבא' : 'אמא');
           await addDoc(scheduledSmsCollection, {
-            phone, msg, sender, label,
+            phone, msg, sender, label, batchId,
             status: 'pending',
             sendAt: sendAtDate.toISOString(),
             createdAt: new Date().toISOString()
@@ -1593,41 +1597,52 @@ async function renderSmsTab(container){
           sentBody.textContent = 'עדיין לא נשלחו הודעות.';
           return;
         }
-        const t = document.createElement('table');
-        t.className = 'log-table sent-table';
-        const th = document.createElement('thead');
-        const trh = document.createElement('tr');
-        ['זמן', 'נמען', 'הודעה', 'מצב'].forEach(label => {
-          const c = document.createElement('th');
-          c.textContent = label;
-          trh.appendChild(c);
+        // One group per send command. Older messages have no batchId: those
+        // sent the same way within a few minutes of each other count as one.
+        const batches = [];
+        rows.slice(0, 500).forEach(r => {
+          const last = batches[batches.length - 1];
+          const t = new Date(r.sentAt).getTime();
+          const same = last && (r.batchId
+            ? last.batchId === r.batchId
+            : (!last.batchId && last.via === r.via && last.oldest - t < 5 * 60000));
+          if (same){ last.rows.push(r); last.oldest = t; }
+          else batches.push({ batchId: r.batchId || null, via: r.via, rows: [r], oldest: t });
         });
-        th.appendChild(trh);
-        t.appendChild(th);
-        const tb = document.createElement('tbody');
-        rows.slice(0, 300).forEach(r => {
-          const tr = document.createElement('tr');
-          const whenTd = document.createElement('td');
-          whenTd.textContent = r.sentAt ? new Date(r.sentAt).toLocaleString('he-IL', { day: 'numeric', month: 'numeric', year: '2-digit', hour: '2-digit', minute: '2-digit' }) : '';
-          tr.appendChild(whenTd);
-          const toTd = document.createElement('td');
-          toTd.textContent = (r.label || '') + (r.phone ? ' · ' + r.phone : '');
-          tr.appendChild(toTd);
-          const msgTd = document.createElement('td');
-          msgTd.className = 'msg-cell';
-          msgTd.textContent = r.msg || '';
-          tr.appendChild(msgTd);
-          const stTd = document.createElement('td');
-          stTd.textContent = (r.status === 'sent' ? 'נשלח ✓' : 'נכשל' + (r.error ? ': ' + r.error : '')) + ' (' + r.via + ')';
-          stTd.className = r.status === 'sent' ? 'status-ok' : 'status-err';
-          tr.appendChild(stTd);
-          tb.appendChild(tr);
+        const fmt = (iso) => new Date(iso).toLocaleString('he-IL', { weekday: 'short', day: 'numeric', month: 'numeric', year: '2-digit', hour: '2-digit', minute: '2-digit' });
+        batches.forEach(batch => {
+          const failed = batch.rows.filter(r => r.status !== 'sent').length;
+          const box = document.createElement('details');
+          box.className = 'sent-batch';
+          const sum = document.createElement('summary');
+          sum.textContent = fmt(batch.rows[0].sentAt) + ' · ' + batch.via;
+          const count = document.createElement('span');
+          count.className = 'batch-count';
+          count.textContent = (batch.rows.length === 1 ? 'הודעה אחת' : batch.rows.length + ' הודעות') + (failed ? ' (' + failed + ' נכשלו)' : ' ✓');
+          sum.appendChild(count);
+          box.appendChild(sum);
+          const body = document.createElement('div');
+          body.className = 'sent-batch-body';
+          // In the order they were sent.
+          batch.rows.slice().reverse().forEach(r => {
+            const item = document.createElement('details');
+            item.className = 'sent-msg';
+            const head = document.createElement('summary');
+            head.textContent = (r.label || '') + (r.phone ? ' · ' + r.phone : '');
+            const st = document.createElement('span');
+            st.className = r.status === 'sent' ? 'status-ok' : 'status-err';
+            st.textContent = r.status === 'sent' ? ' ✓' : ' ✗ ' + (r.error || 'נכשל');
+            head.appendChild(st);
+            item.appendChild(head);
+            const text = document.createElement('div');
+            text.className = 'sent-msg-text';
+            text.textContent = r.msg || '';
+            item.appendChild(text);
+            body.appendChild(item);
+          });
+          box.appendChild(body);
+          sentBody.appendChild(box);
         });
-        t.appendChild(tb);
-        const wrap = document.createElement('div');
-        wrap.className = 'table-scroll';
-        wrap.appendChild(t);
-        sentBody.appendChild(wrap);
       } catch(e){
         sentBody.textContent = 'שגיאה בטעינת הארכיון: ' + (e && e.message ? e.message : String(e));
       }
