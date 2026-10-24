@@ -4223,14 +4223,16 @@ function renderTodayHistoryTableNow(container){
         val = cats[activeKey] || 0;
       }
       const td = document.createElement('td');
-      td.textContent = val || '';
+      // מקוואות/רמב"ם: a checkmark, like on today's board (worth 2 points
+      // only in הנוסע המתמיד); a click toggles it.
+      td.textContent = ARCHIVE_WEEKLY_KEYS[activeKey] ? (val > 0 ? '✓' : '') : (val || '');
       if (activeKey !== 'total'){
         td.style.cursor = 'pointer';
         td.addEventListener('click', () => {
           const dayKey = dayKeyOf(entry.date);
           if (ARCHIVE_WEEKLY_KEYS[activeKey]){
-            promptEditArchiveValue(val, (newVal) => {
-              commitOp({ kind: 'weekCell', weekKey: getWeekKey(new Date(dayKey + 'T12:00:00')), sid: student.id, field: ARCHIVE_WEEKLY_KEYS[activeKey], target: dayKey, value: newVal });
+            requireArchiveEditAccess(() => {
+              commitOp({ kind: 'weekCell', weekKey: getWeekKey(new Date(dayKey + 'T12:00:00')), sid: student.id, field: ARCHIVE_WEEKLY_KEYS[activeKey], target: dayKey, value: val > 0 ? 0 : 2 });
             });
             return;
           }
