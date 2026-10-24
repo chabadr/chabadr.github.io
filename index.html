@@ -396,6 +396,7 @@
     font-size: 0.85em;
     padding: 4px;
   }
+  table.archive-table td.ff-percent{ font-weight: 700; color: var(--ink); }
   table.archive-table th.ff-parent-first,
   table.archive-table td.ff-parent-first{
     border-right: 3px solid var(--gold);
@@ -3152,7 +3153,7 @@ function buildMetivtaTable({ days, archivedKeys, archiveTable, availableWidth })
     const addDayBtn = document.createElement('button');
     addDayBtn.type = 'button';
     addDayBtn.className = 'metivta-move-btn';
-    addDayBtn.textContent = '+ יום קודם';
+    addDayBtn.textContent = '+יום';
     addDayBtn.title = 'הוספת טור ליום שעבר';
     addDayBtn.addEventListener('click', () => requireArchiveEditAccess(() => showHebrewDayPicker(days)));
     headerGroup.appendChild(addDayBtn);
@@ -3170,7 +3171,7 @@ function buildMetivtaTable({ days, archivedKeys, archiveTable, availableWidth })
   if (!archiveTable){
     const exportBtn = document.createElement('button');
     exportBtn.className = 'export-btn';
-    exportBtn.textContent = 'הורדת אקסל';
+    exportBtn.textContent = 'אקסל';
     exportBtn.addEventListener('click', () => exportMetivtaArchiveCSV(days));
     dateEl.appendChild(exportBtn);
   }
@@ -3350,17 +3351,19 @@ function weeklyDailySum(s, field){
 
 async function exportWeeklyCSV(entry, weekStartD, weekEndD){
   try {
-    const headers = ['שם', 'חסידות', 'תפילה', 'מקוואות', 'בונוס', 'רמב"ם', 'מתיבתא', ...WEEKLY_PARENT_FIELD_DEFS.map(f => f.label)];
+    const headers = ['שם', '%', 'חסידות', 'תפילה', 'מקוואות', 'בונוס', 'רמב"ם', 'מתיבתא', ...WEEKLY_CLASS_FIELD_DEFS.map(f => f.label), ...WEEKLY_PARENT_FIELD_DEFS.map(f => f.label)];
     const rows = [headers];
     entry.students.forEach(s => {
       rows.push([
         studentName(s.id),
+        weeklyPercent(s) + '%',
         weeklyDailySum(s, 'morning'),
         weeklyDailySum(s, 'tefila'),
         weeklyDailySum(s, 'mikvaotVal'),
         weeklyDailySum(s, 'bonus'),
         weeklyDailySum(s, 'rambamVal'),
         weeklyDailySum(s, 'metivtaVal'),
+        ...WEEKLY_CLASS_FIELD_DEFS.map(f => s[f.field] || 0),
         ...WEEKLY_PARENT_FIELD_DEFS.map(f => f.kind === 'weekly-bool' ? (s[f.field] ? 'כן' : 'לא') : (s[f.field] || 0))
       ]);
     });
@@ -3537,6 +3540,28 @@ function buildWeekDaySelectDropdown(allWeeklyEntries, selectedEntry, ctx){
   dropdown.appendChild(toggle);
   dropdown.appendChild(list);
   return dropdown;
+}
+
+// Weekly columns filled in by the class (a number for the whole week), each
+// with the one in charge of it.
+const WEEKLY_CLASS_FIELD_DEFS = [
+  { field: 'mivtzaim', label: 'מבצעים', kind: 'weekly-number', group: 'את"ה' },
+  { field: 'hayomYom', label: 'היום יום', kind: 'weekly-number', group: 'משה' },
+  { field: 'chitasClass', label: 'חת"ת', kind: 'weekly-number', group: 'משה' },
+  { field: 'gaomash', label: 'גאומ"ש', kind: 'weekly-number', group: 'משה' },
+  { field: 'mincha', label: 'מנחה', kind: 'weekly-number', group: 'מנהל' }
+];
+
+// The week's score out of WEEKLY_FULL_POINTS: every column's week total
+// added up (a ✓ counts 1).
+const WEEKLY_FULL_POINTS = 170;
+const WEEKLY_DAILY_FIELDS = ['morning', 'tefila', 'mikvaotVal', 'bonus', 'rambamVal', 'metivtaVal'];
+function weeklyPercent(s){
+  let points = WEEKLY_DAILY_FIELDS.reduce((sum, f) => sum + weeklyDailySum(s, f), 0);
+  [...WEEKLY_CLASS_FIELD_DEFS, ...WEEKLY_PARENT_FIELD_DEFS].forEach(f => {
+    points += f.kind === 'weekly-bool' ? (s[f.field] ? 1 : 0) : (Number(s[f.field]) || 0);
+  });
+  return Math.round(points / WEEKLY_FULL_POINTS * 100);
 }
 
 const WEEKLY_PARENT_FIELD_DEFS = [
@@ -3856,12 +3881,14 @@ function renderWeeklyEntryInto(entry, container, allWeeklyEntries){
   table.style.width = wide ? '100%' : 'max-content';
 
   const fieldDefs = [
+    { field: 'percent', label: '%', kind: 'percent' },
     { field: 'morning', label: 'חסידות', kind: 'daily' },
     { field: 'tefila', label: 'תפילה', kind: 'daily' },
     { field: 'mikvaotVal', label: 'מקוואות', kind: 'daily' },
     { field: 'bonus', label: 'בונוס', kind: 'daily' },
     { field: 'rambamVal', label: 'רמב"ם', kind: 'daily' },
     { field: 'metivtaVal', label: 'מתיבתא', kind: 'daily' },
+    ...WEEKLY_CLASS_FIELD_DEFS,
     ...WEEKLY_PARENT_FIELD_DEFS
   ].filter(f => !(f.field === 'metivtaVal' && (weeklyArchiveViewMode[entry.weekKey] || 'total') !== 'total'
     && weeklyDayHasNoMetivta(weekStartD, weeklyArchiveViewMode[entry.weekKey])));
@@ -3889,15 +3916,16 @@ function renderWeeklyEntryInto(entry, container, allWeeklyEntries){
   groupSpacer.className = 'ff-group-th';
   groupRow.appendChild(groupSpacer);
   const groupOf = (field) => isParentField(field) ? 'עדכוני הורים'
+    : field === 'percent' ? ''
     : field === 'rambamVal' ? 'שמעון'
     : field === 'metivtaVal' ? 'חננאל'
-    : 'תורנים';
+    : (WEEKLY_CLASS_FIELD_DEFS.find(f => f.field === field) || { group: 'תורנים' }).group;
   let lastGroupTh = null;
   fieldDefs.forEach(({ field }) => {
     const name = groupOf(field);
     if (lastGroupTh && lastGroupTh.textContent === name){ lastGroupTh.colSpan++; return; }
     lastGroupTh = document.createElement('th');
-    lastGroupTh.className = 'ff-parent-group-th';
+    lastGroupTh.className = name ? 'ff-parent-group-th' : 'ff-group-th';
     lastGroupTh.colSpan = 1;
     lastGroupTh.textContent = name;
     groupRow.appendChild(lastGroupTh);
@@ -3934,6 +3962,7 @@ function renderWeeklyEntryInto(entry, container, allWeeklyEntries){
   });
 
   const getFieldVal = (s, field, kind) => {
+    if (kind === 'percent') return weeklyPercent(s);
     if (kind === 'weekly-number') return s[field] || 0;
     if (kind === 'weekly-bool') return s[field] ? 1 : 0;
     if (!isDayView) return weeklyDailySum(s, field);
@@ -3956,7 +3985,12 @@ function renderWeeklyEntryInto(entry, container, allWeeklyEntries){
       const td = document.createElement('td');
       if (field === firstParentField) td.classList.add('ff-parent-first');
       const val = getFieldVal(s, field, kind);
-      if (kind === 'weekly-bool'){
+      if (kind === 'percent'){
+        // The week's score, whichever day is shown.
+        valueSpans.push(fitTextSpan(td, val + '%'));
+        td.className = 'ff-percent';
+        td.title = 'מתוך ' + WEEKLY_FULL_POINTS + ' נקודות בשבוע';
+      } else if (kind === 'weekly-bool'){
         valueSpans.push(fitTextSpan(td, s[field] ? '✓' : ''));
         td.style.cursor = 'pointer';
         td.addEventListener('click', () => {
@@ -3994,8 +4028,14 @@ function renderWeeklyEntryInto(entry, container, allWeeklyEntries){
   if (wide){
     fitSpanGroupToCells(headerSpans, 12, 40);
     fitSpanGroupToCells(nameSpans, 12, 40, 6);
-    // The name column is then narrowed to its longest name; the other
-    // columns share the room left and their text is fitted again.
+    fitSpanGroupToCells(valueSpans, 12, 40);
+    // Names no larger than the numbers; the name column is then narrowed to
+    // its longest name, the other columns share the room left and their
+    // text is fitted again.
+    const valueFont = parseFloat(valueSpans.length ? valueSpans[0].style.fontSize : '') || 40;
+    if ((parseFloat(nameSpans.length ? nameSpans[0].style.fontSize : '') || 0) > valueFont){
+      nameSpans.forEach(sp => { sp.style.fontSize = valueFont + 'px'; });
+    }
     const nameCs = getComputedStyle(nameTh);
     const nameW = Math.ceil(Math.max(...nameSpans.map(sp => sp.offsetWidth)) + (parseFloat(nameCs.paddingLeft) || 0) + (parseFloat(nameCs.paddingRight) || 0) + 8);
     cols[0].style.width = nameW + 'px';
@@ -4202,7 +4242,7 @@ function renderTodayHistoryTableNow(container){
 
   const exportBtn = document.createElement('button');
   exportBtn.className = 'export-btn';
-  exportBtn.textContent = 'הורדת אקסל';
+  exportBtn.textContent = 'אקסל';
   exportBtn.addEventListener('click', () => exportArchiveDaysCSV(days, allOptions, groupType));
   dateEl.appendChild(exportBtn);
 
