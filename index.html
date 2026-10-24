@@ -3487,11 +3487,15 @@ function buildWeekDaySelectDropdown(allWeeklyEntries, selectedEntry, ctx){
       subList.appendChild(dayOpt);
     };
 
-    // The week's total is the parsha itself (above); no Shabbat day.
+    // The week's total is the parsha itself (above); no Shabbat day, and no
+    // day that hasn't come yet.
+    const today = activityDayStr();
     for (let i = 0; i < 6; i++){
       const d = new Date(weekStartD);
       d.setDate(d.getDate() + i);
-      addDayOption(dayKeyOf(d.toISOString()), HEBREW_WEEKDAY_NAMES[i] + ' · ' + formatHebrewDateShort(d));
+      const key = dayKeyOf(d.toISOString());
+      if (key > today) break;
+      addDayOption(key, HEBREW_WEEKDAY_NAMES[i] + ' · ' + formatHebrewDateShort(d));
     }
     parshaRow.appendChild(subList);
     list.appendChild(parshaRow);
