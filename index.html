@@ -3363,8 +3363,8 @@ async function exportWeeklyCSV(entry, weekStartD, weekEndD){
         weeklyDailySum(s, 'bonus'),
         weeklyDailySum(s, 'rambamVal'),
         weeklyDailySum(s, 'metivtaVal'),
-        ...WEEKLY_CLASS_FIELD_DEFS.map(f => s[f.field] || 0),
-        ...WEEKLY_PARENT_FIELD_DEFS.map(f => f.kind === 'weekly-bool' ? (s[f.field] ? 'כן' : 'לא') : (s[f.field] || 0))
+        ...WEEKLY_CLASS_FIELD_DEFS.map(f => weeklyFieldPoints(s, f)),
+        ...WEEKLY_PARENT_FIELD_DEFS.map(f => weeklyFieldPoints(s, f))
       ]);
     });
     const csv = rows.map(row => row.map(cell => {
@@ -3544,34 +3544,62 @@ function buildWeekDaySelectDropdown(allWeeklyEntries, selectedEntry, ctx){
 
 // Weekly columns filled in by the class (a number for the whole week), each
 // with the one in charge of it.
+// step/max: the points that can be given, picked from a list (0, step, 2*step, ... max).
 const WEEKLY_CLASS_FIELD_DEFS = [
-  { field: 'mivtzaim', label: 'מבצעים', kind: 'weekly-number', group: 'את"ה' },
-  { field: 'hayomYom', label: 'היום יום', kind: 'weekly-number', group: 'משה' },
-  { field: 'chitasClass', label: 'חת"ת', kind: 'weekly-number', group: 'משה' },
-  { field: 'gaomash', label: 'גאומ"ש', kind: 'weekly-number', group: 'משה' },
-  { field: 'mincha', label: 'מנחה', kind: 'weekly-number', group: 'מנהל' }
+  { field: 'mivtzaim', label: 'מבצעים', kind: 'weekly-number', group: 'את"ה', step: 6, max: 6 },
+  { field: 'hayomYom', label: 'היום יום', kind: 'weekly-number', group: 'משה', step: 1, max: 7 },
+  { field: 'chitasClass', label: 'חת"ת', kind: 'weekly-number', group: 'משה', step: 3, max: 21 },
+  { field: 'gaomash', label: 'גאומ"ש', kind: 'weekly-number', group: 'משה', step: 2, max: 10 },
+  { field: 'mincha', label: 'מנחה', kind: 'weekly-number', group: 'מנהל', step: 1, max: 6 }
 ];
 
-// The week's score out of WEEKLY_FULL_POINTS: every column's week total
-// added up (a ✓ counts 1).
+// Points of a weekly column in הנוסע המתמיד. Parents report days (0-7) or a
+// ✓; ratio turns that into points.
+function weeklyFieldPoints(s, f){
+  const ratio = f.ratio || 1;
+  if (f.kind === 'weekly-bool') return s[f.field] ? ratio : 0;
+  return (Number(s[f.field]) || 0) * ratio;
+}
+
+// The week's score out of WEEKLY_FULL_POINTS: every column's points added up.
 const WEEKLY_FULL_POINTS = 170;
 const WEEKLY_DAILY_FIELDS = ['morning', 'tefila', 'mikvaotVal', 'bonus', 'rambamVal', 'metivtaVal'];
 function weeklyPercent(s){
   let points = WEEKLY_DAILY_FIELDS.reduce((sum, f) => sum + weeklyDailySum(s, f), 0);
-  [...WEEKLY_CLASS_FIELD_DEFS, ...WEEKLY_PARENT_FIELD_DEFS].forEach(f => {
-    points += f.kind === 'weekly-bool' ? (s[f.field] ? 1 : 0) : (Number(s[f.field]) || 0);
-  });
+  [...WEEKLY_CLASS_FIELD_DEFS, ...WEEKLY_PARENT_FIELD_DEFS].forEach(f => { points += weeklyFieldPoints(s, f); });
   return Math.round(points / WEEKLY_FULL_POINTS * 100);
 }
 
 const WEEKLY_PARENT_FIELD_DEFS = [
-  { field: 'chitas', label: 'חת"ת', kind: 'weekly-number' },
-  { field: 'shema', label: 'ישן חסיד', kind: 'weekly-number' },
+  { field: 'chitas', label: 'חת"ת', kind: 'weekly-number', ratio: 2 },
+  { field: 'shema', label: 'ישן חסיד', kind: 'weekly-number', ratio: 2 },
   { field: 'netilatYadaim', label: 'נטילת ידיים', kind: 'weekly-number' },
-  { field: 'minchaMaariv', label: 'מנחה מעריב', kind: 'weekly-number' },
+  { field: 'minchaMaariv', label: 'מנחה מעריב', kind: 'weekly-number', ratio: 2 },
   { field: 'mikveh', label: 'מקווה שישי', kind: 'weekly-bool' },
-  { field: 'dvarTorah', label: 'שיחה', kind: 'weekly-bool' }
+  { field: 'dvarTorah', label: 'שיחה', kind: 'weekly-bool', ratio: 4 }
 ];
+
+// A list of the points a weekly cell can get, opened under the cell.
+function showWeeklyValuePicker(td, values, current, onPick){
+  document.querySelectorAll('.ff-value-picker').forEach(el => el.remove());
+  const list = document.createElement('div');
+  list.className = 'merged-dropdown-list ff-value-picker open';
+  values.forEach(v => {
+    const opt = document.createElement('div');
+    opt.className = 'merged-dropdown-option' + (v === current ? ' merged-dropdown-option-active' : '');
+    opt.textContent = String(v);
+    opt.addEventListener('click', (e) => {
+      e.stopPropagation();
+      list.remove();
+      if (v !== current) onPick(v);
+    });
+    list.appendChild(opt);
+  });
+  list.addEventListener('click', (e) => e.stopPropagation());
+  document.body.appendChild(list);
+  placeDropdownListFixed(td, list);
+  list.style.minWidth = Math.max(td.offsetWidth, 48) + 'px';
+}
 
 function fitHeaderCellToWidestWord(th){
   const label = th.dataset.fitLabel;
@@ -3961,10 +3989,10 @@ function renderWeeklyEntryInto(entry, container, allWeeklyEntries){
     return true;
   });
 
+  const defOf = (field) => fieldDefs.find(f => f.field === field) || {};
   const getFieldVal = (s, field, kind) => {
     if (kind === 'percent') return weeklyPercent(s);
-    if (kind === 'weekly-number') return s[field] || 0;
-    if (kind === 'weekly-bool') return s[field] ? 1 : 0;
+    if (kind === 'weekly-number' || kind === 'weekly-bool') return weeklyFieldPoints(s, defOf(field));
     if (!isDayView) return weeklyDailySum(s, field);
     return weeklyDayFieldValue((s.days || {})[viewMode], field);
   };
@@ -3991,7 +4019,8 @@ function renderWeeklyEntryInto(entry, container, allWeeklyEntries){
         td.className = 'ff-percent';
         td.title = 'מתוך ' + WEEKLY_FULL_POINTS + ' נקודות בשבוע';
       } else if (kind === 'weekly-bool'){
-        valueSpans.push(fitTextSpan(td, s[field] ? '✓' : ''));
+        const ratio = defOf(field).ratio || 1;
+        valueSpans.push(fitTextSpan(td, s[field] ? (ratio > 1 ? String(ratio) : '✓') : ''));
         td.style.cursor = 'pointer';
         td.addEventListener('click', () => {
           requireArchiveEditAccess(() => {
@@ -3999,11 +4028,21 @@ function renderWeeklyEntryInto(entry, container, allWeeklyEntries){
           });
         });
       } else if (kind === 'weekly-number'){
+        // Points, picked from the column's list (parents' days times ratio).
+        const def = defOf(field);
+        const ratio = def.ratio || 1;
+        const step = def.step || ratio;
+        const max = def.max || 7 * ratio;
+        const values = [];
+        for (let v = 0; v <= max; v += step) values.push(v);
         valueSpans.push(fitTextSpan(td, val || ''));
         td.style.cursor = 'pointer';
-        td.addEventListener('click', () => {
-          promptEditArchiveValue(val, (newVal) => {
-            commitOp({ kind: 'weekCell', weekKey: entry.weekKey, sid: s.id, field, target: null, value: newVal });
+        td.addEventListener('click', (e) => {
+          e.stopPropagation();
+          requireArchiveEditAccess(() => {
+            showWeeklyValuePicker(td, values, val, (points) => {
+              commitOp({ kind: 'weekCell', weekKey: entry.weekKey, sid: s.id, field, target: null, value: points / ratio });
+            });
           });
         });
       } else {
