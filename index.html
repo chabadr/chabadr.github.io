@@ -167,6 +167,11 @@
   table.archive-table td:first-child{ border-left: none; white-space: nowrap; }
   table.archive-table th:first-child{ white-space: nowrap; }
   table.archive-table tr:nth-child(even){ background: #FCFBF6; }
+  table.archive-table .sticky-col{ position: sticky; z-index: 1; background: #fff; }
+  table.archive-table tr:nth-child(even) td.sticky-col{ background: #FCFBF6; }
+  table.archive-table th.sticky-col{ background: var(--paper-dark); z-index: 11; }
+  table.archive-table th.ff-group-th.sticky-col{ background: #fff; }
+  table.archive-table .sticky-col-last{ box-shadow: inset 1px 0 0 var(--line); }
 
   .boards{
     display:flex;
@@ -323,6 +328,7 @@
   table.archive-table tr.metivta-selected td{
     background: #E4ECF7;
   }
+  table.archive-table tr.metivta-selected td.sticky-col{ background: #E4ECF7; }
   table.archive-table tr.metivta-selected td.metivta-rownum{
     background: var(--ink);
     color: var(--paper);
@@ -3175,7 +3181,12 @@ function buildMetivtaTable({ days, archivedKeys, archiveTable, availableWidth })
   // Fixed widths so the leading columns stay narrow. Today's column (where
   // attendance is entered) gets whatever room is left on screen after them,
   // between a normal day's width and 110px - never pushed off-screen.
-  const COL_W = { num: 26, family: 62, first: 54, class: 34, summary: 62, day: 56 };
+  const COL_W = {
+    num: 26,
+    family: textColumnWidth(tableRows.map(r => r.family), 'משפחה', 4),
+    first: textColumnWidth(tableRows.map(r => r.first), 'פרטי', 4),
+    class: 34, summary: 62, day: 56
+  };
   const leadWidth = COL_W.num + COL_W.family + COL_W.first + COL_W.class + COL_W.summary;
   COL_W.today = Math.max(COL_W.day, Math.min(110, availableWidth - 2 - leadWidth));
   const dayColWidth = (entry) => entry.isLive ? COL_W.today : COL_W.day;
@@ -3240,8 +3251,12 @@ function buildMetivtaTable({ days, archivedKeys, archiveTable, availableWidth })
     trh.appendChild(th);
   });
   const headerWidths = [COL_W.num, COL_W.family, COL_W.first, COL_W.class, COL_W.summary];
+  // Today's column takes any room left on a wide screen, so the leading
+  // columns keep exactly their widths.
   [...trh.children].forEach((th, i) => {
-    th.style.width = (i < headerWidths.length ? headerWidths[i] : dayColWidth(days[i - headerWidths.length])) + 'px';
+    const entry = days[i - headerWidths.length];
+    if (i >= headerWidths.length && entry.isLive) return;
+    th.style.width = (i < headerWidths.length ? headerWidths[i] : dayColWidth(entry)) + 'px';
   });
   thead.appendChild(trh);
   table.appendChild(thead);
@@ -3311,6 +3326,8 @@ function buildMetivtaTable({ days, archivedKeys, archiveTable, availableWidth })
     tbody.appendChild(tr);
   });
   table.appendChild(tbody);
+
+  stickLeadingColumns(table, [COL_W.num, COL_W.family, COL_W.first]);
 
   const scrollWrap = document.createElement('div');
   scrollWrap.className = 'table-scroll';
@@ -3553,6 +3570,34 @@ function fitHeaderCellToWidestWord(th){
   const padding = (parseFloat(cs.paddingLeft) || 0) + (parseFloat(cs.paddingRight) || 0);
   const border = (parseFloat(cs.borderLeftWidth) || 0) + (parseFloat(cs.borderRightWidth) || 0);
   th.style.width = Math.ceil(maxWordWidth + padding + border + 4) + 'px';
+}
+
+// The width (px) a column needs for its longest text - cell text at the
+// tables' 13px, the header label in bold - plus the cell's padding.
+function textColumnWidth(texts, headerLabel, padding){
+  const ctx = textColumnWidth.ctx || (textColumnWidth.ctx = document.createElement('canvas').getContext('2d'));
+  ctx.font = "400 13px 'Rubik', sans-serif";
+  let w = 0;
+  texts.forEach(t => { w = Math.max(w, ctx.measureText(String(t || '')).width); });
+  ctx.font = "700 12.5px 'Rubik', sans-serif";
+  w = Math.max(w, ctx.measureText(headerLabel || '').width);
+  return Math.ceil(w + padding + 4);
+}
+
+// The leading (name) columns stay in place while the rest of the table
+// scrolls sideways under them. widths: each sticky column's width in px.
+function stickLeadingColumns(table, widths){
+  [...table.rows].forEach(tr => {
+    let right = 0;
+    for (let i = 0; i < widths.length && i < tr.cells.length; i++){
+      const cell = tr.cells[i];
+      if (cell.colSpan > 1) break;
+      cell.classList.add('sticky-col');
+      if (i === widths.length - 1) cell.classList.add('sticky-col-last');
+      cell.style.right = right + 'px';
+      right += widths[i];
+    }
+  });
 }
 
 function fitNamesColumnWidth(th, names){
@@ -3949,8 +3994,16 @@ function renderWeeklyEntryInto(entry, container, allWeeklyEntries){
   if (wide){
     fitSpanGroupToCells(headerSpans, 12, 40);
     fitSpanGroupToCells(nameSpans, 12, 40, 6);
+    // The name column is then narrowed to its longest name; the other
+    // columns share the room left and their text is fitted again.
+    const nameCs = getComputedStyle(nameTh);
+    const nameW = Math.ceil(Math.max(...nameSpans.map(sp => sp.offsetWidth)) + (parseFloat(nameCs.paddingLeft) || 0) + (parseFloat(nameCs.paddingRight) || 0) + 8);
+    cols[0].style.width = nameW + 'px';
+    cols.slice(1).forEach(c => { c.style.width = 'calc((100% - ' + nameW + 'px) / ' + fieldDefs.length + ')'; });
+    fitSpanGroupToCells(headerSpans.slice(1), 12, 40);
     fitSpanGroupToCells(valueSpans, 12, 40);
-    groupRow.querySelectorAll('.ff-parent-group-th').forEach(th => { th.style.fontSize = headerSpans[0].style.fontSize; });
+    groupRow.querySelectorAll('.ff-parent-group-th').forEach(th => { th.style.fontSize = headerSpans[1].style.fontSize; });
+    stickLeadingColumns(table, [nameW]);
   } else {
     // Compact layout: each column as narrow as its widest header word (the
     // name column as wide as the longest name), applied through the
@@ -3959,6 +4012,7 @@ function renderWeeklyEntryInto(entry, container, allWeeklyEntries){
     nameTh.dataset.fitNamesCol = '1';
     fitNamesColumnWidth(nameTh, uniqueStudents.map(s => studentName(s.id)));
     [...trh.children].forEach((th, i) => { if (cols[i]) cols[i].style.width = th.style.width; });
+    stickLeadingColumns(table, [nameTh.offsetWidth]);
   }
 }
 
@@ -4157,17 +4211,16 @@ function renderTodayHistoryTableNow(container){
   const table = document.createElement('table');
   table.className = 'archive-table';
   table.style.tableLayout = 'fixed';
-  table.style.width = 'max(100%, ' + (160 + days.length * 46) + 'px)';
+  const nameColWidth = textColumnWidth(state.students.map(st => studentName(st.id)), 'שם', 8);
+  table.style.width = 'max(100%, ' + (nameColWidth + days.length * 46) + 'px)';
 
   const colgroup = document.createElement('colgroup');
   const nameCol = document.createElement('col');
-  nameCol.style.width = '160px';
+  nameCol.style.width = nameColWidth + 'px';
   colgroup.appendChild(nameCol);
-  days.forEach(() => {
-    const dayCol = document.createElement('col');
-    dayCol.style.width = '46px';
-    colgroup.appendChild(dayCol);
-  });
+  // The day columns share what is left (at least 46px each - see the
+  // table's width), so the name column stays as wide as its longest name.
+  days.forEach(() => colgroup.appendChild(document.createElement('col')));
   table.appendChild(colgroup);
 
   const thead = document.createElement('thead');
@@ -4268,6 +4321,19 @@ function renderTodayHistoryTableNow(container){
   scrollWrap.appendChild(table);
   wrap.appendChild(scrollWrap);
   container.appendChild(wrap);
+
+  // Measured again in the font the cells really use (it is larger on a
+  // wide screen).
+  const sampleTd = table.querySelector('tbody td');
+  let finalNameWidth = nameColWidth;
+  if (sampleTd && table.isConnected){
+    const scale = (parseFloat(getComputedStyle(sampleTd).fontSize) || 13) / 13;
+    finalNameWidth = textColumnWidth(state.students.map(st => studentName(st.id)), 'שם', 8 / scale) * scale;
+    finalNameWidth = Math.ceil(finalNameWidth);
+    nameCol.style.width = finalNameWidth + 'px';
+    table.style.width = 'max(100%, ' + (finalNameWidth + days.length * 46) + 'px)';
+  }
+  stickLeadingColumns(table, [finalNameWidth]);
 }
 
 function buildToolbar(){
