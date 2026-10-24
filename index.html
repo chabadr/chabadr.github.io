@@ -3333,7 +3333,7 @@ function weeklyDailySum(s, field){
 
 async function exportWeeklyCSV(entry, weekStartD, weekEndD){
   try {
-    const headers = ['שם', 'חסידות', 'תפילה', 'מקוואות', 'רמב"ם', 'בונוס', 'מתיבתא', ...WEEKLY_PARENT_FIELD_DEFS.map(f => f.label)];
+    const headers = ['שם', 'חסידות', 'תפילה', 'מקוואות', 'בונוס', 'רמב"ם', 'מתיבתא', ...WEEKLY_PARENT_FIELD_DEFS.map(f => f.label)];
     const rows = [headers];
     entry.students.forEach(s => {
       rows.push([
@@ -3341,8 +3341,8 @@ async function exportWeeklyCSV(entry, weekStartD, weekEndD){
         weeklyDailySum(s, 'morning'),
         weeklyDailySum(s, 'tefila'),
         weeklyDailySum(s, 'mikvaotVal'),
-        weeklyDailySum(s, 'rambamVal'),
         weeklyDailySum(s, 'bonus'),
+        weeklyDailySum(s, 'rambamVal'),
         weeklyDailySum(s, 'metivtaVal'),
         ...WEEKLY_PARENT_FIELD_DEFS.map(f => f.kind === 'weekly-bool' ? (s[f.field] ? 'כן' : 'לא') : (s[f.field] || 0))
       ]);
@@ -3810,15 +3810,14 @@ function renderWeeklyEntryInto(entry, container, allWeeklyEntries){
     { field: 'morning', label: 'חסידות', kind: 'daily' },
     { field: 'tefila', label: 'תפילה', kind: 'daily' },
     { field: 'mikvaotVal', label: 'מקוואות', kind: 'daily' },
-    { field: 'rambamVal', label: 'רמב"ם', kind: 'daily' },
     { field: 'bonus', label: 'בונוס', kind: 'daily' },
+    { field: 'rambamVal', label: 'רמב"ם', kind: 'daily' },
     { field: 'metivtaVal', label: 'מתיבתא', kind: 'daily' },
     ...WEEKLY_PARENT_FIELD_DEFS
   ].filter(f => !(f.field === 'metivtaVal' && (weeklyArchiveViewMode[entry.weekKey] || 'total') !== 'total'
     && weeklyDayHasNoMetivta(weekStartD, weeklyArchiveViewMode[entry.weekKey])));
   const isParentField = (field) => WEEKLY_PARENT_FIELD_DEFS.some(f => f.field === field);
   const firstParentField = WEEKLY_PARENT_FIELD_DEFS[0].field;
-  const dailyCount = fieldDefs.length - WEEKLY_PARENT_FIELD_DEFS.length;
 
   const colgroup = document.createElement('colgroup');
   const cols = [];
@@ -3835,16 +3834,25 @@ function renderWeeklyEntryInto(entry, container, allWeeklyEntries){
   const isDayView = viewMode !== 'total';
 
   const thead = document.createElement('thead');
+  // Who is in charge of each group of columns.
   const groupRow = document.createElement('tr');
   const groupSpacer = document.createElement('th');
   groupSpacer.className = 'ff-group-th';
-  groupSpacer.colSpan = 1 + dailyCount;
   groupRow.appendChild(groupSpacer);
-  const parentGroupTh = document.createElement('th');
-  parentGroupTh.className = 'ff-parent-group-th';
-  parentGroupTh.colSpan = WEEKLY_PARENT_FIELD_DEFS.length;
-  parentGroupTh.textContent = 'עדכוני הורים';
-  groupRow.appendChild(parentGroupTh);
+  const groupOf = (field) => isParentField(field) ? 'עדכוני הורים'
+    : field === 'rambamVal' ? 'שמעון'
+    : field === 'metivtaVal' ? 'חננאל'
+    : 'תורנים';
+  let lastGroupTh = null;
+  fieldDefs.forEach(({ field }) => {
+    const name = groupOf(field);
+    if (lastGroupTh && lastGroupTh.textContent === name){ lastGroupTh.colSpan++; return; }
+    lastGroupTh = document.createElement('th');
+    lastGroupTh.className = 'ff-parent-group-th';
+    lastGroupTh.colSpan = 1;
+    lastGroupTh.textContent = name;
+    groupRow.appendChild(lastGroupTh);
+  });
   thead.appendChild(groupRow);
 
   const trh = document.createElement('tr');
@@ -3938,7 +3946,7 @@ function renderWeeklyEntryInto(entry, container, allWeeklyEntries){
     fitSpanGroupToCells(headerSpans, 12, 40);
     fitSpanGroupToCells(nameSpans, 12, 40, 6);
     fitSpanGroupToCells(valueSpans, 12, 40);
-    parentGroupTh.style.fontSize = headerSpans[0].style.fontSize;
+    groupRow.querySelectorAll('.ff-parent-group-th').forEach(th => { th.style.fontSize = headerSpans[0].style.fontSize; });
   } else {
     // Compact layout: each column as narrow as its widest header word (the
     // name column as wide as the longest name), applied through the
