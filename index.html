@@ -3421,15 +3421,28 @@ function dayLabelWithinWeek(weekStartD, dayKeyStr){
 // dropdown list is positioned relative to the viewport instead, escaping
 // that clip. It closes on any outside scroll, since it would otherwise stay
 // put while the toggle it belongs to scrolls away.
+// Opens under the toggle - or above it when there isn't room below (a cell
+// near the bottom of the screen), so the whole list is always visible.
 function placeDropdownListFixed(toggle, list){
   const r = toggle.getBoundingClientRect();
   list.classList.add('dropdown-fixed');
   list.style.position = 'fixed';
-  list.style.top = r.bottom + 'px';
   list.style.right = Math.max(window.innerWidth - r.right, 4) + 'px';
   list.style.left = 'auto';
-  list.style.maxHeight = Math.max(window.innerHeight - r.bottom - 8, 160) + 'px';
   list.style.overflowY = 'auto';
+  list.style.top = r.bottom + 'px';
+  list.style.bottom = 'auto';
+  list.style.maxHeight = 'none';
+  const needed = list.scrollHeight;
+  const below = window.innerHeight - r.bottom - 8;
+  const above = r.top - 8;
+  if (needed > below && above > below){
+    list.style.top = 'auto';
+    list.style.bottom = (window.innerHeight - r.top) + 'px';
+    list.style.maxHeight = above + 'px';
+  } else {
+    list.style.maxHeight = Math.max(below, 160) + 'px';
+  }
 }
 
 document.addEventListener('scroll', (e) => {
