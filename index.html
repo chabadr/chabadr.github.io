@@ -3421,6 +3421,10 @@ function getDisplayArchive(){
 }
 
 let weeklyArchiveSortField = {};
+// The order of the rows of הנוסע המתמיד: made when a week / day / sort column
+// is picked (by % unless another column is chosen) and kept while cells are
+// edited, so a row does not jump under the cursor.
+let weeklySortOrder = null; // { sig, ids }
 let weeklyArchiveViewMode = {};
 
 const HEBREW_WEEKDAY_NAMES = ['ראשון', 'שני', 'שלישי', 'רביעי', 'חמישי', 'שישי', 'שבת'];
@@ -3476,6 +3480,7 @@ const FREQUENT_WEEK_PICKER = {
   select: (weekKey, mode) => {
     selectedWeeklyKey = weekKey;
     weeklyArchiveViewMode[weekKey] = mode;
+    weeklySortOrder = null;
     renderFrequentFlyerView();
   }
 };
@@ -3973,7 +3978,7 @@ function renderWeeklyEntryInto(entry, container, allWeeklyEntries){
   }
   table.appendChild(colgroup);
 
-  const currentSortField = weeklyArchiveSortField[entry.weekKey] || null;
+  const currentSortField = weeklyArchiveSortField[entry.weekKey] || 'percent';
   const viewMode = weeklyArchiveViewMode[entry.weekKey] || 'total';
   const isDayView = viewMode !== 'total';
 
@@ -4024,6 +4029,7 @@ function renderWeeklyEntryInto(entry, container, allWeeklyEntries){
     headerSpans.push(fitTextSpan(th, label + (currentSortField === field ? ' ▼' : '')));
     th.addEventListener('click', () => {
       weeklyArchiveSortField[entry.weekKey] = field;
+      weeklySortOrder = null;
       renderFrequentFlyerView();
     });
     if (field !== 'percent') trh.appendChild(th);
@@ -4050,7 +4056,15 @@ function renderWeeklyEntryInto(entry, container, allWeeklyEntries){
   const kindOf = (field) => (fieldDefs.find(f => f.field === field) || {}).kind;
 
   if (currentSortField){
-    uniqueStudents = uniqueStudents.slice().sort((a, b) => getFieldVal(b, currentSortField, kindOf(currentSortField)) - getFieldVal(a, currentSortField, kindOf(currentSortField)));
+    const sortSig = entry.weekKey + '|' + viewMode + '|' + currentSortField + '|' + uniqueStudents.length;
+    if (!weeklySortOrder || weeklySortOrder.sig !== sortSig){
+      weeklySortOrder = {
+        sig: sortSig,
+        ids: uniqueStudents.slice().sort((a, b) => getFieldVal(b, currentSortField, kindOf(currentSortField)) - getFieldVal(a, currentSortField, kindOf(currentSortField))).map(st => st.id)
+      };
+    }
+    const rank = new Map(weeklySortOrder.ids.map((id, i) => [id, i]));
+    uniqueStudents = uniqueStudents.slice().sort((a, b) => (rank.has(a.id) ? rank.get(a.id) : 1e9) - (rank.has(b.id) ? rank.get(b.id) : 1e9));
   }
   const nameSpans = [];
   const valueSpans = [];
