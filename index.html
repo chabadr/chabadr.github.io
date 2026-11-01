@@ -737,21 +737,21 @@
     border-color: var(--gold);
   }
 
-  .click-code-pad{
-    display: flex;
-    gap: 10px;
+  .mini-keypad{
+    display: grid;
+    grid-template-columns: repeat(5, 24px);
+    gap: 3px;
     justify-content: center;
-    align-items: center;
-    height: 90px;
-    margin: 6px 0 10px;
-    border: 2px dashed var(--line);
-    border-radius: 12px;
-    background: var(--paper);
-    cursor: pointer;
-    user-select: none;
+    direction: ltr;
+    margin: 8px 0 6px;
   }
-  .click-code-pad{ color: var(--ink-soft); font-size: 14px; transition: background 0.08s ease; }
-  .click-code-pad.flash{ background: var(--gold-bg); }
+  .mini-keypad button{
+    width: 24px; height: 24px; padding: 0;
+    font-size: 12px; font-family: 'Rubik', sans-serif;
+    border: 1px solid var(--line); border-radius: 5px;
+    background: #fff; color: var(--ink); cursor: pointer;
+  }
+  .mini-keypad button:active{ background: var(--gold-bg); }
   .lock-error{
     color: var(--danger);
     font-size: 13px;
@@ -4813,11 +4813,8 @@ async function initApp(){
   }
 }
 
-// Editing the archive is opened with a code of mouse clicks (nothing to see
-// on the screen): L = left button, R = right button.
-// Right twice, left once, right twice, left once.
-const ARCHIVE_CLICK_CODE = ['R', 'R', 'L', 'R', 'R', 'L'];
-// A typed number for screens without a mouse (a phone or a tablet).
+// Editing the archive is opened with a code entered on a very small number
+// pad, whose digits change places after every press.
 const ARCHIVE_ACCESS_CODE = '963';
 // Once opened it stays open this long after the last use - also across a
 // reload and between the site's pages (it is kept in the browser).
@@ -4889,108 +4886,71 @@ function showArchiveCodePrompt(onSuccess){
   msg.className = 'modal-msg';
   box.appendChild(msg);
 
-  // The pad where the clicks are made. Nothing on it tells how many clicks
-  // the code has - it only blinks on every click, whatever the button.
-  const pad = document.createElement('div');
-  pad.className = 'click-code-pad';
-  pad.textContent = 'לחצו כאן';
-  box.appendChild(pad);
+  // A tiny number pad. The digits change places after every press, and
+  // nothing on it shows how many digits the code has.
+  const keypad = document.createElement('div');
+  keypad.className = 'mini-keypad';
+  const keys = [];
+  for (let i = 0; i < 10; i++){
+    const key = document.createElement('button');
+    key.type = 'button';
+    key.addEventListener('click', () => press(key.textContent));
+    keypad.appendChild(key);
+    keys.push(key);
+  }
+  function shuffleKeys(){
+    const digits = '0123456789'.split('');
+    for (let i = digits.length - 1; i > 0; i--){
+      const j = Math.floor(Math.random() * (i + 1));
+      [digits[i], digits[j]] = [digits[j], digits[i]];
+    }
+    keys.forEach((key, i) => { key.textContent = digits[i]; });
+  }
+  box.appendChild(keypad);
 
   const errorEl = document.createElement('div');
   errorEl.className = 'lock-error';
   box.appendChild(errorEl);
-
-  // A typed number, for a screen without a mouse; hidden until asked for.
-  const input = document.createElement('input');
-  input.type = 'password';
-  input.className = 'lock-input';
-  input.inputMode = 'numeric';
-  input.maxLength = 10;
-  input.autocomplete = 'off';
-  input.style.display = 'none';
-  box.appendChild(input);
 
   const btnRow = document.createElement('div');
   btnRow.className = 'modal-btns';
   const cancelBtn = document.createElement('button');
   cancelBtn.className = 'modal-btn modal-btn-cancel';
   cancelBtn.textContent = 'ביטול';
+  cancelBtn.addEventListener('click', () => overlay.remove());
   btnRow.appendChild(cancelBtn);
-  const typedBtn = document.createElement('button');
-  typedBtn.type = 'button';
-  typedBtn.className = 'modal-btn modal-btn-cancel';
-  typedBtn.textContent = 'קוד מספרי';
-  btnRow.appendChild(typedBtn);
   box.appendChild(btnRow);
 
-  let entered = [];
-
-  function close(){
-    overlay.remove();
-  }
-  function succeed(){
-    writeArchiveLock({ tries: 0, until: 0 });
-    close();
-    onSuccess();
-  }
+  let entered = '';
   function showLockState(){
     const mins = archiveLockMinutesLeft();
     if (mins > 0){
       msg.textContent = 'הקוד ננעל. אפשר לנסות שוב בעוד ' + mins + (mins === 1 ? ' דקה' : ' דקות') + '.';
-      pad.style.display = 'none';
-      typedBtn.style.display = 'none';
+      keypad.style.display = 'none';
       return true;
     }
-    msg.textContent = 'הזן את קוד הלחיצות (בעכבר):';
-    pad.style.display = '';
+    msg.textContent = 'הזן קוד:';
+    keypad.style.display = '';
     return false;
   }
-  function wrong(){
-    entered = [];
-    const locked = archiveWrongTry();
-    if (locked){ errorEl.textContent = ''; showLockState(); }
-    else errorEl.textContent = 'קוד שגוי, נסה שוב';
-  }
-  function addSymbol(symbol){
+  function press(digit){
     errorEl.textContent = '';
-    entered.push(symbol);
-    pad.classList.add('flash');
-    setTimeout(() => pad.classList.remove('flash'), 120);
-    if (entered.length < ARCHIVE_CLICK_CODE.length) return;
-    if (entered.every((s, i) => s === ARCHIVE_CLICK_CODE[i])) succeed();
-    else wrong();
+    entered += digit;
+    if (entered.length < ARCHIVE_ACCESS_CODE.length){ shuffleKeys(); return; }
+    if (entered === ARCHIVE_ACCESS_CODE){
+      writeArchiveLock({ tries: 0, until: 0 });
+      overlay.remove();
+      onSuccess();
+      return;
+    }
+    entered = '';
+    if (archiveWrongTry()) showLockState();
+    else { errorEl.textContent = 'קוד שגוי, נסה שוב'; shuffleKeys(); }
   }
-
-  // Every press of the left or the right button is one click of the code.
-  pad.addEventListener('mousedown', (e) => {
-    if (e.button === 0) addSymbol('L');
-    else if (e.button === 2) addSymbol('R');
-  });
-  // No browser menu on a right click inside the prompt.
-  overlay.addEventListener('contextmenu', (e) => e.preventDefault());
-
-  cancelBtn.addEventListener('click', close);
-  typedBtn.addEventListener('click', () => {
-    pad.style.display = 'none';
-    typedBtn.style.display = 'none';
-    input.style.display = '';
-    msg.textContent = 'הזן קוד מספרי:';
-    input.focus();
-  });
-  function tryTyped(){
-    if (input.value.trim() === ARCHIVE_ACCESS_CODE){ succeed(); return; }
-    const locked = archiveWrongTry();
-    input.value = '';
-    if (locked){ input.style.display = 'none'; errorEl.textContent = ''; showLockState(); }
-    else errorEl.textContent = 'קוד שגוי, נסה שוב';
-  }
-  input.addEventListener('input', () => {
-    if (input.value.trim() === ARCHIVE_ACCESS_CODE) succeed();
-  });
-  input.addEventListener('keydown', (e) => { if (e.key === 'Enter') tryTyped(); });
 
   overlay.appendChild(box);
   document.body.appendChild(overlay);
+  shuffleKeys();
   showLockState();
 }
 
