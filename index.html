@@ -401,14 +401,18 @@
   table.ff-table.ff-wide tbody td .ff-fit{ line-height: 1.25; vertical-align: middle; }
   table.ff-table.ff-wide thead tr:last-child th{ font-size: 0; }
   table.ff-table.ff-wide thead tr:last-child th .ff-fit{ line-height: 1.2; vertical-align: middle; }
-  /* The group name (who is in charge) on top of the group's first column. */
-  .ff-group-cap{
-    position: relative; z-index: 1;
-    min-height: 13px; line-height: 1.2;
-    font-size: 11px; font-weight: 700; color: var(--gold);
-    white-space: nowrap; text-align: right;
+  /* The thin row with the group names, centered over their columns. */
+  table.ff-table th.ff-tall-th{ vertical-align: middle; }
+  table.ff-table th.ff-parent-group-th{
+    background: var(--gold-bg);
+    color: var(--ink);
+    padding: 1px 4px;
+    font-size: 11.5px;
+    line-height: 1.25;
+    text-align: center;
+    border-bottom: 1px solid var(--gold);
+    border-right: 3px solid var(--gold);
   }
-  table.ff-table th.ff-group-start{ border-right: 2px solid var(--gold); }
   .merged-dropdown-toggle:focus{
     outline: 2px solid var(--gold);
     outline-offset: 2px;
@@ -2495,8 +2499,6 @@ function weeklyDayHasNoMetivta(weekStartD, dayKeyStr){
 // School days are Sunday-Friday. A past day counts as missing when any of its
 // expected columns is empty for every student (no data for the day at all
 // included); days from today on (still live or in the future) are never listed.
-const WEEKDAY_LETTERS = ['א', 'ב', 'ג', 'ד', 'ה', 'ו', 'ש'];
-
 function weekMissingDayNames(entry){
   const weekStartD = new Date(entry.weekStart);
   const today = todayStr();
@@ -3666,11 +3668,17 @@ function textColumnWidth(texts, headerLabel, padding){
 // The leading (name) columns stay in place while the rest of the table
 // scrolls sideways under them. widths: each sticky column's width in px.
 function stickLeadingColumns(table, widths){
+  const taken = []; // columns still covered by a tall cell from a row above
   [...table.rows].forEach(tr => {
     let column = 0, right = 0;
-    for (let i = 0; i < tr.cells.length && column < widths.length; i++){
+    const next = [];
+    taken.forEach((n, c) => { if (n > 1) next[c] = n - 1; });
+    for (let i = 0; i < tr.cells.length; i++){
+      while (taken[column] > 0){ right += widths[column] || 0; column++; }
+      if (column >= widths.length) break;
       const cell = tr.cells[i];
       const span = cell.colSpan || 1;
+      if ((cell.rowSpan || 1) > 1) for (let c = column; c < column + span; c++) next[c] = cell.rowSpan - 1;
       if (column + span > widths.length) break; // reaches past the fixed columns
       const width = widths.slice(column, column + span).reduce((a, w) => a + w, 0);
       cell.classList.add('sticky-col');
@@ -3679,6 +3687,8 @@ function stickLeadingColumns(table, widths){
       right += width;
       column += span;
     }
+    taken.length = 0;
+    next.forEach((n, c) => { taken[c] = n; });
   });
 }
 
@@ -3897,7 +3907,7 @@ function renderWeeklyEntryInto(entry, container, allWeeklyEntries){
   const weekEndD = new Date(weekStartD);
   weekEndD.setDate(weekEndD.getDate() + 6);
 
-  // The blue bar: the week picker and the days still missing (as letters).
+  // The blue bar: the week picker and the days still missing.
   const dateEl = document.createElement('div');
   dateEl.className = 'archive-date weekly-header-row weekly-header-row-nowrap';
   const headerGroup = document.createElement('div');
@@ -3916,8 +3926,7 @@ function renderWeeklyEntryInto(entry, container, allWeeklyEntries){
     headerGroup.appendChild(sep2);
     const missingEl = document.createElement('span');
     missingEl.className = 'missing-days';
-    missingEl.textContent = missingDays.map(n => WEEKDAY_LETTERS[HEBREW_WEEKDAY_NAMES.indexOf(n)] || n).join(', ');
-    missingEl.title = 'ימים חסרים: ' + missingDays.join(', ');
+    missingEl.textContent = 'ימים חסרים: ' + missingDays.join(', ');
     headerGroup.appendChild(missingEl);
   }
   dateEl.appendChild(headerGroup);
@@ -3969,34 +3978,46 @@ function renderWeeklyEntryInto(entry, container, allWeeklyEntries){
   const isDayView = viewMode !== 'total';
 
   const thead = document.createElement('thead');
-  // Who is in charge of each group of columns - written small on top of the
-  // group's first column, in the same row as the column names.
+  // Who is in charge of each group of columns: a thin row on top of the
+  // column names, each name centered over all of its columns (so the lines
+  // between columns stop there and continue below).
+  const groupRow = document.createElement('tr');
   const groupOf = (field) => isParentField(field) ? 'עדכוני הורים'
-    : field === 'percent' ? ''
     : field === 'rambamVal' ? 'שמעון'
     : field === 'metivtaVal' ? 'חננאל'
     : (WEEKLY_CLASS_FIELD_DEFS.find(f => f.field === field) || { group: 'תורנים' }).group;
-  const groupCaption = (cell, name, first) => {
-    const cap = document.createElement('div');
-    cap.className = 'ff-group-cap' + (first ? ' first' : '');
-    cap.textContent = first ? name : '';
-    cell.appendChild(cap);
-    if (first) cell.classList.add('ff-group-start');
-  };
+  let lastGroupTh = null;
+  fieldDefs.forEach(({ field }) => {
+    if (field === 'percent') return;
+    const name = groupOf(field);
+    if (lastGroupTh && lastGroupTh.textContent === name){ lastGroupTh.colSpan++; return; }
+    lastGroupTh = document.createElement('th');
+    lastGroupTh.className = 'ff-parent-group-th';
+    lastGroupTh.colSpan = 1;
+    lastGroupTh.textContent = name;
+    groupRow.appendChild(lastGroupTh);
+  });
+  thead.appendChild(groupRow);
 
   const trh = document.createElement('tr');
   const headerSpans = [];
+  // The name and the % cells span both header rows, their text in the
+  // middle of the height.
   const nameTh = document.createElement('th');
-  groupCaption(nameTh, '', false);
+  nameTh.rowSpan = 2;
+  nameTh.className = 'ff-tall-th';
   headerSpans.push(fitTextSpan(nameTh, 'שם'));
-  trh.appendChild(nameTh);
-  let lastGroupName = null;
+  groupRow.insertBefore(nameTh, groupRow.firstChild);
+  const headerCells = [nameTh];
   fieldDefs.forEach(({ field, label }) => {
     const th = document.createElement('th');
-    const groupName = groupOf(field);
-    groupCaption(th, groupName, groupName !== '' && groupName !== lastGroupName);
-    if (field !== 'percent') lastGroupName = groupName;
     th.style.cursor = 'pointer';
+    if (field === 'percent'){
+      th.rowSpan = 2;
+      th.className = 'ff-tall-th';
+      groupRow.insertBefore(th, groupRow.children[1]);
+    }
+    headerCells.push(th);
     if (field === firstParentField) th.classList.add('ff-parent-first');
     // The whole header on one line (the parents' columns are made wide enough).
     th.dataset.fitLabel = label.replace(/ /g, '\u00a0');
@@ -4005,10 +4026,11 @@ function renderWeeklyEntryInto(entry, container, allWeeklyEntries){
       weeklyArchiveSortField[entry.weekKey] = field;
       renderFrequentFlyerView();
     });
-    trh.appendChild(th);
+    if (field !== 'percent') trh.appendChild(th);
   });
   thead.appendChild(trh);
   table.appendChild(thead);
+  const pctTh = headerCells[1];
 
   const tbody = document.createElement('tbody');
   const seenIds = new Set();
@@ -4134,16 +4156,16 @@ function renderWeeklyEntryInto(entry, container, allWeeklyEntries){
     });
     fitSpanGroupToCells(headerSpans.slice(1), 9, 16);
     fitSpanGroupToCells(valueSpans, 12, 22);
-    stickLeadingColumns(table, [nameW, trh.children[1].offsetWidth]);
+    stickLeadingColumns(table, [nameW, pctTh.offsetWidth]);
   } else {
     // Compact layout: each column as narrow as its widest header word (the
     // name column as wide as the longest name), applied through the
     // colgroup since the group-label row above spans several columns.
-    trh.querySelectorAll('th[data-fit-label]').forEach(fitHeaderCellToWidestWord);
+    headerCells.forEach(th => { if (th.dataset.fitLabel) fitHeaderCellToWidestWord(th); });
     nameTh.dataset.fitNamesCol = '1';
     fitNamesColumnWidth(nameTh, uniqueStudents.map(s => studentName(s.id)));
-    [...trh.children].forEach((th, i) => { if (cols[i]) cols[i].style.width = th.style.width; });
-    stickLeadingColumns(table, [nameTh.offsetWidth, trh.children[1].offsetWidth]);
+    headerCells.forEach((th, i) => { if (cols[i]) cols[i].style.width = th.style.width; });
+    stickLeadingColumns(table, [nameTh.offsetWidth, pctTh.offsetWidth]);
   }
 }
 
