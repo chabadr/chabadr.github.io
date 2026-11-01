@@ -167,6 +167,7 @@
   table.archive-table td:first-child{ border-left: none; white-space: nowrap; }
   table.archive-table th:first-child{ white-space: nowrap; }
   table.archive-table tr:nth-child(even){ background: #FCFBF6; }
+  table.archive-table th.week-end, table.archive-table td.week-end{ border-left: 3px solid var(--gold); }
   table.archive-table .sticky-col{ position: sticky; z-index: 1; background: #fff; }
   table.archive-table tr:nth-child(even) td.sticky-col{ background: #FCFBF6; }
   table.archive-table th.sticky-col{ background: var(--paper-dark); z-index: 11; }
@@ -965,9 +966,17 @@ async function fetchArchiveWeeksMap(){
 
 // Re-reads the archive documents (another device may have archived a day or
 // edited the archive) and redraws.
+// A refresh that was read before one of our own saves finished could bring
+// back the old value of the cell just edited, so it is thrown away and done
+// again once the saving is over.
+let archiveWriteVersion = 0;      // bumped by every save made here
+let archiveRefreshWanted = false; // a refresh was dropped because of a save
 async function refreshArchiveAndRender(){
   if (!serverSnap) return;
+  if (syncRunning || pendingOps.length){ archiveRefreshWanted = true; return; }
+  const version = archiveWriteVersion;
   const [days, weeks] = await Promise.all([fetchArchiveDays(), fetchArchiveWeeksMap()]);
+  if (version !== archiveWriteVersion || syncRunning || pendingOps.length){ archiveRefreshWanted = true; return; }
   serverSnap.dailyDays = days;
   serverSnap.weeks = weeks;
   rebuildViewAndRender();
@@ -1620,6 +1629,7 @@ async function syncPendingOps(){
     const ids = new Set(batch.map(o => o.id));
     pendingOps = pendingOps.filter(o => !ids.has(o.id));
     persistPendingOps();
+    archiveWriteVersion++;
     serverSnap.main = result.snap.main;
     lastServerMainJson = JSON.stringify(result.snap.main);
     if (result.readDaily) serverSnap.dailyDays = result.snap.dailyDays;
@@ -1630,6 +1640,10 @@ async function syncPendingOps(){
   syncRunning = false;
   rebuildViewAndRender();
   if (pendingOps.length) scheduleSync(syncFailed ? SAVE_RETRY_MS : 0);
+  else if (archiveRefreshWanted){
+    archiveRefreshWanted = false;
+    refreshArchiveAndRender();
+  }
 }
 function studentTotal(student){
   const todayCats = CATEGORIES.reduce((sum, c) => sum + (student.cats[c.key] || 0), 0);
@@ -4208,6 +4222,7 @@ async function exportArchiveDaysCSV(days, allOptions, groupType){
 }
 
 let todayArchiveSortIndex = null;
+let todayArchiveSortOrder = null;
 
 // מקוואות/רמב"ם of an archived day live in its week document (they are
 // checkmarks counted per day, not class points).
@@ -4284,18 +4299,14 @@ function renderTodayHistoryTableNow(container){
 
   const table = document.createElement('table');
   table.className = 'archive-table';
-  table.style.tableLayout = 'fixed';
-  const nameColWidth = textColumnWidth(state.students.map(st => studentName(st.id)), 'שם', 8);
-  table.style.width = 'max(100%, ' + (nameColWidth + days.length * 46) + 'px)';
+  // Each column is exactly as wide as its date needs, on one line.
+  table.style.tableLayout = 'auto';
+  table.style.width = 'max-content';
 
-  const colgroup = document.createElement('colgroup');
-  const nameCol = document.createElement('col');
-  nameCol.style.width = nameColWidth + 'px';
-  colgroup.appendChild(nameCol);
-  // The day columns share what is left (at least 46px each - see the
-  // table's width), so the name column stays as wide as its longest name.
-  days.forEach(() => colgroup.appendChild(document.createElement('col')));
-  table.appendChild(colgroup);
+  const weekOf = (entry) => getWeekKey(new Date(dayKeyOf(entry.date) + 'T12:00:00'));
+  // A thick line after the last day of each week (the next column is the
+  // week before it).
+  const endsWeek = (dayIndex) => dayIndex + 1 < days.length && weekOf(days[dayIndex]) !== weekOf(days[dayIndex + 1]);
 
   const thead = document.createElement('thead');
 
@@ -4306,12 +4317,12 @@ function renderTodayHistoryTableNow(container){
   days.forEach((entry, dayIndex) => {
     const th = document.createElement('th');
     th.style.cursor = 'pointer';
-    th.style.whiteSpace = 'normal';
+    th.style.whiteSpace = 'nowrap';
     th.style.lineHeight = '1.2';
+    if (endsWeek(dayIndex)) th.classList.add('week-end');
     const d = new Date(entry.date);
     const dateLine = formatHebrewDateShort(d) + (entry.isLive ? ' (היום)' : '');
     const weekdayLine = d.toLocaleDateString('he-IL', { weekday: 'short' });
-    th.innerHTML = '';
     const dateSpan = document.createElement('div');
     dateSpan.style.fontSize = '0.85em';
     dateSpan.textContent = dateLine + (todayArchiveSortIndex === dayIndex ? ' ▼' : '');
@@ -4324,6 +4335,7 @@ function renderTodayHistoryTableNow(container){
     th.appendChild(weekdaySpan);
     th.addEventListener('click', () => {
       todayArchiveSortIndex = dayIndex;
+      todayArchiveSortOrder = null;
       renderTodayHistoryTable(container);
     });
     trDate.appendChild(th);
@@ -4332,56 +4344,72 @@ function renderTodayHistoryTableNow(container){
   table.appendChild(thead);
 
   const tbody = document.createElement('tbody');
-  const activeKeyForSort = getHistoryActive('archive_shared', groupType, allOptions[0].key);
+  const activeKey = getHistoryActive('archive_shared', groupType, allOptions[0].key);
   let orderedStudents = state.students.slice();
   if (todayArchiveSortIndex !== null && days[todayArchiveSortIndex]){
+    // Sorted by a day's column: the order is made once and kept while cells
+    // are edited, so a row does not jump to another place under the cursor.
     const sortEntry = days[todayArchiveSortIndex];
-    orderedStudents.sort((a, b) => getTodayArchiveValue(sortEntry, b.id, activeKeyForSort) - getTodayArchiveValue(sortEntry, a.id, activeKeyForSort));
+    const sortSig = dayKeyOf(sortEntry.date) + '|' + activeKey;
+    if (!todayArchiveSortOrder || todayArchiveSortOrder.sig !== sortSig){
+      todayArchiveSortOrder = {
+        sig: sortSig,
+        ids: orderedStudents.slice().sort((a, b) => getTodayArchiveValue(sortEntry, b.id, activeKey) - getTodayArchiveValue(sortEntry, a.id, activeKey)).map(st => st.id)
+      };
+    }
+    const rank = new Map(todayArchiveSortOrder.ids.map((id, i) => [id, i]));
+    orderedStudents.sort((a, b) => rank.get(a.id) - rank.get(b.id));
   }
+  const category = CATEGORIES.find(c => c.key === activeKey);
   orderedStudents.forEach(student => {
     const tr = document.createElement('tr');
     const nameTd = document.createElement('td');
     nameTd.textContent = studentName(student.id);
     tr.appendChild(nameTd);
 
-    days.forEach(entry => {
-      const s = entry.students.find(x => x.id === student.id);
-      const cats = (s && s.cats) || {};
-      const activeKey = getHistoryActive('archive_shared', groupType, allOptions[0].key);
-
-      let val;
-      if (ARCHIVE_WEEKLY_KEYS[activeKey]){
-        val = archivedWeeklyDayValue(entry, student.id, ARCHIVE_WEEKLY_KEYS[activeKey]);
-      } else if (activeKey === 'total'){
-        val = CATEGORIES.reduce((sum, c) => sum + (cats[c.key] || 0), 0) + ((s && s.minusTotal) || 0);
-      } else if (activeKey === 'shop'){
-        val = -((s && s.purchases || 0) * PURCHASE_COST);
-      } else if (activeKey === 'minus'){
-        val = (s && s.minusTotal) || 0;
-      } else {
-        val = cats[activeKey] || 0;
-      }
+    days.forEach((entry, dayIndex) => {
+      const s = entry.students.find(x => x.id === student.id) || {};
+      const cats = s.cats || {};
+      const dayKey = dayKeyOf(entry.date);
+      const val = getTodayArchiveValue(entry, student.id, activeKey);
       const td = document.createElement('td');
+      if (endsWeek(dayIndex)) td.classList.add('week-end');
       // מקוואות/רמב"ם: a checkmark, like on today's board (worth 2 points
-      // only in הנוסע המתמיד); a click toggles it.
+      // only in הנוסע המתמיד).
       td.textContent = ARCHIVE_WEEKLY_KEYS[activeKey] ? (val > 0 ? '✓' : '') : (val || '');
-      if (activeKey !== 'total'){
-        td.style.cursor = 'pointer';
-        td.addEventListener('click', () => {
-          const dayKey = dayKeyOf(entry.date);
-          if (ARCHIVE_WEEKLY_KEYS[activeKey]){
-            requireArchiveEditAccess(() => {
-              commitOp({ kind: 'weekCell', weekKey: getWeekKey(new Date(dayKey + 'T12:00:00')), sid: student.id, field: ARCHIVE_WEEKLY_KEYS[activeKey], target: dayKey, value: val > 0 ? 0 : 2 });
-            });
-            return;
-          }
-          if (!s) return;
-          const field = activeKey === 'shop' ? 'purchases' : activeKey === 'minus' ? 'minusTotal' : 'cat:' + activeKey;
-          const current = activeKey === 'shop' ? (s.purchases || 0) : activeKey === 'minus' ? (s.minusTotal || 0) : (cats[activeKey] || 0);
-          promptEditArchiveValue(current, (newVal) => {
-            commitOp({ kind: 'archiveCell', target: dayKey, group: 'main', sid: student.id, field, value: newVal });
-          });
+      if (activeKey === 'total') { tr.appendChild(td); return; }
+      td.style.cursor = 'pointer';
+      const editCell = (field, value) => requireArchiveEditAccess(() => {
+        commitOp({ kind: 'archiveCell', target: dayKey, group: 'main', sid: student.id, field, value });
+      });
+      // A click puts the cell's fixed value there, another click takes it
+      // out. The minus and the purchases are added one at a time, with a
+      // small + in the corner that takes one back (never above 0).
+      let onClick;
+      let undo = null;
+      if (ARCHIVE_WEEKLY_KEYS[activeKey]){
+        onClick = () => requireArchiveEditAccess(() => {
+          commitOp({ kind: 'weekCell', weekKey: weekOf(entry), sid: student.id, field: ARCHIVE_WEEKLY_KEYS[activeKey], target: dayKey, value: val > 0 ? 0 : 2 });
         });
+      } else if (activeKey === 'minus'){
+        onClick = () => editCell('minusTotal', (s.minusTotal || 0) - 1);
+        if (val < 0) undo = () => editCell('minusTotal', Math.min(0, val + 1));
+      } else if (activeKey === 'shop'){
+        onClick = () => editCell('purchases', (s.purchases || 0) + 1);
+        if ((s.purchases || 0) > 0) undo = () => editCell('purchases', s.purchases - 1);
+      } else {
+        onClick = () => editCell('cat:' + activeKey, cats[activeKey] ? 0 : category.value);
+      }
+      td.addEventListener('click', onClick);
+      if (undo){
+        td.style.position = 'relative';
+        const undoBtn = document.createElement('button');
+        undoBtn.type = 'button';
+        undoBtn.className = 'status-plus-btn';
+        undoBtn.textContent = '+';
+        undoBtn.title = activeKey === 'minus' ? 'ביטול מינוס' : 'ביטול קניה';
+        undoBtn.addEventListener('click', (e) => { e.stopPropagation(); undo(); });
+        td.appendChild(undoBtn);
       }
       tr.appendChild(td);
     });
@@ -4396,18 +4424,8 @@ function renderTodayHistoryTableNow(container){
   wrap.appendChild(scrollWrap);
   container.appendChild(wrap);
 
-  // Measured again in the font the cells really use (it is larger on a
-  // wide screen).
-  const sampleTd = table.querySelector('tbody td');
-  let finalNameWidth = nameColWidth;
-  if (sampleTd && table.isConnected){
-    const scale = (parseFloat(getComputedStyle(sampleTd).fontSize) || 13) / 13;
-    finalNameWidth = textColumnWidth(state.students.map(st => studentName(st.id)), 'שם', 8 / scale) * scale;
-    finalNameWidth = Math.ceil(finalNameWidth);
-    nameCol.style.width = finalNameWidth + 'px';
-    table.style.width = 'max(100%, ' + (finalNameWidth + days.length * 46) + 'px)';
-  }
-  stickLeadingColumns(table, [finalNameWidth]);
+  // The name column stays in place while the days scroll under it.
+  if (table.isConnected) stickLeadingColumns(table, [nameTh.offsetWidth]);
 }
 
 function buildToolbar(){
@@ -4430,13 +4448,32 @@ function computeSortScore(student){
   return attendanceSum + plusGroupSum + plusPersistent + minusOnly;
 }
 
+// The rows of today's board are ordered by score, but a change in the minus
+// column does not move anyone: the order is kept as long as nothing but the
+// minuses changed since it was made.
+let boardOrder = null; // { sig, rank: Map(student id -> place) }
+function boardRowOrder(){
+  const sig = state.students.map(st => st.id + ':' + (computeSortScore(st) - (st.minusTotal || 0))).join(',');
+  if (!boardOrder || boardOrder.sig !== sig){
+    const rank = new Map();
+    const half = Math.ceil(TOTAL_STUDENTS / 2);
+    [state.students.slice(0, half), state.students.slice(half)].forEach(group => {
+      group.slice().sort((a, b) => computeSortScore(b) - computeSortScore(a)).forEach((st, i) => rank.set(st.id, i));
+    });
+    boardOrder = { sig, rank };
+  }
+  return boardOrder.rank;
+}
+
 function render(){
   if (!state) return;
   const boardsEl = document.getElementById('boards');
   boardsEl.innerHTML = '';
   const half = Math.ceil(TOTAL_STUDENTS / 2);
-  const firstHalf = state.students.slice(0, half).sort((a, b) => computeSortScore(b) - computeSortScore(a));
-  const secondHalf = state.students.slice(half).sort((a, b) => computeSortScore(b) - computeSortScore(a));
+  const rank = boardRowOrder();
+  const byRank = (a, b) => rank.get(a.id) - rank.get(b.id);
+  const firstHalf = state.students.slice(0, half).sort(byRank);
+  const secondHalf = state.students.slice(half).sort(byRank);
 
   const col1 = document.createElement('div');
   col1.className = 'board-col';
@@ -4910,51 +4947,6 @@ function requireArchiveEditAccess(callback){
   showArchiveCodePrompt(() => {
     extendArchiveEditAccess();
     callback();
-  });
-}
-
-function promptEditArchiveValue(currentValue, onSave){
-  requireArchiveEditAccess(() => {
-    const overlay = document.createElement('div');
-    overlay.className = 'modal-overlay';
-
-    const box = document.createElement('div');
-    box.className = 'modal-box';
-
-    const msg = document.createElement('div');
-    msg.className = 'modal-msg';
-    msg.textContent = 'ערוך ערך:';
-    box.appendChild(msg);
-
-    const input = document.createElement('input');
-    input.type = 'number';
-    input.className = 'lock-input';
-    input.value = currentValue || 0;
-    box.appendChild(input);
-
-    const btnRow = document.createElement('div');
-    btnRow.className = 'modal-btns';
-
-    const cancelBtn = document.createElement('button');
-    cancelBtn.className = 'modal-btn modal-btn-cancel';
-    cancelBtn.textContent = 'ביטול';
-    cancelBtn.addEventListener('click', () => document.body.removeChild(overlay));
-    btnRow.appendChild(cancelBtn);
-
-    const saveBtn = document.createElement('button');
-    saveBtn.className = 'modal-btn modal-btn-confirm';
-    saveBtn.textContent = 'שמור';
-    saveBtn.addEventListener('click', () => {
-      const newVal = parseInt(input.value, 10) || 0;
-      document.body.removeChild(overlay);
-      onSave(newVal);
-    });
-    btnRow.appendChild(saveBtn);
-
-    box.appendChild(btnRow);
-    overlay.appendChild(box);
-    document.body.appendChild(overlay);
-    setTimeout(() => { input.focus(); input.select(); }, 50);
   });
 }
 
