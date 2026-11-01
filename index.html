@@ -728,6 +728,26 @@
     border-color: var(--gold);
   }
 
+  .click-code-pad{
+    display: flex;
+    gap: 10px;
+    justify-content: center;
+    align-items: center;
+    height: 90px;
+    margin: 6px 0 10px;
+    border: 2px dashed var(--line);
+    border-radius: 12px;
+    background: var(--paper);
+    cursor: pointer;
+    user-select: none;
+  }
+  .click-code-dot{
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    border: 2px solid var(--ink-soft);
+  }
+  .click-code-dot.filled{ background: var(--ink); border-color: var(--ink); }
   .lock-error{
     color: var(--danger);
     font-size: 13px;
@@ -1721,61 +1741,23 @@ function adjustMinus(studentId, delta){
   commitOp({ kind: 'minus', group: 'main', sid: studentId, delta });
 }
 
-function showMinusPicker(studentId){
-  const student = state.students.find(s => s.id === studentId);
-  if (student && (student.minusTotal || 0) === 0){
-    adjustMinus(studentId, -1);
-  } else {
-    showMinusPickerModal(studentId);
+// A click on a minus cell adds a minus; the small + in the corner takes one
+// back, never going above 0.
+function appendMinusCellEvents(td, student){
+  td.style.position = 'relative';
+  td.addEventListener('click', () => adjustMinus(student.id, -1));
+  if ((student.minusTotal || 0) < 0){
+    const undo = document.createElement('button');
+    undo.type = 'button';
+    undo.className = 'status-plus-btn';
+    undo.textContent = '+';
+    undo.title = 'ביטול מינוס';
+    undo.addEventListener('click', (e) => {
+      e.stopPropagation();
+      adjustMinus(student.id, 1);
+    });
+    td.appendChild(undo);
   }
-}
-
-function showMinusPickerModal(studentId){
-  const overlay = document.createElement('div');
-  overlay.className = 'modal-overlay';
-
-  const box = document.createElement('div');
-  box.className = 'modal-box';
-
-  const msg = document.createElement('div');
-  msg.className = 'modal-msg';
-  msg.textContent = 'בחר ערך להוספה:';
-  box.appendChild(msg);
-
-  const btnRow = document.createElement('div');
-  btnRow.className = 'modal-btns';
-
-  const minusBtn = document.createElement('button');
-  minusBtn.className = 'modal-btn modal-btn-confirm';
-  minusBtn.textContent = '−1';
-  minusBtn.addEventListener('click', () => {
-    document.body.removeChild(overlay);
-    adjustMinus(studentId, -1);
-  });
-  btnRow.appendChild(minusBtn);
-
-  const plusBtn = document.createElement('button');
-  plusBtn.className = 'modal-btn modal-btn-confirm';
-  plusBtn.textContent = '+1';
-  plusBtn.addEventListener('click', () => {
-    document.body.removeChild(overlay);
-    adjustMinus(studentId, 1);
-  });
-  btnRow.appendChild(plusBtn);
-
-  box.appendChild(btnRow);
-
-  const cancelBtn = document.createElement('button');
-  cancelBtn.className = 'modal-btn modal-btn-cancel';
-  cancelBtn.textContent = 'ביטול';
-  cancelBtn.style.marginTop = '10px';
-  cancelBtn.addEventListener('click', () => {
-    document.body.removeChild(overlay);
-  });
-  box.appendChild(cancelBtn);
-
-  overlay.appendChild(box);
-  document.body.appendChild(overlay);
 }
 
 function makePurchase(studentId){
@@ -2336,7 +2318,7 @@ function buildBoard(title, students){
           minusVal.className = 'point-val';
           minusVal.textContent = hasMinus ? student.minusTotal : '';
           td.appendChild(minusVal);
-          td.addEventListener('click', () => showMinusPicker(student.id));
+          appendMinusCellEvents(td, student);
         }
       } else if (s.kind === 'merged'){
         const activeKey = state.mergedActive[s.groupIndex];
@@ -2384,7 +2366,7 @@ function buildBoard(title, students){
         minusVal.className = 'point-val';
         minusVal.textContent = hasMinus ? student.minusTotal : '';
         td.appendChild(minusVal);
-        td.addEventListener('click', () => showMinusPicker(student.id));
+        appendMinusCellEvents(td, student);
       } else if (s.kind === 'shopOnly'){
         const purchaseCost = (student.purchases || 0) * PURCHASE_COST;
         const hasValue = purchaseCost !== 0;
@@ -4720,9 +4702,71 @@ async function initApp(){
   }
 }
 
+// Editing the archive is opened with a code of mouse clicks (nothing to see
+// on the screen): L = left button, R = right button, B = both together.
+const ARCHIVE_CLICK_CODE = ['B', 'R', 'B', 'R'];
+// A typed number for screens without a mouse (a phone or a tablet).
 const ARCHIVE_ACCESS_CODE = '963';
-let archiveEditUnlocked = false;
-let archiveEditAccessTimer = null;
+// Once opened it stays open this long after the last use - also across a
+// reload and between the site's pages (it is kept in the browser).
+const ARCHIVE_EDIT_SECONDS = 90;
+const ARCHIVE_UNLOCK_KEY = 'archiveEditUntil';
+// Three wrong tries lock the prompt for a few minutes.
+const ARCHIVE_LOCK_KEY = 'archiveEditLock';
+const ARCHIVE_MAX_TRIES = 3;
+const ARCHIVE_LOCK_MINUTES = 5;
+// Two buttons pressed within this many milliseconds count as "both".
+const CHORD_WINDOW_MS = 150;
+
+let archiveEditUntilMemory = 0;
+let archiveLockMemory = { tries: 0, until: 0 };
+
+function readArchiveEditUntil(){
+  try{
+    return Math.max(parseInt(localStorage.getItem(ARCHIVE_UNLOCK_KEY), 10) || 0, archiveEditUntilMemory);
+  } catch(e){
+    return archiveEditUntilMemory;
+  }
+}
+
+function archiveEditUnlocked(){
+  return Date.now() < readArchiveEditUntil();
+}
+
+function extendArchiveEditAccess(){
+  archiveEditUntilMemory = Date.now() + ARCHIVE_EDIT_SECONDS * 1000;
+  try{ localStorage.setItem(ARCHIVE_UNLOCK_KEY, String(archiveEditUntilMemory)); } catch(e){}
+}
+
+function readArchiveLock(){
+  try{
+    const v = JSON.parse(localStorage.getItem(ARCHIVE_LOCK_KEY));
+    if (v && typeof v === 'object') return { tries: v.tries || 0, until: v.until || 0 };
+  } catch(e){}
+  return archiveLockMemory;
+}
+
+function writeArchiveLock(lock){
+  archiveLockMemory = lock;
+  try{ localStorage.setItem(ARCHIVE_LOCK_KEY, JSON.stringify(lock)); } catch(e){}
+}
+
+// Counts a wrong try; returns the minutes left if that locked the prompt.
+function archiveWrongTry(){
+  const lock = readArchiveLock();
+  const tries = lock.tries + 1;
+  if (tries >= ARCHIVE_MAX_TRIES){
+    writeArchiveLock({ tries: 0, until: Date.now() + ARCHIVE_LOCK_MINUTES * 60000 });
+    return ARCHIVE_LOCK_MINUTES;
+  }
+  writeArchiveLock({ tries, until: 0 });
+  return 0;
+}
+
+function archiveLockMinutesLeft(){
+  const left = readArchiveLock().until - Date.now();
+  return left > 0 ? Math.ceil(left / 60000) : 0;
+}
 
 function showArchiveCodePrompt(onSuccess){
   const overlay = document.createElement('div');
@@ -4733,71 +4777,138 @@ function showArchiveCodePrompt(onSuccess){
 
   const msg = document.createElement('div');
   msg.className = 'modal-msg';
-  msg.textContent = 'הזן קוד לעריכת ארכיון:';
   box.appendChild(msg);
 
+  // The pad where the clicks are made, with one dot per click.
+  const pad = document.createElement('div');
+  pad.className = 'click-code-pad';
+  const dots = ARCHIVE_CLICK_CODE.map(() => {
+    const d = document.createElement('span');
+    d.className = 'click-code-dot';
+    pad.appendChild(d);
+    return d;
+  });
+  box.appendChild(pad);
+
+  const errorEl = document.createElement('div');
+  errorEl.className = 'lock-error';
+  box.appendChild(errorEl);
+
+  // A typed number, for a screen without a mouse; hidden until asked for.
   const input = document.createElement('input');
   input.type = 'password';
   input.className = 'lock-input';
   input.inputMode = 'numeric';
   input.maxLength = 10;
   input.autocomplete = 'off';
+  input.style.display = 'none';
   box.appendChild(input);
-
-  const errorEl = document.createElement('div');
-  errorEl.className = 'lock-error';
-  box.appendChild(errorEl);
 
   const btnRow = document.createElement('div');
   btnRow.className = 'modal-btns';
-
   const cancelBtn = document.createElement('button');
   cancelBtn.className = 'modal-btn modal-btn-cancel';
   cancelBtn.textContent = 'ביטול';
-  cancelBtn.addEventListener('click', () => document.body.removeChild(overlay));
   btnRow.appendChild(cancelBtn);
+  const typedBtn = document.createElement('button');
+  typedBtn.type = 'button';
+  typedBtn.className = 'modal-btn modal-btn-cancel';
+  typedBtn.textContent = 'קוד מספרי';
+  btnRow.appendChild(typedBtn);
+  box.appendChild(btnRow);
 
-  function trySubmit(){
-    if (input.value.trim() === ARCHIVE_ACCESS_CODE){
-      archiveEditUnlocked = true;
-      document.body.removeChild(overlay);
-      onSuccess();
-    } else {
-      errorEl.textContent = 'קוד שגוי, נסה שוב';
-      input.value = '';
-      input.focus();
+  let entered = [];
+  let pressed = { left: false, right: false };
+  let chordTimer = null;
+
+  function close(){
+    clearTimeout(chordTimer);
+    overlay.remove();
+  }
+  function succeed(){
+    writeArchiveLock({ tries: 0, until: 0 });
+    close();
+    onSuccess();
+  }
+  function showLockState(){
+    const mins = archiveLockMinutesLeft();
+    if (mins > 0){
+      msg.textContent = 'הקוד ננעל. אפשר לנסות שוב בעוד ' + mins + (mins === 1 ? ' דקה' : ' דקות') + '.';
+      pad.style.display = 'none';
+      typedBtn.style.display = 'none';
+      return true;
     }
+    msg.textContent = 'הזן את קוד הלחיצות (בעכבר):';
+    pad.style.display = '';
+    return false;
+  }
+  function wrong(){
+    entered = [];
+    dots.forEach(d => d.classList.remove('filled'));
+    const locked = archiveWrongTry();
+    if (locked){ errorEl.textContent = ''; showLockState(); }
+    else errorEl.textContent = 'קוד שגוי, נסה שוב';
+  }
+  function addSymbol(symbol){
+    errorEl.textContent = '';
+    entered.push(symbol);
+    dots.forEach((d, i) => d.classList.toggle('filled', i < entered.length));
+    if (entered.length < ARCHIVE_CLICK_CODE.length) return;
+    if (entered.every((s, i) => s === ARCHIVE_CLICK_CODE[i])) succeed();
+    else wrong();
+  }
+
+  // A press of the left and the right button within CHORD_WINDOW_MS of each
+  // other is one "both" click; the click is decided when that time is over.
+  pad.addEventListener('mousedown', (e) => {
+    if (e.button !== 0 && e.button !== 2) return;
+    if (!pressed.left && !pressed.right){
+      pressed = { left: false, right: false };
+      chordTimer = setTimeout(() => {
+        const symbol = pressed.left && pressed.right ? 'B' : (pressed.right ? 'R' : 'L');
+        pressed = { left: false, right: false };
+        addSymbol(symbol);
+      }, CHORD_WINDOW_MS);
+    }
+    if (e.button === 0) pressed.left = true;
+    if (e.button === 2) pressed.right = true;
+  });
+  // No browser menu on a right click inside the prompt.
+  overlay.addEventListener('contextmenu', (e) => e.preventDefault());
+
+  cancelBtn.addEventListener('click', close);
+  typedBtn.addEventListener('click', () => {
+    pad.style.display = 'none';
+    typedBtn.style.display = 'none';
+    input.style.display = '';
+    msg.textContent = 'הזן קוד מספרי:';
+    input.focus();
+  });
+  function tryTyped(){
+    if (input.value.trim() === ARCHIVE_ACCESS_CODE){ succeed(); return; }
+    const locked = archiveWrongTry();
+    input.value = '';
+    if (locked){ input.style.display = 'none'; errorEl.textContent = ''; showLockState(); }
+    else errorEl.textContent = 'קוד שגוי, נסה שוב';
   }
   input.addEventListener('input', () => {
-    if (input.value.trim() === ARCHIVE_ACCESS_CODE){
-      archiveEditUnlocked = true;
-      document.body.removeChild(overlay);
-      onSuccess();
-    }
+    if (input.value.trim() === ARCHIVE_ACCESS_CODE) succeed();
   });
-  input.addEventListener('keydown', (e) => { if (e.key === 'Enter') trySubmit(); });
+  input.addEventListener('keydown', (e) => { if (e.key === 'Enter') tryTyped(); });
 
-  box.appendChild(btnRow);
   overlay.appendChild(box);
   document.body.appendChild(overlay);
-  setTimeout(() => input.focus(), 50);
-}
-
-function armArchiveEditAccessTimer(){
-  clearTimeout(archiveEditAccessTimer);
-  archiveEditAccessTimer = setTimeout(() => {
-    archiveEditUnlocked = false;
-  }, 30000);
+  showLockState();
 }
 
 function requireArchiveEditAccess(callback){
-  if (archiveEditUnlocked){
-    armArchiveEditAccessTimer();
+  if (archiveEditUnlocked()){
+    extendArchiveEditAccess();
     callback();
     return;
   }
   showArchiveCodePrompt(() => {
-    armArchiveEditAccessTimer();
+    extendArchiveEditAccess();
     callback();
   });
 }
