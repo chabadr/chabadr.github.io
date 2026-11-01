@@ -415,7 +415,26 @@
   table.ff-table.ff-wide tbody td .ff-fit{ line-height: 1.25; vertical-align: middle; }
   table.ff-table.ff-wide thead tr:last-child th{ font-size: 0; }
   table.ff-table.ff-wide thead tr:last-child th .ff-fit{ line-height: 1.2; vertical-align: middle; }
-  table.ff-table th.ff-parent-group-th, table.ff-table th.ff-group-th{ padding: 1px 4px; font-size: 0.75em; line-height: 1.25; }
+  /* The top row: the week picker and the group names in one dark row. */
+  table.ff-table th.ff-title-th, table.ff-table th.ff-parent-group-th{
+    background: var(--ink);
+    color: var(--paper);
+    padding: 2px 6px;
+    font-size: 12.5px;
+    line-height: 1.3;
+    border-bottom: 1px solid var(--gold);
+  }
+  table.ff-table th.ff-title-th{ text-align: right; border-left: none; }
+  table.archive-table th.ff-title-th.sticky-col{ background: var(--ink); }
+  table.ff-table .ff-title-box.archive-date{
+    display: flex; align-items: center; flex-wrap: wrap; gap: 4px 10px;
+    padding: 0; font-size: 13px; background: none;
+  }
+  table.ff-table th.ff-has-export{ position: relative; }
+  table.ff-table .ff-export-btn{
+    position: absolute; left: 4px; top: 50%; transform: translateY(-50%);
+    padding: 1px 8px; font-size: 11.5px; border-radius: 6px;
+  }
   .merged-dropdown-toggle:focus{
     outline: 2px solid var(--gold);
     outline-offset: 2px;
@@ -2502,6 +2521,8 @@ function weeklyDayHasNoMetivta(weekStartD, dayKeyStr){
 // School days are Sunday-Friday. A past day counts as missing when any of its
 // expected columns is empty for every student (no data for the day at all
 // included); days from today on (still live or in the future) are never listed.
+const WEEKDAY_LETTERS = ['א', 'ב', 'ג', 'ד', 'ה', 'ו', 'ש'];
+
 function weekMissingDayNames(entry){
   const weekStartD = new Date(entry.weekStart);
   const today = todayStr();
@@ -3352,6 +3373,17 @@ function weeklyDayFieldValue(dayData, field){
   return field === 'metivtaVal' ? Math.max(0, v) : v;
 }
 
+// In the weekly view: on how many days of the week the student did it (not
+// how many points that gave). Metivta counts the days he attended - its
+// stored value is -1 for a day with no attendance.
+function weeklyDaysDone(s, field){
+  return Object.values(s.days || {}).filter(d => {
+    if (!d) return false;
+    if (field === 'metivtaVal') return typeof d.metivtaVal === 'number' && d.metivtaVal >= 0;
+    return (d[field] || 0) > 0;
+  }).length;
+}
+
 function weeklyDailySum(s, field){
   return Object.values(s.days || {}).reduce((sum, d) => sum + weeklyDayFieldValue(d, field), 0);
 }
@@ -3364,12 +3396,12 @@ async function exportWeeklyCSV(entry, weekStartD, weekEndD){
       rows.push([
         studentName(s.id),
         weeklyPercent(s) + '%',
-        weeklyDailySum(s, 'morning'),
-        weeklyDailySum(s, 'tefila'),
-        weeklyDailySum(s, 'mikvaotVal'),
-        weeklyDailySum(s, 'bonus'),
-        weeklyDailySum(s, 'rambamVal'),
-        weeklyDailySum(s, 'metivtaVal'),
+        weeklyDaysDone(s, 'morning'),
+        weeklyDaysDone(s, 'tefila'),
+        weeklyDaysDone(s, 'mikvaotVal'),
+        weeklyDaysDone(s, 'bonus'),
+        weeklyDaysDone(s, 'rambamVal'),
+        weeklyDaysDone(s, 'metivtaVal'),
         ...WEEKLY_CLASS_FIELD_DEFS.map(f => weeklyFieldPoints(s, f)),
         ...WEEKLY_PARENT_FIELD_DEFS.map(f => weeklyFieldPoints(s, f))
       ]);
@@ -3661,14 +3693,17 @@ function textColumnWidth(texts, headerLabel, padding){
 // scrolls sideways under them. widths: each sticky column's width in px.
 function stickLeadingColumns(table, widths){
   [...table.rows].forEach(tr => {
-    let right = 0;
-    for (let i = 0; i < widths.length && i < tr.cells.length; i++){
+    let column = 0, right = 0;
+    for (let i = 0; i < tr.cells.length && column < widths.length; i++){
       const cell = tr.cells[i];
-      if (cell.colSpan > 1) break;
+      const span = cell.colSpan || 1;
+      if (column + span > widths.length) break; // reaches past the fixed columns
+      const width = widths.slice(column, column + span).reduce((a, w) => a + w, 0);
       cell.classList.add('sticky-col');
-      if (i === widths.length - 1) cell.classList.add('sticky-col-last');
+      if (column + span === widths.length) cell.classList.add('sticky-col-last');
       cell.style.right = right + 'px';
-      right += widths[i];
+      right += width;
+      column += span;
     }
   });
 }
@@ -3884,40 +3919,28 @@ function renderWeeklyEntryInto(entry, container, allWeeklyEntries){
   const entryWrap = document.createElement('div');
   entryWrap.className = 'archive-entry';
 
-  const dateEl = document.createElement('div');
-  dateEl.className = 'archive-date weekly-header-row weekly-header-row-nowrap';
   const weekStartD = new Date(entry.weekStart);
   const weekEndD = new Date(weekStartD);
   weekEndD.setDate(weekEndD.getDate() + 6);
 
-  const headerGroup = document.createElement('div');
-  headerGroup.className = 'header-group';
-  const titleSpan = document.createElement('span');
-  titleSpan.textContent = 'הנוסע המתמיד';
-  headerGroup.appendChild(titleSpan);
-  const sep1 = document.createElement('span');
-  sep1.textContent = '·';
-  headerGroup.appendChild(sep1);
-  headerGroup.appendChild(buildWeekDaySelectDropdown(allWeeklyEntries || [entry], entry));
+  // The week picker and the missing days (letters: א, ב, ג) are the first
+  // cell of the table's top row, in the same dark row as the group names.
+  const titleBox = document.createElement('div');
+  titleBox.className = 'archive-date ff-title-box';
+  titleBox.appendChild(buildWeekDaySelectDropdown(allWeeklyEntries || [entry], entry));
   const missingDays = weekMissingDayNames(entry);
   if (missingDays.length){
-    const sep2 = document.createElement('span');
-    sep2.textContent = '·';
-    headerGroup.appendChild(sep2);
     const missingEl = document.createElement('span');
     missingEl.className = 'missing-days';
-    missingEl.textContent = 'ימים חסרים: ' + missingDays.join(', ');
-    headerGroup.appendChild(missingEl);
+    missingEl.textContent = missingDays.map(n => WEEKDAY_LETTERS[HEBREW_WEEKDAY_NAMES.indexOf(n)] || n).join(', ');
+    missingEl.title = 'ימים חסרים: ' + missingDays.join(', ');
+    titleBox.appendChild(missingEl);
   }
-  dateEl.appendChild(headerGroup);
 
   const exportBtn = document.createElement('button');
-  exportBtn.className = 'export-btn';
+  exportBtn.className = 'export-btn ff-export-btn';
   exportBtn.textContent = 'אקסל';
   exportBtn.addEventListener('click', () => exportWeeklyCSV(entry, weekStartD, weekEndD));
-  dateEl.appendChild(exportBtn);
-
-  entryWrap.appendChild(dateEl);
 
   // On a computer the table spans the whole page and its text grows to fill
   // the cells; on a narrow screen it keeps its compact, scrollable layout.
@@ -3960,9 +3983,11 @@ function renderWeeklyEntryInto(entry, container, allWeeklyEntries){
   const thead = document.createElement('thead');
   // Who is in charge of each group of columns.
   const groupRow = document.createElement('tr');
-  const groupSpacer = document.createElement('th');
-  groupSpacer.className = 'ff-group-th';
-  groupRow.appendChild(groupSpacer);
+  const titleTh = document.createElement('th');
+  titleTh.className = 'ff-title-th';
+  titleTh.colSpan = 2; // the name and the %
+  titleTh.appendChild(titleBox);
+  groupRow.appendChild(titleTh);
   const groupOf = (field) => isParentField(field) ? 'עדכוני הורים'
     : field === 'percent' ? ''
     : field === 'rambamVal' ? 'שמעון'
@@ -3970,6 +3995,7 @@ function renderWeeklyEntryInto(entry, container, allWeeklyEntries){
     : (WEEKLY_CLASS_FIELD_DEFS.find(f => f.field === field) || { group: 'תורנים' }).group;
   let lastGroupTh = null;
   fieldDefs.forEach(({ field }) => {
+    if (field === 'percent') return;
     const name = groupOf(field);
     if (lastGroupTh && lastGroupTh.textContent === name){ lastGroupTh.colSpan++; return; }
     lastGroupTh = document.createElement('th');
@@ -3978,6 +4004,11 @@ function renderWeeklyEntryInto(entry, container, allWeeklyEntries){
     lastGroupTh.textContent = name;
     groupRow.appendChild(lastGroupTh);
   });
+  // The Excel button at the far end of the dark row.
+  if (lastGroupTh){
+    lastGroupTh.classList.add('ff-has-export');
+    lastGroupTh.appendChild(exportBtn);
+  }
   thead.appendChild(groupRow);
 
   const trh = document.createElement('tr');
@@ -4013,7 +4044,7 @@ function renderWeeklyEntryInto(entry, container, allWeeklyEntries){
   const getFieldVal = (s, field, kind) => {
     if (kind === 'percent') return weeklyPercent(s);
     if (kind === 'weekly-number' || kind === 'weekly-bool') return weeklyFieldPoints(s, defOf(field));
-    if (!isDayView) return weeklyDailySum(s, field);
+    if (!isDayView) return weeklyDaysDone(s, field);
     return weeklyDayFieldValue((s.days || {})[viewMode], field);
   };
   const kindOf = (field) => (fieldDefs.find(f => f.field === field) || {}).kind;
@@ -4126,7 +4157,7 @@ function renderWeeklyEntryInto(entry, container, allWeeklyEntries){
     fitSpanGroupToCells(headerSpans.slice(1), 9, 16);
     fitSpanGroupToCells(valueSpans, 12, 22);
     groupRow.querySelectorAll('.ff-parent-group-th').forEach(th => { th.style.fontSize = headerSpans[1].style.fontSize; });
-    stickLeadingColumns(table, [nameW]);
+    stickLeadingColumns(table, [nameW, trh.children[1].offsetWidth]);
   } else {
     // Compact layout: each column as narrow as its widest header word (the
     // name column as wide as the longest name), applied through the
@@ -4135,7 +4166,7 @@ function renderWeeklyEntryInto(entry, container, allWeeklyEntries){
     nameTh.dataset.fitNamesCol = '1';
     fitNamesColumnWidth(nameTh, uniqueStudents.map(s => studentName(s.id)));
     [...trh.children].forEach((th, i) => { if (cols[i]) cols[i].style.width = th.style.width; });
-    stickLeadingColumns(table, [nameTh.offsetWidth]);
+    stickLeadingColumns(table, [nameTh.offsetWidth, trh.children[1].offsetWidth]);
   }
 }
 
