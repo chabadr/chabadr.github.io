@@ -4092,11 +4092,12 @@ function renderWeeklyEntryInto(entry, container, allWeeklyEntries){
   const sendBtn = document.createElement('button');
   sendBtn.className = 'export-btn';
   sendBtn.textContent = 'שליחה';
-  sendBtn.addEventListener('click', () => {
+  // Sending needs the same code as editing.
+  sendBtn.addEventListener('click', () => requireArchiveEditAccess(() => {
     const weekLabel = (dateEl.querySelector('.merged-dropdown-toggle') || {}).textContent || '';
     const missing = (dateEl.querySelector('.missing-days') || {}).textContent || '';
     sendTablePdf(table, 'הנוסע המתמיד · ' + weekLabel + (missing ? ' · ' + missing : ''), sendBtn);
-  });
+  }));
   dateEl.appendChild(sendBtn);
 
   entryWrap.appendChild(dateEl);

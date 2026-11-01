@@ -59,12 +59,10 @@
 כדי שהפונקציה תוכל לשלוח מייל צריך חשבון מייל ששולח (כרגע Gmail):
 
 1. בחשבון ה-Gmail: להפעיל אימות דו-שלבי, ואז ליצור **סיסמת אפליקציה** (חשבון Google ← אבטחה ← סיסמאות אפליקציה). מקבלים סיסמה של 16 תווים.
-2. ב-Cloud Shell, בתיקיית הפרויקט:
+2. ב-Cloud Shell, בתיקיית הפרויקט, להריץ את הסקריפט (הוא שואל את כתובת ה-Gmail ואת סיסמת האפליקציה, שומר אותן כסודות, מתקין ומעלה את הפונקציות):
    ```bash
-   firebase functions:secrets:set SMTP_USER   # כתובת ה-Gmail השולח
-   firebase functions:secrets:set SMTP_PASS   # סיסמת האפליקציה (16 תווים)
-   cd functions && npm install && cd ..
-   firebase deploy --only functions
+   git pull
+   bash functions/setup-pdf-mail.sh
    ```
 3. בעמוד הניהול ← "משתנים": להזין את הכתובת שאליה נשלחת הטבלה.
 
