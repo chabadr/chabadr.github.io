@@ -3,7 +3,7 @@
   "description": "Scheduled Cloud Functions: the daily reset, scheduled SMS messages, and the PDF e-mails of the הנוסע המתמיד table.",
   "private": true,
   "engines": {
-    "node": "20"
+    "node": "22"
   },
   "main": "index.js",
   "dependencies": {
