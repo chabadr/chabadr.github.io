@@ -405,6 +405,17 @@
   .ff-fit{
     display: inline-block;
   }
+  /* הנוסע המתמיד: low rows and a low header. The lines are 1.25 / 1.2 tall,
+     enough for the whole height of the letters to stay inside the cell. */
+  table.ff-table tbody td{ padding: 6px 4px; line-height: 1.2; }
+  table.ff-table thead tr:last-child th{ padding: 2px 3px; line-height: 1.2; }
+  /* Wide layout: every text is in a span with its own size, so the cell
+     itself adds no extra line height. */
+  table.ff-table.ff-wide tbody td{ padding: 6px 4px; font-size: 0; }
+  table.ff-table.ff-wide tbody td .ff-fit{ line-height: 1.25; vertical-align: middle; }
+  table.ff-table.ff-wide thead tr:last-child th{ font-size: 0; }
+  table.ff-table.ff-wide thead tr:last-child th .ff-fit{ line-height: 1.2; vertical-align: middle; }
+  table.ff-table th.ff-parent-group-th, table.ff-table th.ff-group-th{ padding: 1px 4px; font-size: 0.75em; line-height: 1.25; }
   .merged-dropdown-toggle:focus{
     outline: 2px solid var(--gold);
     outline-offset: 2px;
@@ -3913,7 +3924,7 @@ function renderWeeklyEntryInto(entry, container, allWeeklyEntries){
   const wide = window.innerWidth >= FREQUENT_WIDE_MIN_WIDTH;
 
   const table = document.createElement('table');
-  table.className = 'archive-table';
+  table.className = 'archive-table ff-table' + (wide ? ' ff-wide' : '');
   table.style.tableLayout = 'fixed';
   table.style.width = wide ? '100%' : 'max-content';
 
@@ -3977,9 +3988,9 @@ function renderWeeklyEntryInto(entry, container, allWeeklyEntries){
   fieldDefs.forEach(({ field, label }) => {
     const th = document.createElement('th');
     th.style.cursor = 'pointer';
-    if (isParentField(field)) th.style.whiteSpace = 'normal';
     if (field === firstParentField) th.classList.add('ff-parent-first');
-    th.dataset.fitLabel = label;
+    // The whole header on one line (the parents' columns are made wide enough).
+    th.dataset.fitLabel = label.replace(/ /g, '\u00a0');
     headerSpans.push(fitTextSpan(th, label + (currentSortField === field ? ' ▼' : '')));
     th.addEventListener('click', () => {
       weeklyArchiveSortField[entry.weekKey] = field;
@@ -4074,12 +4085,18 @@ function renderWeeklyEntryInto(entry, container, allWeeklyEntries){
 
   if (!table.isConnected || container.clientWidth === 0) return;
   if (wide){
-    fitSpanGroupToCells(headerSpans, 12, 40);
+    const isParentSpan = (i) => i > 0 && isParentField(fieldDefs[i - 1].field);
+    // Headers: one size for all (small - the header row is kept low). The
+    // parents' headers are whole labels on one line, so their columns are
+    // widened below to fit them instead of shrinking the text.
+    const plainHeaderSpans = headerSpans.filter((sp, i) => !isParentSpan(i));
+    fitSpanGroupToCells(plainHeaderSpans, 12, 16);
+    const headerSize = plainHeaderSpans[0].style.fontSize;
+    headerSpans.forEach(sp => { sp.style.fontSize = headerSize; });
     fitSpanGroupToCells(nameSpans, 12, 40, 6);
-    fitSpanGroupToCells(valueSpans, 12, 40);
+    fitSpanGroupToCells(valueSpans, 12, 22);
     // Names no larger than the numbers; the name column is then narrowed to
-    // its longest name, the other columns share the room left and their
-    // text is fitted again.
+    // its longest name.
     const valueFont = parseFloat(valueSpans.length ? valueSpans[0].style.fontSize : '') || 40;
     if ((parseFloat(nameSpans.length ? nameSpans[0].style.fontSize : '') || 0) > valueFont){
       nameSpans.forEach(sp => { sp.style.fontSize = valueFont + 'px'; });
@@ -4087,9 +4104,27 @@ function renderWeeklyEntryInto(entry, container, allWeeklyEntries){
     const nameCs = getComputedStyle(nameTh);
     const nameW = Math.ceil(Math.max(...nameSpans.map(sp => sp.offsetWidth)) + (parseFloat(nameCs.paddingLeft) || 0) + (parseFloat(nameCs.paddingRight) || 0) + 8);
     cols[0].style.width = nameW + 'px';
-    cols.slice(1).forEach(c => { c.style.width = 'calc((100% - ' + nameW + 'px) / ' + fieldDefs.length + ')'; });
-    fitSpanGroupToCells(headerSpans.slice(1), 12, 40);
-    fitSpanGroupToCells(valueSpans, 12, 40);
+    // The parents' columns: wide enough for the whole header; the others
+    // share the rest equally.
+    const tableW = table.clientWidth;
+    const equalShare = (tableW - nameW) / fieldDefs.length;
+    let parentsW = 0, parentCount = 0;
+    headerSpans.forEach((sp, i) => {
+      if (!isParentSpan(i)) return;
+      const th = sp.parentElement;
+      const cs = getComputedStyle(th);
+      const need = Math.ceil(sp.offsetWidth + (parseFloat(cs.paddingLeft) || 0) + (parseFloat(cs.paddingRight) || 0) + 8);
+      const width = Math.max(need, equalShare);
+      cols[i].style.width = width + 'px';
+      parentsW += width;
+      parentCount++;
+    });
+    const others = fieldDefs.length - parentCount;
+    headerSpans.forEach((sp, i) => {
+      if (i > 0 && !isParentSpan(i)) cols[i].style.width = 'calc((100% - ' + (nameW + parentsW) + 'px) / ' + others + ')';
+    });
+    fitSpanGroupToCells(headerSpans.slice(1), 9, 16);
+    fitSpanGroupToCells(valueSpans, 12, 22);
     groupRow.querySelectorAll('.ff-parent-group-th').forEach(th => { th.style.fontSize = headerSpans[1].style.fontSize; });
     stickLeadingColumns(table, [nameW]);
   } else {
