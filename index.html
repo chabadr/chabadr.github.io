@@ -750,13 +750,8 @@
     cursor: pointer;
     user-select: none;
   }
-  .click-code-dot{
-    width: 16px;
-    height: 16px;
-    border-radius: 50%;
-    border: 2px solid var(--ink-soft);
-  }
-  .click-code-dot.filled{ background: var(--ink); border-color: var(--ink); }
+  .click-code-pad{ color: var(--ink-soft); font-size: 14px; transition: background 0.08s ease; }
+  .click-code-pad.flash{ background: var(--gold-bg); }
   .lock-error{
     color: var(--danger);
     font-size: 13px;
@@ -4819,8 +4814,9 @@ async function initApp(){
 }
 
 // Editing the archive is opened with a code of mouse clicks (nothing to see
-// on the screen): L = left button, R = right button, B = both together.
-const ARCHIVE_CLICK_CODE = ['B', 'R', 'B', 'R'];
+// on the screen): L = left button, R = right button.
+// Right twice, left once, right twice, left once.
+const ARCHIVE_CLICK_CODE = ['R', 'R', 'L', 'R', 'R', 'L'];
 // A typed number for screens without a mouse (a phone or a tablet).
 const ARCHIVE_ACCESS_CODE = '963';
 // Once opened it stays open this long after the last use - also across a
@@ -4831,8 +4827,6 @@ const ARCHIVE_UNLOCK_KEY = 'archiveEditUntil';
 const ARCHIVE_LOCK_KEY = 'archiveEditLock';
 const ARCHIVE_MAX_TRIES = 3;
 const ARCHIVE_LOCK_MINUTES = 5;
-// Two buttons pressed within this many milliseconds count as "both".
-const CHORD_WINDOW_MS = 150;
 
 let archiveEditUntilMemory = 0;
 let archiveLockMemory = { tries: 0, until: 0 };
@@ -4895,15 +4889,11 @@ function showArchiveCodePrompt(onSuccess){
   msg.className = 'modal-msg';
   box.appendChild(msg);
 
-  // The pad where the clicks are made, with one dot per click.
+  // The pad where the clicks are made. Nothing on it tells how many clicks
+  // the code has - it only blinks on every click, whatever the button.
   const pad = document.createElement('div');
   pad.className = 'click-code-pad';
-  const dots = ARCHIVE_CLICK_CODE.map(() => {
-    const d = document.createElement('span');
-    d.className = 'click-code-dot';
-    pad.appendChild(d);
-    return d;
-  });
+  pad.textContent = 'לחצו כאן';
   box.appendChild(pad);
 
   const errorEl = document.createElement('div');
@@ -4934,11 +4924,8 @@ function showArchiveCodePrompt(onSuccess){
   box.appendChild(btnRow);
 
   let entered = [];
-  let pressed = { left: false, right: false };
-  let chordTimer = null;
 
   function close(){
-    clearTimeout(chordTimer);
     overlay.remove();
   }
   function succeed(){
@@ -4960,7 +4947,6 @@ function showArchiveCodePrompt(onSuccess){
   }
   function wrong(){
     entered = [];
-    dots.forEach(d => d.classList.remove('filled'));
     const locked = archiveWrongTry();
     if (locked){ errorEl.textContent = ''; showLockState(); }
     else errorEl.textContent = 'קוד שגוי, נסה שוב';
@@ -4968,26 +4954,17 @@ function showArchiveCodePrompt(onSuccess){
   function addSymbol(symbol){
     errorEl.textContent = '';
     entered.push(symbol);
-    dots.forEach((d, i) => d.classList.toggle('filled', i < entered.length));
+    pad.classList.add('flash');
+    setTimeout(() => pad.classList.remove('flash'), 120);
     if (entered.length < ARCHIVE_CLICK_CODE.length) return;
     if (entered.every((s, i) => s === ARCHIVE_CLICK_CODE[i])) succeed();
     else wrong();
   }
 
-  // A press of the left and the right button within CHORD_WINDOW_MS of each
-  // other is one "both" click; the click is decided when that time is over.
+  // Every press of the left or the right button is one click of the code.
   pad.addEventListener('mousedown', (e) => {
-    if (e.button !== 0 && e.button !== 2) return;
-    if (!pressed.left && !pressed.right){
-      pressed = { left: false, right: false };
-      chordTimer = setTimeout(() => {
-        const symbol = pressed.left && pressed.right ? 'B' : (pressed.right ? 'R' : 'L');
-        pressed = { left: false, right: false };
-        addSymbol(symbol);
-      }, CHORD_WINDOW_MS);
-    }
-    if (e.button === 0) pressed.left = true;
-    if (e.button === 2) pressed.right = true;
+    if (e.button === 0) addSymbol('L');
+    else if (e.button === 2) addSymbol('R');
   });
   // No browser menu on a right click inside the prompt.
   overlay.addEventListener('contextmenu', (e) => e.preventDefault());
