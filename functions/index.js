@@ -7,6 +7,8 @@ const { defineSecret } = require('firebase-functions/params');
 const { logger } = require('firebase-functions');
 const admin = require('firebase-admin');
 const https = require('https');
+const nodemailer = require('nodemailer');
+const { sendQueuedPdf, MAX_AGE_MS } = require('./pdf-mail');
 const { computeDailyResetUpdate, isLiveDayDueForArchive, getWeekKey } = require('./daily-reset');
 
 admin.initializeApp();
@@ -17,6 +19,9 @@ const FIRESTORE_COLLECTION = 'classroom_points';
 const SMS4FREE_KEY = defineSecret('SMS4FREE_KEY');
 const SMS4FREE_USER = defineSecret('SMS4FREE_USER');
 const SMS4FREE_PASS = defineSecret('SMS4FREE_PASS');
+// The mail account the PDFs are sent from (see functions/README.md).
+const SMTP_USER = defineSecret('SMTP_USER');
+const SMTP_PASS = defineSecret('SMTP_PASS');
 
 // Keep in sync with SMS4FREE_ERROR_MESSAGES in admin.html.
 const SMS4FREE_ERROR_MESSAGES = {
@@ -124,4 +129,44 @@ exports.dailyReset = onSchedule({
     return 'archived ' + mainData.lastActivityDate + ' into week ' + weekKey;
   });
   logger.info('daily reset: ' + result);
+});
+
+// Every minute: the table PDFs queued by the "שליחה" button of הנוסע המתמיד
+// (pdfOutbox, status "pending") are e-mailed to the address set in the admin
+// page (meta/pdfSettings), and the document is marked sent or failed. The big
+// PDF text is removed once it is sent.
+exports.sendPendingPdfs = onSchedule({
+  schedule: '* * * * *',
+  timeZone: 'Asia/Jerusalem',
+  region: 'us-central1',
+  secrets: [SMTP_USER, SMTP_PASS]
+}, async () => {
+  const db = admin.firestore();
+  const mainRef = db.collection(FIRESTORE_COLLECTION).doc(STORAGE_KEY);
+  const outbox = mainRef.collection('pdfOutbox');
+
+  // Old finished documents are cleaned up.
+  const old = await outbox.where('createdAt', '<', new Date(Date.now() - MAX_AGE_MS).toISOString()).get();
+  await Promise.all(old.docs.filter((d) => d.data().status !== 'pending').map((d) => d.ref.delete()));
+
+  const pending = await outbox.where('status', '==', 'pending').get();
+  if (pending.empty) return;
+  const settings = await mainRef.collection('meta').doc('pdfSettings').get();
+  const email = settings.exists ? (settings.data().email || '') : '';
+  const user = SMTP_USER.value();
+  const transporter = nodemailer.createTransport({
+    host: 'smtp.gmail.com',
+    port: 465,
+    secure: true,
+    auth: { user, pass: SMTP_PASS.value() }
+  });
+  for (const docSnap of pending.docs){
+    const result = await sendQueuedPdf(docSnap.data(), email, transporter, user);
+    if (result.status === 'sent'){
+      await docSnap.ref.update({ status: 'sent', sentAt: new Date().toISOString(), to: email, pdfBase64: admin.firestore.FieldValue.delete() });
+    } else {
+      await docSnap.ref.update({ status: 'failed', error: result.error });
+      logger.error('PDF e-mail failed', { id: docSnap.id, error: result.error });
+    }
+  }
 });

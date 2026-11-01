@@ -737,13 +737,22 @@
     border-color: var(--gold);
   }
 
+  .code-overlay{ position: fixed; inset: 0; z-index: 400; background: transparent; }
+  .code-box-mini{
+    position: absolute; left: 12px; bottom: 12px;
+    background: var(--paper); border: 2px solid var(--line); border-radius: 8px;
+    padding: 5px; box-shadow: 0 4px 14px rgba(34,48,74,0.25);
+    transition: border-color 0.1s ease;
+  }
+  .code-box-mini.wrong{ border-color: var(--danger); }
+  .code-lock-msg{ font-size: 12px; color: var(--ink-soft); max-width: 190px; padding: 2px 4px; }
   .mini-keypad{
     display: grid;
     grid-template-columns: repeat(5, 24px);
     gap: 3px;
     justify-content: center;
     direction: ltr;
-    margin: 8px 0 6px;
+    margin: 0;
   }
   .mini-keypad button{
     width: 24px; height: 24px; padding: 0;
@@ -778,7 +787,7 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-app.js";
 import {
   getFirestore, initializeFirestore, persistentLocalCache, persistentMultipleTabManager,
-  doc, getDoc, getDocs, collection, onSnapshot, runTransaction,
+  doc, getDoc, getDocs, collection, setDoc, onSnapshot, runTransaction,
 } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
 import { firebaseConfig, isFirebaseConfigured } from "./firebase-config.js";
 import { mountPageNav } from "./page-nav.js";
@@ -3359,34 +3368,182 @@ function weeklyDailySum(s, field){
   return Object.values(s.days || {}).reduce((sum, d) => sum + weeklyDayFieldValue(d, field), 0);
 }
 
-async function exportWeeklyCSV(entry, weekStartD, weekEndD){
-  try {
-    const headers = ['שם', '%', 'חסידות', 'תפילה', 'מקוואות', 'בונוס', 'רמב"ם', 'מתיבתא', ...WEEKLY_CLASS_FIELD_DEFS.map(f => f.label), ...WEEKLY_PARENT_FIELD_DEFS.map(f => f.label)];
-    const rows = [headers];
-    entry.students.forEach(s => {
-      rows.push([
-        studentName(s.id),
-        weeklyPercent(s) + '%',
-        weeklyDaysDone(s, 'morning'),
-        weeklyDaysDone(s, 'tefila'),
-        weeklyDaysDone(s, 'mikvaotVal'),
-        weeklyDaysDone(s, 'bonus'),
-        weeklyDaysDone(s, 'rambamVal'),
-        weeklyDaysDone(s, 'metivtaVal'),
-        ...WEEKLY_CLASS_FIELD_DEFS.map(f => weeklyFieldPoints(s, f)),
-        ...WEEKLY_PARENT_FIELD_DEFS.map(f => weeklyFieldPoints(s, f))
-      ]);
-    });
-    const csv = rows.map(row => row.map(cell => {
-      const str = String(cell);
-      return /[",\n]/.test(str) ? '"' + str.replace(/"/g, '""') + '"' : str;
-    }).join(',')).join('\r\n');
+// ---- Sending the table as a PDF ----
+// The table that is shown is drawn onto a canvas, made into a one-page PDF and
+// put in the pdfOutbox collection; a server function sends it by e-mail to the
+// address set in the admin page and marks the document sent or failed.
 
-    const dateStr = weekStartD.toISOString().slice(0, 10) + '_' + weekEndD.toISOString().slice(0, 10);
-    const filename = 'הנוסע-המתמיד_' + dateStr + '.csv';
-    await saveCsvFile(filename, csv);
-  } catch (err){
-    showModal('שגיאה בהורדה: ' + (err && err.message ? err.message : String(err)), { showCancel: false, confirmText: 'הבנתי' });
+function isVisibleColor(c){
+  return !!c && c !== 'transparent' && !/^rgba\(\s*\d+,\s*\d+,\s*\d+,\s*0\s*\)$/.test(c);
+}
+
+// Draws every cell of the table (background, lines, text) where it is on the
+// screen, under a dark title bar.
+async function renderTableToCanvas(table, titleText){
+  if (document.fonts && document.fonts.ready) await document.fonts.ready;
+  const scroller = table.closest('.table-scroll');
+  const oldScroll = scroller ? scroller.scrollLeft : 0;
+  if (scroller) scroller.scrollLeft = 0;
+  const tableRect = table.getBoundingClientRect();
+  const W = Math.ceil(tableRect.width);
+  const H = Math.ceil(tableRect.height);
+  const TITLE_H = 44;
+  const scale = Math.min(2, 2400 / W);
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.ceil(W * scale);
+  canvas.height = Math.ceil((H + TITLE_H) * scale);
+  const ctx = canvas.getContext('2d');
+  ctx.scale(scale, scale);
+  ctx.fillStyle = '#fff';
+  ctx.fillRect(0, 0, W, H + TITLE_H);
+  ctx.direction = 'rtl';
+  ctx.textBaseline = 'middle';
+
+  ctx.fillStyle = '#22304A';
+  ctx.fillRect(0, 0, W, TITLE_H);
+  ctx.fillStyle = '#F6F3EA';
+  ctx.font = "700 20px 'Rubik', sans-serif";
+  ctx.textAlign = 'right';
+  ctx.fillText(titleText, W - 16, TITLE_H / 2);
+
+  const cells = [...table.querySelectorAll('th, td')].map(cell => {
+    const r = cell.getBoundingClientRect();
+    return { cell, x: r.left - tableRect.left, y: r.top - tableRect.top + TITLE_H, w: r.width, h: r.height, cs: getComputedStyle(cell) };
+  });
+  // backgrounds (a transparent cell shows its row's), then the lines, then the text
+  cells.forEach(({ cell, x, y, w, h, cs }) => {
+    let bg = cs.backgroundColor;
+    if (!isVisibleColor(bg) && cell.parentElement) bg = getComputedStyle(cell.parentElement).backgroundColor;
+    if (isVisibleColor(bg)){ ctx.fillStyle = bg; ctx.fillRect(x, y, w, h); }
+  });
+  cells.forEach(({ x, y, w, h, cs }) => {
+    const side = (name, rx, ry, rw, rh) => {
+      const width = parseFloat(cs['border' + name + 'Width']) || 0;
+      if (width > 0 && cs['border' + name + 'Style'] !== 'none' && isVisibleColor(cs['border' + name + 'Color'])){
+        ctx.fillStyle = cs['border' + name + 'Color'];
+        ctx.fillRect(rx(width), ry(width), rw(width), rh(width));
+      }
+    };
+    side('Top', () => x, () => y, () => w, bw => bw);
+    side('Bottom', () => x, bw => y + h - bw, () => w, bw => bw);
+    side('Left', () => x, () => y, bw => bw, () => h);
+    side('Right', bw => x + w - bw, () => y, bw => bw, () => h);
+  });
+  cells.forEach(({ cell, x, y, w, h, cs }) => {
+    const el = cell.querySelector('.ff-fit') || cell;
+    const text = el.textContent.trim();
+    if (!text) return;
+    const es = getComputedStyle(el);
+    if (!(parseFloat(es.fontSize) > 0)) return;
+    ctx.font = es.fontStyle + ' ' + es.fontWeight + ' ' + es.fontSize + ' ' + es.fontFamily;
+    ctx.fillStyle = es.color;
+    const align = cs.textAlign;
+    if (align === 'right' || align === 'start'){ ctx.textAlign = 'right'; ctx.fillText(text, x + w - 5, y + h / 2); }
+    else if (align === 'left' || align === 'end'){ ctx.textAlign = 'left'; ctx.fillText(text, x + 5, y + h / 2); }
+    else { ctx.textAlign = 'center'; ctx.fillText(text, x + w / 2, y + h / 2); }
+  });
+  if (scroller) scroller.scrollLeft = oldScroll;
+  return canvas;
+}
+
+// A one-page PDF (A4, landscape or portrait by the shape of the picture)
+// holding the JPEG picture, as large as fits.
+function buildPdfFromJpeg(jpeg, imgW, imgH){
+  const landscape = imgW >= imgH;
+  const pw = landscape ? 842 : 595;
+  const ph = landscape ? 595 : 842;
+  const margin = 18;
+  const k = Math.min((pw - 2 * margin) / imgW, (ph - 2 * margin) / imgH);
+  const w = imgW * k, h = imgH * k;
+  const x = (pw - w) / 2, y = (ph - h) / 2;
+  const enc = new TextEncoder();
+  const parts = [];
+  const offsets = [];
+  let length = 0;
+  const push = (data) => {
+    const bytes = typeof data === 'string' ? enc.encode(data) : data;
+    parts.push(bytes);
+    length += bytes.length;
+  };
+  const begin = (n) => { offsets[n] = length; push(n + ' 0 obj\n'); };
+  push('%PDF-1.4\n');
+  begin(1); push('<< /Type /Catalog /Pages 2 0 R >>\nendobj\n');
+  begin(2); push('<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n');
+  begin(3); push('<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ' + pw + ' ' + ph + '] /Resources << /XObject << /Im0 4 0 R >> >> /Contents 5 0 R >>\nendobj\n');
+  begin(4);
+  push('<< /Type /XObject /Subtype /Image /Width ' + imgW + ' /Height ' + imgH + ' /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ' + jpeg.length + ' >>\nstream\n');
+  push(jpeg);
+  push('\nendstream\nendobj\n');
+  const content = 'q ' + w.toFixed(2) + ' 0 0 ' + h.toFixed(2) + ' ' + x.toFixed(2) + ' ' + y.toFixed(2) + ' cm /Im0 Do Q';
+  begin(5); push('<< /Length ' + content.length + ' >>\nstream\n' + content + '\nendstream\nendobj\n');
+  const xref = length;
+  let table = 'xref\n0 6\n0000000000 65535 f \n';
+  for (let n = 1; n <= 5; n++) table += String(offsets[n]).padStart(10, '0') + ' 00000 n \n';
+  push(table + 'trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n' + xref + '\n%%EOF\n');
+  const out = new Uint8Array(length);
+  let pos = 0;
+  parts.forEach(b => { out.set(b, pos); pos += b.length; });
+  return out;
+}
+
+function bytesToBase64(bytes){
+  let binary = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) binary += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+  return btoa(binary);
+}
+
+// Firestore keeps a document under 1 MB: the picture's quality goes down
+// until the PDF fits.
+const PDF_MAX_BASE64 = 880000;
+async function canvasToPdfBase64(canvas){
+  for (const quality of [0.9, 0.8, 0.7, 0.6, 0.5, 0.4]){
+    const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg', quality));
+    const pdf = buildPdfFromJpeg(new Uint8Array(await blob.arrayBuffer()), canvas.width, canvas.height);
+    const base64 = bytesToBase64(pdf);
+    if (base64.length <= PDF_MAX_BASE64) return base64;
+  }
+  throw new Error('הטבלה גדולה מדי לשליחה');
+}
+
+async function sendTablePdf(table, title, button){
+  const label = button.textContent;
+  const setLabel = (text) => { button.textContent = text; };
+  button.disabled = true;
+  try{
+    const settings = await getDoc(doc(firestoreDb, FIRESTORE_COLLECTION, STORAGE_KEY, 'meta', 'pdfSettings'));
+    const email = settings.exists() ? (settings.data().email || '') : '';
+    if (!email){
+      showModal('לא הוגדרה כתובת לשליחה. מגדירים אותה בעמוד הניהול, בלשונית "משתנים".', { showCancel: false, confirmText: 'הבנתי' });
+      return;
+    }
+    setLabel('מכין…');
+    const pdfBase64 = await canvasToPdfBase64(await renderTableToCanvas(table, title));
+    const id = 'pdf-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8);
+    const ref = doc(firestoreDb, FIRESTORE_COLLECTION, STORAGE_KEY, 'pdfOutbox', id);
+    setLabel('שולח…');
+    await setDoc(ref, { status: 'pending', createdAt: new Date().toISOString(), subject: title, filename: 'הנוסע-המתמיד.pdf', pdfBase64 });
+    // The server function picks it up within a minute or so.
+    for (let i = 0; i < 45; i++){
+      await new Promise(resolve => setTimeout(resolve, 3000));
+      const snap = await getDoc(ref);
+      const data = snap.exists() ? snap.data() : null;
+      if (data && data.status === 'sent'){
+        setLabel('נשלח ✓');
+        setStatus('הטבלה נשלחה ל-' + email);
+        setTimeout(() => setStatus(''), 6000);
+        return;
+      }
+      if (data && data.status === 'failed'){
+        showModal('השליחה נכשלה: ' + (data.error || 'שגיאה לא ידועה'), { showCancel: false, confirmText: 'הבנתי' });
+        return;
+      }
+    }
+    showModal('השליחה עדיין בתור. אם לא תגיע בדקות הקרובות, בדוק את הגדרות הדוא"ל בשרת.', { showCancel: false, confirmText: 'הבנתי' });
+  } catch(e){
+    showModal('השליחה נכשלה: ' + (e && e.message ? e.message : String(e)), { showCancel: false, confirmText: 'הבנתי' });
+  } finally {
+    button.disabled = false;
+    setTimeout(() => { button.textContent = label; }, 2500);
   }
 }
 
@@ -3931,11 +4088,16 @@ function renderWeeklyEntryInto(entry, container, allWeeklyEntries){
   }
   dateEl.appendChild(headerGroup);
 
-  const exportBtn = document.createElement('button');
-  exportBtn.className = 'export-btn';
-  exportBtn.textContent = 'אקסל';
-  exportBtn.addEventListener('click', () => exportWeeklyCSV(entry, weekStartD, weekEndD));
-  dateEl.appendChild(exportBtn);
+  // Sends the table as it is shown now (PDF) to the address set in the admin page.
+  const sendBtn = document.createElement('button');
+  sendBtn.className = 'export-btn';
+  sendBtn.textContent = 'שליחה';
+  sendBtn.addEventListener('click', () => {
+    const weekLabel = (dateEl.querySelector('.merged-dropdown-toggle') || {}).textContent || '';
+    const missing = (dateEl.querySelector('.missing-days') || {}).textContent || '';
+    sendTablePdf(table, 'הנוסע המתמיד · ' + weekLabel + (missing ? ' · ' + missing : ''), sendBtn);
+  });
+  dateEl.appendChild(sendBtn);
 
   entryWrap.appendChild(dateEl);
 
@@ -4876,15 +5038,14 @@ function archiveLockMinutesLeft(){
 }
 
 function showArchiveCodePrompt(onSuccess){
+  // No dimming and no title: just the small number pad, at the bottom left
+  // of the screen. A click anywhere else closes it.
   const overlay = document.createElement('div');
-  overlay.className = 'modal-overlay';
+  overlay.className = 'code-overlay';
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
 
   const box = document.createElement('div');
-  box.className = 'modal-box';
-
-  const msg = document.createElement('div');
-  msg.className = 'modal-msg';
-  box.appendChild(msg);
+  box.className = 'code-box-mini';
 
   // A tiny number pad. The digits change places after every press, and
   // nothing on it shows how many digits the code has.
@@ -4908,33 +5069,25 @@ function showArchiveCodePrompt(onSuccess){
   }
   box.appendChild(keypad);
 
-  const errorEl = document.createElement('div');
-  errorEl.className = 'lock-error';
-  box.appendChild(errorEl);
-
-  const btnRow = document.createElement('div');
-  btnRow.className = 'modal-btns';
-  const cancelBtn = document.createElement('button');
-  cancelBtn.className = 'modal-btn modal-btn-cancel';
-  cancelBtn.textContent = 'ביטול';
-  cancelBtn.addEventListener('click', () => overlay.remove());
-  btnRow.appendChild(cancelBtn);
-  box.appendChild(btnRow);
+  // Shown only while the code is locked.
+  const lockMsg = document.createElement('div');
+  lockMsg.className = 'code-lock-msg';
+  box.appendChild(lockMsg);
 
   let entered = '';
   function showLockState(){
     const mins = archiveLockMinutesLeft();
     if (mins > 0){
-      msg.textContent = 'הקוד ננעל. אפשר לנסות שוב בעוד ' + mins + (mins === 1 ? ' דקה' : ' דקות') + '.';
+      lockMsg.textContent = 'ננעל. אפשר לנסות שוב בעוד ' + mins + (mins === 1 ? ' דקה' : ' דקות') + '.';
+      lockMsg.style.display = '';
       keypad.style.display = 'none';
       return true;
     }
-    msg.textContent = 'הזן קוד:';
+    lockMsg.style.display = 'none';
     keypad.style.display = '';
     return false;
   }
   function press(digit){
-    errorEl.textContent = '';
     entered += digit;
     if (entered.length < ARCHIVE_ACCESS_CODE.length){ shuffleKeys(); return; }
     if (entered === ARCHIVE_ACCESS_CODE){
@@ -4944,8 +5097,11 @@ function showArchiveCodePrompt(onSuccess){
       return;
     }
     entered = '';
+    // A wrong code: the frame blinks red (no text), the digits move.
+    box.classList.add('wrong');
+    setTimeout(() => box.classList.remove('wrong'), 350);
     if (archiveWrongTry()) showLockState();
-    else { errorEl.textContent = 'קוד שגוי, נסה שוב'; shuffleKeys(); }
+    else shuffleKeys();
   }
 
   overlay.appendChild(box);

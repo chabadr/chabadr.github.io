@@ -684,6 +684,48 @@ async function renderPhonesTab(container){
     const roster = buildRoster(mainData, phonesData);
     status.remove();
 
+    // Where the "שליחה" button of הנוסע המתמיד sends the table (as a PDF).
+    const pdfSettingsRef = doc(db, FIRESTORE_COLLECTION, STORAGE_KEY, 'meta', 'pdfSettings');
+    const pdfSnap = await getDoc(pdfSettingsRef);
+    const pdfCard = document.createElement('div');
+    pdfCard.className = 'card';
+    const pdfTitle = document.createElement('div');
+    pdfTitle.className = 'section-title';
+    pdfTitle.textContent = 'שליחת טבלת הנוסע המתמיד (PDF)';
+    pdfCard.appendChild(pdfTitle);
+    const pdfHint = document.createElement('div');
+    pdfHint.className = 'hint';
+    pdfHint.textContent = 'כפתור "שליחה" בטבלת הנוסע המתמיד שולח אליה את הטבלה שמוצגת באותו רגע, כקובץ PDF. נשמר אוטומטית.';
+    pdfCard.appendChild(pdfHint);
+    const pdfRow = document.createElement('div');
+    pdfRow.className = 'row-inline';
+    const pdfInput = document.createElement('input');
+    pdfInput.type = 'email';
+    pdfInput.dir = 'ltr';
+    pdfInput.placeholder = 'name@example.com';
+    pdfInput.value = (pdfSnap.exists() && pdfSnap.data().email) || '';
+    pdfRow.appendChild(pdfInput);
+    const pdfStatus = document.createElement('span');
+    pdfStatus.className = 'save-status';
+    pdfRow.appendChild(pdfStatus);
+    pdfCard.appendChild(pdfRow);
+    container.appendChild(pdfCard);
+    let pdfTimer = null;
+    pdfInput.addEventListener('input', () => {
+      clearTimeout(pdfTimer);
+      const value = pdfInput.value.trim();
+      if (value && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)){ pdfStatus.textContent = 'כתובת לא תקינה'; return; }
+      pdfStatus.textContent = 'שומר…';
+      pdfTimer = setTimeout(async () => {
+        try{
+          await setDoc(pdfSettingsRef, { email: value }, { merge: true });
+          pdfStatus.textContent = 'נשמר ✓';
+        } catch(e){
+          pdfStatus.textContent = 'השמירה נכשלה: ' + describeSaveError(e);
+        }
+      }, 700);
+    });
+
     const titleRow = document.createElement('div');
     titleRow.className = 'title-row';
     const title = document.createElement('div');
