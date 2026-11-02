@@ -216,6 +216,7 @@
     top: 0;
     z-index: 10;
   }
+  .th-name-text{ display: inline-block; }
   .th-inner{
     display: flex;
     align-items: center;
@@ -2233,7 +2234,10 @@ function buildBoard(title, students){
     if (isColHidden(s.category)) th.style.display = 'none';
 
     if (s.kind === 'name'){
-      th.textContent = 'שם';
+      const nameLabel = document.createElement('span');
+      nameLabel.className = 'th-name-text';
+      nameLabel.textContent = 'שם';
+      th.appendChild(nameLabel);
     } else if (s.kind === 'total'){
       th.className = (th.className ? th.className + ' ' : '') + 'col-hide-narrow';
       const totalBtn = document.createElement('button');
@@ -4974,13 +4978,15 @@ function fitAllTextCells(){
   // Metivta table's own header font size instead of this JS auto-shrink,
   // which would otherwise size it independently of the other headers and
   // end up visibly mismatched from them.
-  document.querySelectorAll('thead .col-reset-btn, thead .merged-dropdown-toggle:not(.metivta-header-toggle)').forEach(el => {
+  document.querySelectorAll('thead .col-reset-btn, thead .th-name-text, thead .merged-dropdown-toggle:not(.metivta-header-toggle)').forEach(el => {
     el.style.fontSize = '';
     const container = el.closest('th');
     const table = el.closest('table');
     if (!container || !table) return;
-    if (!headerGroups.has(table)) headerGroups.set(table, []);
-    headerGroups.get(table).push({ el, container });
+    // Today's board: every header of both tables is one group, one size.
+    const groupKey = table.closest('.board-wrap') ? 'board' : table;
+    if (!headerGroups.has(groupKey)) headerGroups.set(groupKey, []);
+    headerGroups.get(groupKey).push({ el, container });
   });
 
   requestAnimationFrame(() => {
@@ -5012,7 +5018,7 @@ function fitAllTextCells(){
 
     fitGroup(bodyItems, 90);
     fitGroup(nameItems, 90, true);
-    headerGroups.forEach(items => fitGroup(items, 40));
+    headerGroups.forEach((items, key) => fitGroup(items, key === 'board' ? 35 : 40));
   });
 }
 
