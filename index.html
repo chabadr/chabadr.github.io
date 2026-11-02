@@ -2563,7 +2563,14 @@ function weeklyDayHasNoMetivta(weekStartD, dayKeyStr){
 // School days are Sunday-Friday. A past day counts as missing when any of its
 // expected columns is empty for every student (no data for the day at all
 // included); days from today on (still live or in the future) are never listed.
-function weekMissingDayNames(entry){
+// Who fills in each daily column (the names over the columns of the table).
+function dailyFieldResponsible(field){
+  return field === 'rambamVal' ? 'שמעון' : field === 'metivtaVal' ? 'חננאל' : 'תורנים';
+}
+
+// The missing days as { name, key, who }: who = those in charge of the
+// columns that are empty on that day.
+function weekMissingDays(entry){
   const weekStartD = new Date(entry.weekStart);
   const today = todayStr();
   const students = entry.students || [];
@@ -2575,10 +2582,12 @@ function weekMissingDayNames(entry){
     if (k >= today) break;
     const fields = WEEKLY_EXPECTED_DAY_FIELDS.filter(f => !(i === FRIDAY_INDEX && f === 'metivtaVal'));
     const filled = (f) => students.some(s => ((s.days || {})[k] || {})[f] > 0);
-    if (!fields.every(filled)) missing.push(HEBREW_WEEKDAY_NAMES[i]);
+    const empty = fields.filter(f => !filled(f));
+    if (empty.length) missing.push({ name: HEBREW_WEEKDAY_NAMES[i], key: k, who: [...new Set(empty.map(dailyFieldResponsible))] });
   }
   return missing;
 }
+
 
 function renderFrequentFlyerView(){
   keepScroll(() => renderFrequentFlyerViewNow());
@@ -4165,14 +4174,18 @@ function renderWeeklyEntryInto(entry, container, allWeeklyEntries, opts){
   headerGroup.appendChild(sep1);
   headerGroup.appendChild(buildWeekDaySelectDropdown(allWeeklyEntries || [entry], entry));
   // On the same line, after a dot: the days still missing, as letters (א, ב, ג).
-  const missingDays = weekMissingDayNames(entry);
+  const missingDays = weekMissingDays(entry);
   if (missingDays.length){
     const sep2 = document.createElement('span');
     sep2.textContent = '·';
     headerGroup.appendChild(sep2);
     const missingEl = document.createElement('span');
     missingEl.className = 'missing-days';
-    missingEl.textContent = 'ימים חסרים: ' + missingDays.map(n => WEEKDAY_LETTERS[HEBREW_WEEKDAY_NAMES.indexOf(n)] || n).join(', ');
+    // On a day that is missing data: in brackets, who still has to fill it in.
+    missingEl.textContent = 'ימים חסרים: ' + missingDays.map(m => {
+      const letter = WEEKDAY_LETTERS[HEBREW_WEEKDAY_NAMES.indexOf(m.name)] || m.name;
+      return m.key === entryViewMode ? letter + ' (' + m.who.join(', ') + ')' : letter;
+    }).join(', ');
     headerGroup.appendChild(missingEl);
   }
   titleColumn.appendChild(headerGroup);
