@@ -94,12 +94,6 @@
     padding: 24px 20px 60px;
   }
 
-  /* Computers and tablets: the tables of הנוסע המתמיד and the archive are as
-     tall as the screen, so scrolling to one of them stops exactly on it. */
-  @media (min-width: 760px){
-    html{ scroll-snap-type: y proximity; }
-    #frequentArchiveView .archive-entry, #todaySummary .archive-entry{ scroll-snap-align: start; }
-  }
   .archive-entry{
     background: #fff;
     border: 1px solid var(--line);
@@ -223,6 +217,10 @@
     z-index: 10;
   }
   .th-name-text{ display: inline-block; }
+  .ff-sub{ color: var(--ink-soft); font-size: 0.55em; white-space: nowrap; }
+  /* The detailed report: two lines in a cell, so the cell is kept low. */
+  table.ff-table.ff-detail.ff-wide tbody td{ padding: 2px 4px; }
+  table.ff-table.ff-detail.ff-wide tbody td .ff-fit{ line-height: 1.1; }
   .th-inner{
     display: flex;
     align-items: center;
@@ -3457,6 +3455,24 @@ function weeklyDaysDone(s, field){
   }).length;
 }
 
+// The detailed report: the letters of the school days (so far) on which the
+// student did not get this daily column, split by commas.
+function weeklyMissingDayLetters(entry, s, field){
+  const weekStartD = new Date(entry.weekStart);
+  const today = todayStr();
+  const out = [];
+  for (let i = 0; i < 6; i++){
+    const d = new Date(weekStartD);
+    d.setDate(d.getDate() + i);
+    if (dayKeyOf(d.toISOString()) >= today) break;
+    if (i === FRIDAY_INDEX && field === 'metivtaVal') continue;
+    const dd = (s.days || {})[dayKeyOf(d.toISOString())] || {};
+    const done = field === 'metivtaVal' ? (typeof dd.metivtaVal === 'number' && dd.metivtaVal >= 0) : (dd[field] || 0) > 0;
+    if (!done) out.push(WEEKDAY_LETTERS[i]);
+  }
+  return out.join(', ');
+}
+
 function weeklyDailySum(s, field){
   return Object.values(s.days || {}).reduce((sum, d) => sum + weeklyDayFieldValue(d, field), 0);
 }
@@ -3794,8 +3810,9 @@ function buildWeekDaySelectDropdown(allWeeklyEntries, selectedEntry, ctx){
       subList.appendChild(dayOpt);
     };
 
-    // The week's total is the parsha itself (above); no Shabbat day, and no
-    // day that hasn't come yet.
+    // The detailed report of the week, then its days. (The week's total is the
+    // parsha itself, above.) No Shabbat day, and no day that hasn't come yet.
+    if (ctx === FREQUENT_WEEK_PICKER) addDayOption('detail', 'דוח מפורט');
     const today = activityDayStr();
     for (let i = 0; i < 6; i++){
       const d = new Date(weekStartD);
@@ -3812,7 +3829,9 @@ function buildWeekDaySelectDropdown(allWeeklyEntries, selectedEntry, ctx){
   toggle.type = 'button';
   toggle.className = 'merged-dropdown-toggle';
   const weekStartD = new Date(selectedEntry.weekStart);
-  toggle.textContent = currentMode === 'total' ? weeklyEntryLabel(selectedEntry) : weeklyEntryLabel(selectedEntry) + ' · ' + dayLabelWithinWeek(weekStartD, currentMode);
+  toggle.textContent = currentMode === 'total' ? weeklyEntryLabel(selectedEntry)
+    : currentMode === 'detail' ? weeklyEntryLabel(selectedEntry) + ' · דוח מפורט'
+    : weeklyEntryLabel(selectedEntry) + ' · ' + dayLabelWithinWeek(weekStartD, currentMode);
   toggle.addEventListener('click', (e) => {
     e.stopPropagation();
     document.querySelectorAll('.merged-dropdown-list.open').forEach(l => {
@@ -4209,7 +4228,7 @@ function renderWeeklyEntryInto(entry, container, allWeeklyEntries, opts){
   const wide = window.innerWidth >= FREQUENT_WIDE_MIN_WIDTH;
 
   const table = document.createElement('table');
-  table.className = 'archive-table ff-table' + (wide ? ' ff-wide' : '');
+  table.className = 'archive-table ff-table' + (wide ? ' ff-wide' : '') + (entryViewMode === 'detail' ? ' ff-detail' : '');
   table.style.tableLayout = 'fixed';
   table.style.width = wide ? '100%' : 'max-content';
 
@@ -4225,7 +4244,7 @@ function renderWeeklyEntryInto(entry, container, allWeeklyEntries, opts){
     ...WEEKLY_PARENT_FIELD_DEFS
   ].filter(f => {
     const mode = entryViewMode;
-    if (mode === 'total') return true;
+    if (mode === 'total' || mode === 'detail') return true;
     // One day: no Metivta on Friday; מבצעים only on Friday; the other weekly
     // columns (היום יום, חת"ת, גאומ"ש, מנחה) and the parents' updates are only
     // in the weekly summary.
@@ -4254,7 +4273,9 @@ function renderWeeklyEntryInto(entry, container, allWeeklyEntries, opts){
   // A column that is not shown in this view cannot be the sort column.
   if (!fieldDefs.some(f => f.field === currentSortField)) currentSortField = 'percent';
   const viewMode = entryViewMode;
-  const isDayView = viewMode !== 'total';
+  // The detailed report: the weekly table, with the days in the daily cells.
+  const isDetail = viewMode === 'detail';
+  const isDayView = viewMode !== 'total' && !isDetail;
 
   const thead = document.createElement('thead');
   // Who is in charge of each group of columns: a thin row on top of the
@@ -4350,6 +4371,7 @@ function renderWeeklyEntryInto(entry, container, allWeeklyEntries, opts){
   const firstSpans = [];
   const valueSpans = [];
   const pctSpans = []; // the % column has its own size (its text is longer)
+  const subSpans = []; // the detailed report: the missing days, small
   uniqueStudents.forEach(s => {
     const tr = document.createElement('tr');
     tr.dataset.studentId = s.id;
@@ -4401,6 +4423,17 @@ function renderWeeklyEntryInto(entry, container, allWeeklyEntries, opts){
             });
           });
         });
+      } else if (isDetail){
+        // Big: on how many days it was received. Small: the days it was not.
+        valueSpans.push(fitTextSpan(td, String(val)));
+        const missing = weeklyMissingDayLetters(entry, s, field);
+        if (missing){
+          td.appendChild(document.createElement('br'));
+          const sub = fitTextSpan(td, missing);
+          sub.classList.add('ff-sub');
+          subSpans.push(sub);
+        }
+        td.title = 'מתעדכן מהימים';
       } else {
         valueSpans.push(fitTextSpan(td, val || ''));
         if (isDayView && WEEKLY_DAY_FULL_VALUE[field] !== undefined && viewMode < activityDayStr()){
@@ -4440,10 +4473,11 @@ function renderWeeklyEntryInto(entry, container, allWeeklyEntries, opts){
     const nameSpans = [...familySpans, ...firstSpans];
     // The rows share the screen's height with the bar and the header; the
     // text may be as tall as a row allows (a row = 8px padding + 1.25 lines).
-    const heightFont = Math.max(12, Math.floor((fillRowHeight() - 8) / 1.25));
+    const heightFont = Math.max(12, Math.floor((fillRowHeight() - (isDetail ? 4 : 8)) / (isDetail ? 1.8 : 1.25)));
     fitSpanGroupToCells(nameSpans, 12, heightFont, 6);
     fitSpanGroupToCells(valueSpans, 12, heightFont);
     fitSpanGroupToCells(pctSpans, 10, heightFont);
+    fitSpanGroupToCells(subSpans, 8, Math.max(8, Math.floor(heightFont * 0.6)));
     // Settles the rows to exactly the screen's height (the text is made a bit
     // smaller if the header ended up taller than expected).
     const fillScreenHeight = () => {
@@ -4451,7 +4485,7 @@ function renderWeeklyEntryInto(entry, container, allWeeklyEntries, opts){
         const rh = fillRowHeight();
         [...tbody.rows].forEach(tr => { tr.style.height = rh + 'px'; });
         if (entryWrap.offsetHeight <= window.innerHeight + 1) break;
-        [...valueSpans, ...pctSpans, ...nameSpans].forEach(sp => { sp.style.fontSize = Math.max(10, (parseFloat(sp.style.fontSize) || 12) - 1) + 'px'; });
+        [...valueSpans, ...pctSpans, ...subSpans, ...nameSpans].forEach(sp => { sp.style.fontSize = Math.max(10, (parseFloat(sp.style.fontSize) || 12) - 1) + 'px'; });
         [...tbody.rows].forEach(tr => { tr.style.height = ''; });
       }
     };
@@ -4477,6 +4511,7 @@ function renderWeeklyEntryInto(entry, container, allWeeklyEntries, opts){
       fitSpanGroupToCells(headerSpans.slice(LEAD), 9, 16);
       fitSpanGroupToCells(valueSpans, 12, heightFont);
       fitSpanGroupToCells(pctSpans, 10, heightFont);
+      fitSpanGroupToCells(subSpans, 8, Math.max(8, Math.floor(heightFont * 0.6)));
       fillScreenHeight();
       stickLeadingColumns(table, [sameAs.L0, sameAs.L1, sameAs.percent || pctTh.offsetWidth]);
       return;
@@ -4493,18 +4528,27 @@ function renderWeeklyEntryInto(entry, container, allWeeklyEntries, opts){
       const th = sp.parentElement;
       const cs = getComputedStyle(th);
       const need = Math.ceil(sp.offsetWidth + (parseFloat(cs.paddingLeft) || 0) + (parseFloat(cs.paddingRight) || 0) + 8);
-      const width = Math.max(need, equalShare);
+      // (The detailed report gives the room to the daily columns instead.)
+      const width = isDetail ? need : Math.max(need, equalShare);
       cols[i].style.width = width + 'px';
       parentsW += width;
       parentCount++;
     });
+    // The detailed report: the daily columns (with the missing days under the
+    // number) get more of the room than the others.
     const others = fieldDefs.length - parentCount;
+    const weightOf = (i) => isDetail ? ({ daily: 1.7, percent: 1.3 }[fieldDefs[i - LEAD].kind] || 1.2) : 1;
+    let weightSum = 0;
+    headerSpans.forEach((sp, i) => { if (i >= LEAD && !isParentSpan(i)) weightSum += weightOf(i); });
     headerSpans.forEach((sp, i) => {
-      if (i >= LEAD && !isParentSpan(i)) cols[i].style.width = 'calc((100% - ' + (nameW + parentsW) + 'px) / ' + others + ')';
+      if (i >= LEAD && !isParentSpan(i)) cols[i].style.width = isDetail
+        ? Math.floor((tableW - nameW - parentsW) * weightOf(i) / weightSum) + 'px'
+        : 'calc((100% - ' + (nameW + parentsW) + 'px) / ' + others + ')';
     });
     fitSpanGroupToCells(headerSpans.slice(LEAD), 9, 16);
     fitSpanGroupToCells(valueSpans, 12, heightFont);
     fitSpanGroupToCells(pctSpans, 10, heightFont);
+    fitSpanGroupToCells(subSpans, 8, Math.max(8, Math.floor(heightFont * 0.6)));
     fillScreenHeight();
     stickLeadingColumns(table, [familyW, firstW, pctTh.offsetWidth]);
     if (opts.onWidths){
