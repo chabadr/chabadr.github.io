@@ -461,16 +461,26 @@
     background: var(--gold-bg);
   }
 
+  /* A week (parsha) is a block of its own: a bold header with a gold edge,
+     and its days hang below it on a vertical line, indented and lighter. */
   .parsha-option{
     padding: 0;
     text-align: right;
+    margin: 0 0 6px;
+    border: 1px solid var(--line);
+    border-right: 4px solid var(--gold);
+    border-radius: 6px;
+    overflow: hidden;
+    background: var(--paper);
   }
   .parsha-option-main{
     display: flex;
     align-items: center;
     justify-content: space-between;
     gap: 8px;
-    padding: 10px 14px;
+    padding: 10px 12px;
+    font-weight: 700;
+    background: var(--gold-bg);
   }
   .parsha-option-label{
     flex: 1;
@@ -490,20 +500,31 @@
   .merged-dropdown-sublist{
     display: none;
     border-top: 1px solid var(--line);
-    border-bottom: 1px solid var(--line);
     background: var(--paper);
+    padding: 4px 0;
   }
   .parsha-option.open .merged-dropdown-sublist{
     display: block;
   }
   .merged-dropdown-sublist .merged-dropdown-option{
-    padding-right: 28px;
+    margin-right: 18px;
+    padding: 6px 12px 6px 8px;
+    border-right: 2px solid var(--line);
     font-size: 0.9em;
     font-weight: 500;
+    color: var(--ink-soft);
+  }
+  .merged-dropdown-sublist .merged-dropdown-option:hover{
+    border-right-color: var(--gold);
   }
   .merged-dropdown-option-active{
     color: var(--gold);
     font-weight: 700;
+  }
+  .merged-dropdown-sublist .merged-dropdown-option-active{
+    color: var(--gold);
+    font-weight: 700;
+    border-right-color: var(--gold);
   }
 
   .col-reset-btn{
@@ -3765,7 +3786,7 @@ function buildWeekDaySelectDropdown(allWeeklyEntries, selectedEntry, ctx){
   toggle.type = 'button';
   toggle.className = 'merged-dropdown-toggle';
   const weekStartD = new Date(selectedEntry.weekStart);
-  toggle.textContent = currentMode === 'total' ? weeklyEntryLabel(selectedEntry) : dayLabelWithinWeek(weekStartD, currentMode);
+  toggle.textContent = currentMode === 'total' ? weeklyEntryLabel(selectedEntry) : weeklyEntryLabel(selectedEntry) + ' · ' + dayLabelWithinWeek(weekStartD, currentMode);
   toggle.addEventListener('click', (e) => {
     e.stopPropagation();
     document.querySelectorAll('.merged-dropdown-list.open').forEach(l => {
@@ -4111,7 +4132,9 @@ function fitSpanGroupToCells(spans, minSize, maxSize, slack){
 
 const FREQUENT_WIDE_MIN_WIDTH = 900;
 
-function renderWeeklyEntryInto(entry, container, allWeeklyEntries){
+function renderWeeklyEntryInto(entry, container, allWeeklyEntries, opts){
+  opts = opts || {};
+  const entryViewMode = opts.forceTotal ? 'total' : (weeklyArchiveViewMode[entry.weekKey] || 'total');
   const entryWrap = document.createElement('div');
   entryWrap.className = 'archive-entry';
 
@@ -4165,7 +4188,7 @@ function renderWeeklyEntryInto(entry, container, allWeeklyEntries){
     ...WEEKLY_CLASS_FIELD_DEFS,
     ...WEEKLY_PARENT_FIELD_DEFS
   ].filter(f => {
-    const mode = weeklyArchiveViewMode[entry.weekKey] || 'total';
+    const mode = entryViewMode;
     if (mode === 'total') return true;
     // One day: no Metivta on Friday; מבצעים only on Friday; the other weekly
     // columns (היום יום, חת"ת, גאומ"ש, מנחה) and the parents' updates are only
@@ -4194,7 +4217,7 @@ function renderWeeklyEntryInto(entry, container, allWeeklyEntries){
   let currentSortField = weeklyArchiveSortField[entry.weekKey] || 'percent';
   // A column that is not shown in this view cannot be the sort column.
   if (!fieldDefs.some(f => f.field === currentSortField)) currentSortField = 'percent';
-  const viewMode = weeklyArchiveViewMode[entry.weekKey] || 'total';
+  const viewMode = entryViewMode;
   const isDayView = viewMode !== 'total';
 
   const thead = document.createElement('thead');
@@ -4390,6 +4413,18 @@ function renderWeeklyEntryInto(entry, container, allWeeklyEntries){
     const familyW = columnWidth(familySpans, headerSpans[0]);
     const firstW = columnWidth(firstSpans, headerSpans[1]);
     const nameW = familyW + firstW;
+    // A single day uses exactly the column widths of the week summary.
+    const sameAs = isDayView && !opts.forceTotal ? weekSummaryColumnWidths(entry, allWeeklyEntries, container) : null;
+    if (sameAs){
+      fieldDefs.forEach((f, i) => { if (sameAs[f.field]) cols[LEAD + i].style.width = sameAs[f.field] + 'px'; });
+      cols[0].style.width = sameAs.L0 + 'px';
+      cols[1].style.width = sameAs.L1 + 'px';
+      table.style.width = (sameAs.L0 + sameAs.L1 + fieldDefs.reduce((t, f) => t + (sameAs[f.field] || 0), 0)) + 'px';
+      fitSpanGroupToCells(headerSpans.slice(LEAD), 9, 16);
+      fitSpanGroupToCells(valueSpans, 12, 22);
+      stickLeadingColumns(table, [sameAs.L0, sameAs.L1, sameAs.percent || pctTh.offsetWidth]);
+      return;
+    }
     cols[0].style.width = familyW + 'px';
     cols[1].style.width = firstW + 'px';
     // The parents' columns: wide enough for the whole header; the others
@@ -4414,6 +4449,11 @@ function renderWeeklyEntryInto(entry, container, allWeeklyEntries){
     fitSpanGroupToCells(headerSpans.slice(LEAD), 9, 16);
     fitSpanGroupToCells(valueSpans, 12, 22);
     stickLeadingColumns(table, [familyW, firstW, pctTh.offsetWidth]);
+    if (opts.onWidths){
+      const w = { L0: cols[0].getBoundingClientRect().width, L1: cols[1].getBoundingClientRect().width };
+      fieldDefs.forEach((f, i) => { w[f.field] = cols[LEAD + i].getBoundingClientRect().width; });
+      opts.onWidths(w);
+    }
   } else {
     // Compact layout: each column as narrow as its widest header word (the
     // name column as wide as the longest name), applied through the
@@ -4427,6 +4467,19 @@ function renderWeeklyEntryInto(entry, container, allWeeklyEntries){
     // On a narrow screen only the two names stay in place (the % scrolls).
     stickLeadingColumns(table, [familyTh.offsetWidth, firstNameTh.offsetWidth]);
   }
+}
+
+// The column widths of the week summary (laid out off-screen), so a single
+// day's table can use the very same widths.
+function weekSummaryColumnWidths(entry, allWeeklyEntries, container){
+  const probe = document.createElement('div');
+  probe.className = container.className;
+  probe.style.cssText = 'position:absolute;visibility:hidden;pointer-events:none;left:0;top:0;width:' + container.getBoundingClientRect().width + 'px';
+  document.body.appendChild(probe);
+  let widths = null;
+  try{ renderWeeklyEntryInto(entry, probe, allWeeklyEntries, { forceTotal: true, onWidths: w => { widths = w; } }); }
+  finally{ probe.remove(); }
+  return widths;
 }
 
 let historyMergedActive = {};
@@ -5184,7 +5237,9 @@ function showArchiveCodePrompt(onSuccess){
   }
   function press(digit){
     entered += digit;
-    if (entered.length < ARCHIVE_ACCESS_CODE.length){ shuffleKeys(); return; }
+    // The digits change places after every single press.
+    shuffleKeys();
+    if (entered.length < ARCHIVE_ACCESS_CODE.length) return;
     if (entered === ARCHIVE_ACCESS_CODE){
       writeArchiveLock({ tries: 0, until: 0 });
       overlay.remove();
@@ -5196,7 +5251,6 @@ function showArchiveCodePrompt(onSuccess){
     box.classList.add('wrong');
     setTimeout(() => box.classList.remove('wrong'), 350);
     if (archiveWrongTry()) showLockState();
-    else shuffleKeys();
   }
 
   overlay.appendChild(box);
