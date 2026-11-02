@@ -405,6 +405,13 @@
   /* The thin row with the group names, centered over their columns. */
   table.ff-table th.ff-tall-th{ vertical-align: middle; }
   table.ff-table thead th{ top: auto; }
+  /* The class archive: the same low rows and text size as הנוסע המתמיד. */
+  table.archive-table.arch-table td{ padding: 4px 6px; line-height: 1.2; font-size: 13px; }
+  table.archive-table.arch-table th{ padding: 2px 6px; line-height: 1.2; font-size: 12.5px; }
+  @media (min-width: 900px){
+    table.archive-table.arch-table td{ padding: 4px 8px; font-size: 20px; line-height: 1.25; }
+    table.archive-table.arch-table th{ padding: 2px 8px; font-size: 12.5px; }
+  }
   table.ff-table th.ff-parent-group-th{
     background: var(--gold-bg);
     color: var(--ink);
@@ -3305,7 +3312,7 @@ function buildMetivtaTable({ days, archivedKeys, archiveTable, availableWidth })
     const weekdaySpan = document.createElement('div');
     weekdaySpan.textContent = entry.isLive ? 'היום' : d.toLocaleDateString('he-IL', { weekday: 'short' });
     weekdaySpan.style.fontWeight = entry.isLive ? '700' : '400';
-    weekdaySpan.style.fontSize = '0.75em';
+    weekdaySpan.style.fontSize = '0.9em';
     weekdaySpan.style.color = 'var(--ink-soft)';
     th.appendChild(dateSpan);
     th.appendChild(weekdaySpan);
@@ -4676,7 +4683,7 @@ function renderTodayHistoryTableNow(container){
   wrap.appendChild(dateEl);
 
   const table = document.createElement('table');
-  table.className = 'archive-table';
+  table.className = 'archive-table arch-table';
   // Each column is exactly as wide as its date needs, on one line.
   table.style.tableLayout = 'auto';
   table.style.width = 'max-content';
@@ -4702,7 +4709,6 @@ function renderTodayHistoryTableNow(container){
     const dateLine = formatHebrewDateShort(d) + (entry.isLive ? ' (היום)' : '');
     const weekdayLine = d.toLocaleDateString('he-IL', { weekday: 'short' });
     const dateSpan = document.createElement('div');
-    dateSpan.style.fontSize = '0.85em';
     dateSpan.textContent = dateLine + (todayArchiveSortIndex === dayIndex ? ' ▼' : '');
     const weekdaySpan = document.createElement('div');
     weekdaySpan.textContent = weekdayLine;
