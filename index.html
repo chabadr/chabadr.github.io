@@ -126,8 +126,11 @@
     flex-shrink: 0;
   }
 
+  /* separate, not collapsed: iOS Safari makes the text of fixed (sticky) cells
+     disappear while scrolling in a table with collapsed borders. */
   table.archive-table{
-    border-collapse: collapse;
+    border-collapse: separate;
+    border-spacing: 0;
     width: 100%;
   }
   table.archive-table th{
