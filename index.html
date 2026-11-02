@@ -1187,10 +1187,74 @@ function newOpId(){
   return Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10);
 }
 
+// ---- The history of edits of the archive tables and of הנוסע המתמיד ----
+// Written once per saved edit: {id, t, table, name, field, week, day, old, new}
+// into editLog/<the day it was made>, read by the admin page.
+const EDIT_LOG_FIELD_LABELS = {
+  bonus: 'בונוס', morning: 'חסידות', tefila: 'תפילה', mikvaotVal: 'מקוואות', rambamVal: 'רמב"ם', metivtaVal: 'מתיבתא',
+  purchases: 'קניות', minusTotal: 'מינוס', metivtaFlags: 'מתיבתא'
+};
+function editLogFieldLabel(field){
+  if (field.startsWith('cat:')) return categoryLabel(field.slice(4)) || field;
+  const weekly = [...WEEKLY_CLASS_FIELD_DEFS, ...WEEKLY_PARENT_FIELD_DEFS].find(f => f.field === field);
+  return EDIT_LOG_FIELD_LABELS[field] || (weekly && weekly.label) || field;
+}
+function editLogValue(v){
+  if (v === true) return '✓';
+  if (v === false || v === undefined || v === null) return '0';
+  return String(v);
+}
+function buildEditLog(op){
+  if (op.kind !== 'weekCell' && op.kind !== 'archiveCell') return null;
+  const log = { id: op.id, t: op.t, field: editLogFieldLabel(op.field) };
+  if (op.kind === 'weekCell'){
+    const week = (state.archive || []).find(e => e.type === 'weekly' && e.weekKey === op.weekKey);
+    const rec = week && (week.students || []).find(x => x.id === op.sid);
+    const def = [...WEEKLY_CLASS_FIELD_DEFS, ...WEEKLY_PARENT_FIELD_DEFS].find(f => f.field === op.field);
+    const ratio = !op.target && def && def.ratio ? def.ratio : 1;
+    const raw = op.target ? ((rec && rec.days && rec.days[op.target]) || {})[op.field] : (rec || {})[op.field];
+    log.table = op.src === 'archive' ? 'ארכיון' : 'הנוסע המתמיד';
+    log.name = op.src === 'archive' ? studentName(op.sid) : metivtaFullName(op.sid, false);
+    log.week = week ? weeklyEntryLabel(week) : op.weekKey;
+    if (op.target){ log.day = op.target; log.dayLabel = formatHebrewDateShort(new Date(op.target + 'T12:00:00')); }
+    log.old = editLogValue(typeof raw === 'number' ? raw * ratio : raw);
+    log.new = editLogValue(typeof op.value === 'number' ? op.value * ratio : op.value);
+    return log;
+  }
+  const entry = (state.archive || []).find(e => e.type !== 'weekly' && dayKeyOf(e.date) === op.target);
+  const extra = op.group === 'extra';
+  const rec = entry && (extra ? (entry.metivtaExtraStudents || []) : (entry.students || [])).find(x => x.id === op.sid);
+  log.day = op.target;
+  log.dayLabel = formatHebrewDateShort(new Date(op.target + 'T12:00:00'));
+  if (op.field === 'metivtaFlags'){
+    log.table = 'מתיבתא';
+    log.name = metivtaFullName(op.sid, extra);
+    log.old = rec && rec.metivtaFlags ? 'ציון ' + metivtaDayScore(rec.metivtaFlags) : '-';
+    log.new = 'ציון ' + metivtaDayScore(op.value);
+    return log;
+  }
+  log.table = 'ארכיון';
+  log.name = studentName(op.sid);
+  const old = op.field.startsWith('cat:') ? ((rec && rec.cats) || {})[op.field.slice(4)] : rec && rec[op.field];
+  log.old = editLogValue(old || 0);
+  log.new = editLogValue(op.value);
+  return log;
+}
+
+function editLogDayKey(op){
+  return dayKeyOf(new Date(op.t).toISOString());
+}
+function editLogDocRef(day){
+  return doc(firestoreDb, FIRESTORE_COLLECTION, STORAGE_KEY, 'editLog', day);
+}
+
 function commitOp(op){
   op.id = newOpId();
   op.t = Date.now();
   if (DAY_OP_KINDS.has(op.kind)) op.day = activityDayStr();
+  // Edits of the archive tables and of הנוסע המתמיד are written to the
+  // updates history (read in the admin page) when the change is saved.
+  try{ const log = buildEditLog(op); if (log) op.log = log; } catch(e){}
   pendingOps.push(op);
   persistPendingOps();
   rebuildViewAndRender();
@@ -1684,8 +1748,20 @@ async function syncPendingOps(){
         const w = await tx.get(weekDocRef(wk));
         if (w.exists()) weeks[wk] = w.data();
       }
+      // The updates history: the entries of the days of these edits.
+      const logOps = batch.filter(o => o.log);
+      const logEntries = {};
+      for (const day of new Set(logOps.map(editLogDayKey))){
+        const ls = await tx.get(editLogDocRef(day));
+        logEntries[day] = ls.exists() && Array.isArray(ls.data().entries) ? ls.data().entries : [];
+      }
       const snap = { main, dailyDays: dailyDays || [], weeks };
       const touched = applyOpsToSnapshot(snap, batch);
+      logOps.forEach(o => {
+        const entries = logEntries[editLogDayKey(o)];
+        if (!entries.some(x => x.id === o.id)) entries.push(o.log);
+      });
+      Object.keys(logEntries).forEach(day => tx.set(editLogDocRef(day), { day, entries: logEntries[day] }));
       tx.set(stateDocRef, snap.main);
       if (touched.daily && dailyDays !== null) tx.set(dailyArchiveDocRef, { days: snap.dailyDays });
       touched.weeks.forEach(wk => tx.set(weekDocRef(wk), snap.weeks[wk]));
@@ -4804,7 +4880,7 @@ function renderTodayHistoryTableNow(container){
       let undo = null;
       if (ARCHIVE_WEEKLY_KEYS[activeKey]){
         onClick = () => requireArchiveEditAccess(() => {
-          commitOp({ kind: 'weekCell', weekKey: weekOf(entry), sid: student.id, field: ARCHIVE_WEEKLY_KEYS[activeKey], target: dayKey, value: val > 0 ? 0 : 2 });
+          commitOp({ kind: 'weekCell', src: 'archive', weekKey: weekOf(entry), sid: student.id, field: ARCHIVE_WEEKLY_KEYS[activeKey], target: dayKey, value: val > 0 ? 0 : 2 });
         });
       } else if (activeKey === 'minus'){
         onClick = () => editCell('minusTotal', (s.minusTotal || 0) - 1);
