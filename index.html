@@ -383,7 +383,7 @@
     color: var(--gold-bright);
   }
   .ff-title-col{ display: flex; flex-direction: column; gap: 2px; }
-  .ff-title-col .missing-days{ font-size: 0.85em; }
+  .ff-title-col .missing-days{ font-size: inherit; }
   table.archive-table td.ff-percent{ font-weight: 700; color: var(--ink); }
   table.archive-table th.ff-parent-first,
   table.archive-table td.ff-parent-first{
@@ -408,8 +408,8 @@
   /* The class archive: the same low rows and text size as הנוסע המתמיד. */
   table.archive-table.arch-table td{ padding: 4px 6px; line-height: 1.2; font-size: 13px; }
   table.archive-table.arch-table th{ padding: 2px 6px; line-height: 1.2; font-size: 12.5px; }
-  @media (min-width: 900px){
-    table.archive-table.arch-table td{ padding: 4px 8px; font-size: 20px; line-height: 1.25; }
+  @media (min-width: 760px){
+    table.archive-table.arch-table td{ padding: 4px 8px; font-size: var(--arch-font, 20px); line-height: 1.25; }
     table.archive-table.arch-table th{ padding: 2px 8px; font-size: 12.5px; }
   }
   table.ff-table th.ff-parent-group-th{
@@ -4137,7 +4137,10 @@ function fitSpanGroupToCells(spans, minSize, maxSize, slack){
   fits(Math.floor(lo * 2) / 2);
 }
 
+// From this width the table spans the whole page and its text fills the cells.
 const FREQUENT_WIDE_MIN_WIDTH = 900;
+// Computers and tablets: the table is exactly as tall as the screen.
+const FILL_SCREEN_MIN_WIDTH = 760;
 
 function renderWeeklyEntryInto(entry, container, allWeeklyEntries, opts){
   opts = opts || {};
@@ -4161,15 +4164,18 @@ function renderWeeklyEntryInto(entry, container, allWeeklyEntries, opts){
   sep1.textContent = '·';
   headerGroup.appendChild(sep1);
   headerGroup.appendChild(buildWeekDaySelectDropdown(allWeeklyEntries || [entry], entry));
-  titleColumn.appendChild(headerGroup);
-  // Below the title: the days still missing, as letters (א, ב, ג).
+  // On the same line, after a dot: the days still missing, as letters (א, ב, ג).
   const missingDays = weekMissingDayNames(entry);
   if (missingDays.length){
-    const missingEl = document.createElement('div');
+    const sep2 = document.createElement('span');
+    sep2.textContent = '·';
+    headerGroup.appendChild(sep2);
+    const missingEl = document.createElement('span');
     missingEl.className = 'missing-days';
     missingEl.textContent = 'ימים חסרים: ' + missingDays.map(n => WEEKDAY_LETTERS[HEBREW_WEEKDAY_NAMES.indexOf(n)] || n).join(', ');
-    titleColumn.appendChild(missingEl);
+    headerGroup.appendChild(missingEl);
   }
+  titleColumn.appendChild(headerGroup);
   dateEl.appendChild(titleColumn);
 
 
@@ -4320,6 +4326,7 @@ function renderWeeklyEntryInto(entry, container, allWeeklyEntries, opts){
   const familySpans = [];
   const firstSpans = [];
   const valueSpans = [];
+  const pctSpans = []; // the % column has its own size (its text is longer)
   uniqueStudents.forEach(s => {
     const tr = document.createElement('tr');
     tr.dataset.studentId = s.id;
@@ -4336,7 +4343,7 @@ function renderWeeklyEntryInto(entry, container, allWeeklyEntries, opts){
       const val = getFieldVal(s, field, kind);
       if (kind === 'percent'){
         // The week's score, whichever day is shown.
-        valueSpans.push(fitTextSpan(td, val + '%'));
+        pctSpans.push(fitTextSpan(td, val + '%'));
         td.className = 'ff-percent';
         td.title = 'מתוך ' + WEEKLY_FULL_POINTS + ' נקודות בשבוע';
       } else if (kind === 'weekly-bool'){
@@ -4396,6 +4403,8 @@ function renderWeeklyEntryInto(entry, container, allWeeklyEntries, opts){
   container.appendChild(entryWrap);
 
   if (!table.isConnected || container.clientWidth === 0) return;
+  const rowCount = Math.max(tbody.rows.length, 1);
+  const fillRowHeight = () => Math.max(0, Math.floor((window.innerHeight - (entryWrap.offsetHeight - tbody.offsetHeight)) / rowCount * 10) / 10);
   if (wide){
     const isParentSpan = (i) => i >= LEAD && isParentField(fieldDefs[i - LEAD].field);
     // Headers: one size for all (small - the header row is kept low). The
@@ -4406,8 +4415,23 @@ function renderWeeklyEntryInto(entry, container, allWeeklyEntries, opts){
     const headerSize = plainHeaderSpans[0].style.fontSize;
     headerSpans.forEach(sp => { sp.style.fontSize = headerSize; });
     const nameSpans = [...familySpans, ...firstSpans];
-    fitSpanGroupToCells(nameSpans, 12, 40, 6);
-    fitSpanGroupToCells(valueSpans, 12, 22);
+    // The rows share the screen's height with the bar and the header; the
+    // text may be as tall as a row allows (a row = 8px padding + 1.25 lines).
+    const heightFont = Math.max(12, Math.floor((fillRowHeight() - 8) / 1.25));
+    fitSpanGroupToCells(nameSpans, 12, heightFont, 6);
+    fitSpanGroupToCells(valueSpans, 12, heightFont);
+    fitSpanGroupToCells(pctSpans, 10, heightFont);
+    // Settles the rows to exactly the screen's height (the text is made a bit
+    // smaller if the header ended up taller than expected).
+    const fillScreenHeight = () => {
+      for (let i = 0; i < 8; i++){
+        const rh = fillRowHeight();
+        [...tbody.rows].forEach(tr => { tr.style.height = rh + 'px'; });
+        if (entryWrap.offsetHeight <= window.innerHeight + 1) break;
+        [...valueSpans, ...pctSpans, ...nameSpans].forEach(sp => { sp.style.fontSize = Math.max(10, (parseFloat(sp.style.fontSize) || 12) - 1) + 'px'; });
+        [...tbody.rows].forEach(tr => { tr.style.height = ''; });
+      }
+    };
     // Names no larger than the numbers; each name column is then narrowed to
     // its longest name.
     const valueFont = parseFloat(valueSpans.length ? valueSpans[0].style.fontSize : '') || 40;
@@ -4415,7 +4439,7 @@ function renderWeeklyEntryInto(entry, container, allWeeklyEntries, opts){
       nameSpans.forEach(sp => { sp.style.fontSize = valueFont + 'px'; });
     }
     const nameCs = getComputedStyle(familyTh);
-    const namePad = (parseFloat(nameCs.paddingLeft) || 0) + (parseFloat(nameCs.paddingRight) || 0) + 8;
+    const namePad = (parseFloat(nameCs.paddingLeft) || 0) + (parseFloat(nameCs.paddingRight) || 0) + 24;
     const columnWidth = (spans, headerSpan) => Math.ceil(Math.max(headerSpan.offsetWidth, ...spans.map(sp => sp.offsetWidth)) + namePad);
     const familyW = columnWidth(familySpans, headerSpans[0]);
     const firstW = columnWidth(firstSpans, headerSpans[1]);
@@ -4428,7 +4452,9 @@ function renderWeeklyEntryInto(entry, container, allWeeklyEntries, opts){
       cols[1].style.width = sameAs.L1 + 'px';
       table.style.width = (sameAs.L0 + sameAs.L1 + fieldDefs.reduce((t, f) => t + (sameAs[f.field] || 0), 0)) + 'px';
       fitSpanGroupToCells(headerSpans.slice(LEAD), 9, 16);
-      fitSpanGroupToCells(valueSpans, 12, 22);
+      fitSpanGroupToCells(valueSpans, 12, heightFont);
+      fitSpanGroupToCells(pctSpans, 10, heightFont);
+      fillScreenHeight();
       stickLeadingColumns(table, [sameAs.L0, sameAs.L1, sameAs.percent || pctTh.offsetWidth]);
       return;
     }
@@ -4454,7 +4480,9 @@ function renderWeeklyEntryInto(entry, container, allWeeklyEntries, opts){
       if (i >= LEAD && !isParentSpan(i)) cols[i].style.width = 'calc((100% - ' + (nameW + parentsW) + 'px) / ' + others + ')';
     });
     fitSpanGroupToCells(headerSpans.slice(LEAD), 9, 16);
-    fitSpanGroupToCells(valueSpans, 12, 22);
+    fitSpanGroupToCells(valueSpans, 12, heightFont);
+    fitSpanGroupToCells(pctSpans, 10, heightFont);
+    fillScreenHeight();
     stickLeadingColumns(table, [familyW, firstW, pctTh.offsetWidth]);
     if (opts.onWidths){
       const w = { L0: cols[0].getBoundingClientRect().width, L1: cols[1].getBoundingClientRect().width };
@@ -4471,6 +4499,21 @@ function renderWeeklyEntryInto(entry, container, allWeeklyEntries, opts){
     fitNamesColumnWidth(familyTh, uniqueStudents.map(s => metivtaFamilyName(s.id, false)));
     fitNamesColumnWidth(firstNameTh, uniqueStudents.map(s => metivtaFirstName(s.id, false)));
     headerCells.forEach((th, i) => { if (cols[i]) cols[i].style.width = th.style.width; });
+    // A tablet: rows as tall as the screen allows, with larger text.
+    if (window.innerWidth >= FILL_SCREEN_MIN_WIDTH){
+      const font = Math.min(24, Math.max(13, Math.floor((fillRowHeight() - 8) / 1.25)));
+      [...tbody.querySelectorAll('td')].forEach(td => { td.style.fontSize = font + 'px'; td.style.lineHeight = '1.25'; });
+      fitNamesColumnWidth(familyTh, uniqueStudents.map(s => metivtaFamilyName(s.id, false)));
+      fitNamesColumnWidth(firstNameTh, uniqueStudents.map(s => metivtaFirstName(s.id, false)));
+      cols[0].style.width = familyTh.style.width;
+      cols[1].style.width = firstNameTh.style.width;
+      for (let i = 0; i < 6; i++){
+        [...tbody.rows].forEach(tr => { tr.style.height = ''; });
+        const rh = fillRowHeight();
+        [...tbody.rows].forEach(tr => { tr.style.height = rh + 'px'; });
+        if (entryWrap.offsetHeight <= window.innerHeight) break;
+      }
+    }
     // On a narrow screen only the two names stay in place (the % scrolls).
     stickLeadingColumns(table, [familyTh.offsetWidth, firstNameTh.offsetWidth]);
   }
@@ -4808,6 +4851,31 @@ function renderTodayHistoryTableNow(container){
   wrap.appendChild(scrollWrap);
   container.appendChild(wrap);
 
+  // On a computer or tablet the table is exactly as tall as the screen: the
+  // rows grow and the text is as large as a row allows, as long as the day
+  // columns do not become wider than their dates need.
+  if (table.isConnected && window.innerWidth >= FILL_SCREEN_MIN_WIDTH){
+    const dayThs = [...trDate.children].slice(1);
+    const daysWidth = () => dayThs.reduce((t, th) => t + th.offsetWidth, 0);
+    const baseWidth = daysWidth();
+    const rowCount = Math.max(tbody.rows.length, 1);
+    const fillRowHeight = () => Math.max(0, Math.floor((window.innerHeight - (wrap.offsetHeight - tbody.offsetHeight)) / rowCount * 10) / 10);
+    let font = Math.min(36, Math.max(13, Math.floor((fillRowHeight() - 8) / 1.25)));
+    for (; font > 13; font--){
+      table.style.setProperty('--arch-font', font + 'px');
+      if (daysWidth() <= baseWidth + 2) break;
+    }
+    // Rows exactly as tall as what is left of the screen (a scrollbar that
+    // appears under the table takes its share, so this is repeated).
+    for (let i = 0; i < 8; i++){
+      table.style.setProperty('--arch-font', font + 'px');
+      [...tbody.rows].forEach(tr => { tr.style.height = ''; });
+      const rh = fillRowHeight();
+      [...tbody.rows].forEach(tr => { tr.style.height = rh + 'px'; });
+      if (wrap.offsetHeight <= window.innerHeight || font <= 13) break;
+      font--;
+    }
+  }
   // The name column stays in place while the days scroll under it.
   if (table.isConnected) stickLeadingColumns(table, [nameTh.offsetWidth]);
 }
