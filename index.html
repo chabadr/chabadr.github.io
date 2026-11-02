@@ -3624,11 +3624,13 @@ let weeklySortOrder = null; // { sig, ids }
 let weeklyArchiveViewMode = {};
 
 const HEBREW_WEEKDAY_NAMES = ['ראשון', 'שני', 'שלישי', 'רביעי', 'חמישי', 'שישי', 'שבת'];
+// The days in the week menu: א, ב, ג ...
+const WEEKDAY_LETTERS = ['א', 'ב', 'ג', 'ד', 'ה', 'ו', 'ש'];
 
 function dayLabelWithinWeek(weekStartD, dayKeyStr){
   const selectedDate = new Date(dayKeyStr);
   const dIdx = Math.round((selectedDate.getTime() - new Date(dayKeyOf(weekStartD.toISOString())).getTime()) / 86400000);
-  return HEBREW_WEEKDAY_NAMES[dIdx] ? HEBREW_WEEKDAY_NAMES[dIdx] + ' · ' + formatHebrewDateShort(selectedDate) : dayKeyStr;
+  return WEEKDAY_LETTERS[dIdx] ? WEEKDAY_LETTERS[dIdx] + ' · ' + formatHebrewDateShort(selectedDate) : dayKeyStr;
 }
 
 // The one-line הנוסע המתמיד title bar scrolls sideways on narrow screens
@@ -3744,7 +3746,7 @@ function buildWeekDaySelectDropdown(allWeeklyEntries, selectedEntry, ctx){
       d.setDate(d.getDate() + i);
       const key = dayKeyOf(d.toISOString());
       if (key > today) break;
-      addDayOption(key, HEBREW_WEEKDAY_NAMES[i] + ' · ' + formatHebrewDateShort(d));
+      addDayOption(key, WEEKDAY_LETTERS[i] + ' · ' + formatHebrewDateShort(d));
     }
     parshaRow.appendChild(subList);
     list.appendChild(parshaRow);
