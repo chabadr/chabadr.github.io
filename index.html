@@ -94,6 +94,12 @@
     padding: 24px 20px 60px;
   }
 
+  /* Computers and tablets: the tables of הנוסע המתמיד and the archive are as
+     tall as the screen, so scrolling to one of them stops exactly on it. */
+  @media (min-width: 760px){
+    html{ scroll-snap-type: y proximity; }
+    #frequentArchiveView .archive-entry, #todaySummary .archive-entry{ scroll-snap-align: start; }
+  }
   .archive-entry{
     background: #fff;
     border: 1px solid var(--line);
