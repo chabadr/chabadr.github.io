@@ -1218,22 +1218,52 @@ function rebuildViewAndRender(){
   renderAll();
 }
 
+// The table row at the middle of the screen: after a redraw it is put back at
+// the same place on the screen, even if something above it changed height, so
+// a row never seems to slide down after an update.
+function captureRowAnchor(){
+  const el = document.elementFromPoint(window.innerWidth / 2, window.innerHeight / 2);
+  const tr = el && el.closest ? el.closest('tbody tr') : null;
+  const container = tr && tr.closest('#frequentArchiveView, #todaySummary, #boards, #metivtaView, #z1View');
+  if (!container) return null;
+  const table = tr.closest('table');
+  return { containerId: container.id, tableIndex: [...container.querySelectorAll('table')].indexOf(table), key: rowAnchorKey(tr), top: tr.getBoundingClientRect().top };
+}
+
+function rowAnchorKey(tr){
+  return (tr.dataset.studentId || '') + '|' + (tr.cells[0] ? tr.cells[0].textContent : '');
+}
+
+function restoreRowAnchor(a){
+  if (!a) return;
+  const container = document.getElementById(a.containerId);
+  const table = container && container.querySelectorAll('table')[a.tableIndex];
+  const tr = table && [...table.tBodies[0].rows].find(r => rowAnchorKey(r) === a.key);
+  if (!tr) return;
+  const delta = tr.getBoundingClientRect().top - a.top;
+  if (Math.abs(delta) > 1) window.scrollBy(0, delta);
+}
+
 function renderAll(){
   // Redrawing empties the tables for a moment, which would scroll the page
   // back to the top - keep it (and any scrolled table) where it was.
   const keep = captureScrollPositions();
+  const anchor = captureRowAnchor();
   render();
   if (document.getElementById('frequentArchiveView').style.display !== 'none') renderFrequentFlyerView();
   if (document.getElementById('metivtaView').style.display !== 'none') renderMetivtaView();
   if (document.getElementById('z1View').style.display !== 'none') renderZ1View();
   restoreScrollPositions(keep);
+  restoreRowAnchor(anchor);
 }
 
 // Redraws a table without moving the page (see renderAll).
 function keepScroll(draw){
   const keep = captureScrollPositions();
+  const anchor = captureRowAnchor();
   draw();
   restoreScrollPositions(keep);
+  restoreRowAnchor(anchor);
 }
 
 function captureScrollPositions(){
@@ -4289,6 +4319,11 @@ function renderWeeklyEntryInto(entry, container, allWeeklyEntries){
         td.addEventListener('click', (e) => {
           e.stopPropagation();
           requireArchiveEditAccess(() => {
+            if (values.length === 2){
+              // Only 0 or one value (מבצעים: 6): a click puts it, another click clears it.
+              commitOp({ kind: 'weekCell', weekKey: entry.weekKey, sid: s.id, field, target: null, value: (val > 0 ? 0 : values[1]) / ratio });
+              return;
+            }
             showWeeklyValuePicker(td, values, val, (points) => {
               commitOp({ kind: 'weekCell', weekKey: entry.weekKey, sid: s.id, field, target: null, value: points / ratio });
             });
