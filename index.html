@@ -3492,6 +3492,23 @@ async function renderTableToCanvas(table, titleText){
     side('Right', bw => x + w - bw, () => y, bw => bw, () => h);
   });
   cells.forEach(({ cell, x, y, w, h, cs }) => {
+    // The detailed report's cell: the number, and the missing days (two lines)
+    // beside it - each piece is drawn where it is on the screen.
+    const dwrap = cell.querySelector('.ff-dwrap');
+    if (dwrap){
+      [dwrap.children[0], ...dwrap.querySelectorAll('.ff-dletters > div')].forEach(piece => {
+        const t = piece && piece.textContent.trim();
+        if (!t) return;
+        const ps = getComputedStyle(piece);
+        if (!(parseFloat(ps.fontSize) > 0)) return;
+        const r = piece.getBoundingClientRect();
+        ctx.font = ps.fontStyle + ' ' + ps.fontWeight + ' ' + ps.fontSize + ' ' + ps.fontFamily;
+        ctx.fillStyle = ps.color;
+        ctx.textAlign = 'right';
+        ctx.fillText(t, r.right - tableRect.left, r.top - tableRect.top + TITLE_H + r.height / 2);
+      });
+      return;
+    }
     const el = cell.querySelector('.ff-fit') || cell;
     const text = el.textContent.trim();
     if (!text) return;
