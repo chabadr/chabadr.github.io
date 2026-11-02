@@ -5075,6 +5075,34 @@ async function loadStateUntilConnected(){
   }
 }
 
+// One-time change of the data: היום יום became 2 points a day, so every value
+// already entered (a number of days) is doubled. Each week is changed in its
+// own transaction and marked, so it can never be doubled twice. Only weeks up
+// to this one are touched - later weeks are entered in the new way.
+const HAYOM_YOM_LAST_OLD_WEEK = '2026-11-01';
+async function migrateHayomYomDoubled(){
+  if (!firestoreDb) return;
+  let changed = false;
+  try{
+    const snaps = await getDocs(weeklyArchiveCollectionRef);
+    const keys = [];
+    snaps.forEach(sn => { const d = sn.data(); if (d && d.weekKey && d.weekKey <= HAYOM_YOM_LAST_OLD_WEEK && !d.hayomYomDoubledV1) keys.push(d.weekKey); });
+    for (const weekKey of keys){
+      await runTransaction(firestoreDb, async (tx) => {
+        const ref = weekDocRef(weekKey);
+        const sn = await tx.get(ref);
+        if (!sn.exists()) return;
+        const data = sn.data();
+        if (data.hayomYomDoubledV1) return;
+        const students = (data.students || []).map(st => (st && st.hayomYom > 0) ? { ...st, hayomYom: st.hayomYom * 2 } : st);
+        tx.set(ref, { ...data, students, hayomYomDoubledV1: true });
+        changed = true;
+      });
+    }
+  } catch(e){ console.warn('hayomYom migration', e); }
+  if (changed) refreshArchiveAndRender();
+}
+
 async function initApp(){
   try{
     // The מתיבתא ז1 page has no menu - nothing on it leads to the rest of the site.
@@ -5111,6 +5139,7 @@ async function initApp(){
     if (isZ1Page) showZ1();
     setStatus('');
     if (pdfJobParams.get('sendpdf')) runSendPdfJob(pdfJobParams);
+    else migrateHayomYomDoubled();
     checkAutoReset();
     scheduleNextAutoResetCheck();
     subscribeToRemoteStateChanges();
