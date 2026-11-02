@@ -126,22 +126,6 @@
     flex-shrink: 0;
   }
 
-  .export-btn{
-    background: var(--gold);
-    color: var(--ink);
-    border: none;
-    font-family: 'Rubik', sans-serif;
-    font-weight: 600;
-    font-size: 12.5px;
-    padding: 6px 14px;
-    border-radius: 8px;
-    cursor: pointer;
-    white-space: nowrap;
-  }
-  .export-btn:hover{
-    background: var(--gold-bright);
-  }
-
   table.archive-table{
     border-collapse: collapse;
     width: 100%;
@@ -378,11 +362,6 @@
   .archive-date .merged-dropdown-toggle{
     font: inherit;
     padding: 0 2px;
-  }
-  .archive-date .export-btn{
-    font-family: inherit;
-    font-size: inherit;
-    margin-inline-start: auto;
   }
   .missing-days{
     font-weight: 800;
@@ -1044,18 +1023,6 @@ function subscribeToRemoteStateChanges(){
   }, (err) => {
     // realtime sync unavailable; changes are still synced by syncPendingOps
   });
-}
-
-async function saveCsvFile(filename, csv){
-  const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
 let state = null; // { students: [{id, cumulative, cats:{c1,c2,c3,c4}}] }
@@ -2882,42 +2849,6 @@ function moveSelectedMetivtaRows(keys, toArchive){
   });
 }
 
-async function exportMetivtaArchiveCSV(days){
-  try {
-    const headers = ['שם'];
-    days.forEach(entry => {
-      const d = new Date(entry.date);
-      headers.push(formatHebrewDateShort(d));
-    });
-    const rows = [headers];
-    state.students.forEach(student => {
-      const row = [metivtaStudentName(student.id)];
-      days.forEach(entry => {
-        const s = entry.students.find(x => x.id === student.id);
-        row.push(metivtaRecordLabel(s));
-      });
-      rows.push(row);
-    });
-    (state.metivtaExtra || []).forEach(student => {
-      const row = [metivtaExtraName(student.id)];
-      days.forEach(entry => {
-        const s = (entry.metivtaExtraStudents || []).find(x => x.id === student.id);
-        row.push(metivtaRecordLabel(s));
-      });
-      rows.push(row);
-    });
-    const csv = rows.map(row => row.map(cell => {
-      const str = String(cell);
-      return /[",\n]/.test(str) ? '"' + str.replace(/"/g, '""') + '"' : str;
-    }).join(',')).join('\r\n');
-
-    const filename = 'מתיבתא-ארכיון_' + todayStr() + '.csv';
-    await saveCsvFile(filename, csv);
-  } catch (err){
-    showModal('שגיאה בהורדה: ' + (err && err.message ? err.message : String(err)), { showCancel: false, confirmText: 'הבנתי' });
-  }
-}
-
 // How many days the Metivta table shows - this computer remembers the last choice.
 const METIVTA_DAY_COUNT_KEY = 'metivtaVisibleDayCount';
 let metivtaVisibleDayCount = (() => {
@@ -3277,14 +3208,6 @@ function buildMetivtaTable({ days, archivedKeys, archiveTable, availableWidth })
     headerGroup.appendChild(moveBtn);
   }
   dateEl.appendChild(headerGroup);
-
-  if (!archiveTable){
-    const exportBtn = document.createElement('button');
-    exportBtn.className = 'export-btn';
-    exportBtn.textContent = 'אקסל';
-    exportBtn.addEventListener('click', () => exportMetivtaArchiveCSV(days));
-    dateEl.appendChild(exportBtn);
-  }
 
   wrap.appendChild(dateEl);
   if (archiveTable && !metivtaArchiveOpen) return wrap;
@@ -4056,19 +3979,6 @@ function z1MissingDayNames(entry){
   return missing;
 }
 
-async function exportZ1CSV(entry, mode){
-  const rows = [['שם', 'מתיבתא']];
-  entry.z1Students.forEach(r => {
-    const v = mode === 'total' ? Object.values(r.days || {}).reduce((sum, d) => sum + z1DayValue(d), 0) : z1DayValue((r.days || {})[mode]);
-    rows.push([z1KeyName(r.key), v]);
-  });
-  const csv = rows.map(row => row.map(cell => {
-    const str = String(cell);
-    return /[",\n]/.test(str) ? '"' + str.replace(/"/g, '""') + '"' : str;
-  }).join(',')).join('\r\n');
-  await saveCsvFile('הנוסע-המתמיד-ז1_' + entry.weekKey + (mode === 'total' ? '' : '_' + mode) + '.csv', csv);
-}
-
 function renderZ1View(){
   keepScroll(() => renderZ1ViewNow());
 }
@@ -4116,11 +4026,6 @@ function renderZ1ViewNow(){
     group.appendChild(m);
   }
   dateEl.appendChild(group);
-  const exportBtn = document.createElement('button');
-  exportBtn.className = 'export-btn';
-  exportBtn.textContent = 'אקסל';
-  exportBtn.addEventListener('click', () => exportZ1CSV(entry, mode));
-  dateEl.appendChild(exportBtn);
   header.appendChild(dateEl);
 
   const valueOf = (r) => mode === 'total'
