@@ -1532,13 +1532,8 @@ function applyWeekCellOp(snap, op, touched){
 // Editing an archived day of the class board or the Metivta by hand.
 // field: 'cat:<key>' | 'purchases' | 'minusTotal' | 'metivtaFlags'.
 function applyArchiveCellOp(snap, op, touched){
-  let entry = snap.dailyDays.find(e => dayKeyOf(e.date) === op.target);
-  if (!entry){
-    // A past day nobody filled in (edited from הנוסע המתמיד): made now.
-    // Today and later belong to the live board.
-    if (op.target >= activityDayStr()) return;
-    entry = ensureArchivedDay(snap, op.target, touched);
-  }
+  const entry = snap.dailyDays.find(e => dayKeyOf(e.date) === op.target);
+  if (!entry) return;
   touched.daily = true;
   const group = op.group === 'extra' ? 'extra' : 'main';
   const rec = ensureArchivedRecord(entry, group, op.sid);
@@ -3358,34 +3353,21 @@ function weeklyDayFieldValue(dayData, field){
   return field === 'metivtaVal' ? Math.max(0, v) : v;
 }
 
-// In the weekly view: on how many days of the week the student did it (not
-// how many points that gave). Metivta counts the days he attended - its
-// stored value is -1 for a day with no attendance.
-// The columns of a single day that can be set directly in הנוסע המתמיד.
-const WEEKLY_DAY_EDITABLE = ['morning', 'tefila', 'bonus', 'mikvaotVal', 'rambamVal'];
+// A click puts the column's full value for that day, another click clears it
+// (0). The value stays in הנוסע המתמיד only - the class archive is not
+// changed. A later edit in the class archive of that day overrides it (see
+// refreshWeeklyFromDay: the later edit of a cell wins).
+const WEEKLY_DAY_FULL_VALUE = { morning: 2, tefila: 3, bonus: 1, mikvaotVal: 2, rambamVal: 2 };
 
-// A click puts the column's full value for that day, another click clears it.
-// The class archive of the day is the source of these numbers, so the change
-// is made there and הנוסע המתמיד follows (as it does for an edit made in the
-// class archive itself).
 function toggleWeeklyDayCell(weekKey, dayKey, sid, field, current){
   requireArchiveEditAccess(() => {
-    const on = current > 0;
-    const cell = (f, value) => commitOp({ kind: 'archiveCell', target: dayKey, group: 'main', sid, field: f, value });
-    if (field === 'mikvaotVal' || field === 'rambamVal'){
-      commitOp({ kind: 'weekCell', weekKey, sid, field, target: dayKey, value: on ? 0 : 2 });
-    } else if (field === 'morning'){
-      cell('cat:c1', on ? 0 : 3);
-    } else if (field === 'tefila'){
-      cell('cat:c3', on ? 0 : 2);
-      cell('cat:c7', on ? 0 : 1);
-    } else if (field === 'bonus'){
-      // the bonus is for a day without a minus
-      cell('minusTotal', on ? -1 : 0);
-    }
+    commitOp({ kind: 'weekCell', weekKey, sid, field, target: dayKey, value: current > 0 ? 0 : WEEKLY_DAY_FULL_VALUE[field] });
   });
 }
 
+// In the weekly view: on how many days of the week the student did it (not
+// how many points that gave). Metivta counts the days he attended - its
+// stored value is -1 for a day with no attendance.
 function weeklyDaysDone(s, field){
   return Object.values(s.days || {}).filter(d => {
     if (!d) return false;
@@ -4300,7 +4282,7 @@ function renderWeeklyEntryInto(entry, container, allWeeklyEntries){
         });
       } else {
         valueSpans.push(fitTextSpan(td, val || ''));
-        if (isDayView && WEEKLY_DAY_EDITABLE.includes(field) && viewMode < activityDayStr()){
+        if (isDayView && WEEKLY_DAY_FULL_VALUE[field] !== undefined && viewMode < activityDayStr()){
           // One day: a click puts the value, another click clears it.
           td.style.cursor = 'pointer';
           td.title = 'לחיצה מכניסה את הערך, לחיצה נוספת מבטלת';
