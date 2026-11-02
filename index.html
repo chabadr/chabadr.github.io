@@ -168,7 +168,9 @@
   table.archive-table th:first-child{ white-space: nowrap; }
   table.archive-table tr:nth-child(even){ background: #FCFBF6; }
   table.archive-table th.week-end, table.archive-table td.week-end{ border-left: 3px solid var(--gold); }
-  table.archive-table .sticky-col{ position: sticky; z-index: 1; background: #fff; }
+  /* The own layer keeps the text of the fixed columns from disappearing while
+     scrolling on a phone. */
+  table.archive-table .sticky-col{ position: sticky; z-index: 1; background: #fff; -webkit-transform: translateZ(0); transform: translateZ(0); -webkit-backface-visibility: hidden; backface-visibility: hidden; }
   table.archive-table tr:nth-child(even) td.sticky-col{ background: #FCFBF6; }
   table.archive-table th.sticky-col{ background: var(--paper-dark); z-index: 11; }
   table.archive-table .sticky-col-last{ box-shadow: inset 1px 0 0 var(--line); }
@@ -1284,21 +1286,45 @@ function renderAll(){
   // back to the top - keep it (and any scrolled table) where it was.
   const keep = captureScrollPositions();
   const anchor = captureRowAnchor();
-  render();
-  if (document.getElementById('frequentArchiveView').style.display !== 'none') renderFrequentFlyerView();
-  if (document.getElementById('metivtaView').style.display !== 'none') renderMetivtaView();
-  if (document.getElementById('z1View').style.display !== 'none') renderZ1View();
-  restoreScrollPositions(keep);
-  restoreRowAnchor(anchor);
+  const held = holdHeights();
+  try{
+    render();
+    if (document.getElementById('frequentArchiveView').style.display !== 'none') renderFrequentFlyerView();
+    if (document.getElementById('metivtaView').style.display !== 'none') renderMetivtaView();
+    if (document.getElementById('z1View').style.display !== 'none') renderZ1View();
+    restoreScrollPositions(keep);
+    restoreRowAnchor(anchor);
+  } finally {
+    releaseHeights(held, keep);
+  }
+}
+
+// While a table is redrawn it is empty for a moment, and the page would get
+// shorter and be scrolled up by the browser. The parts of the page keep their
+// height until the redraw is done.
+function holdHeights(){
+  const els = ['boards', 'todaySummary', 'frequentArchiveView', 'metivtaView', 'z1View'].map(id => document.getElementById(id)).filter(Boolean);
+  els.forEach(el => { if (el.offsetHeight) el.style.minHeight = el.offsetHeight + 'px'; });
+  return els;
+}
+
+function releaseHeights(els, keep){
+  els.forEach(el => { el.style.minHeight = ''; });
+  if (keep && (window.scrollX !== keep.x || window.scrollY !== keep.y)) window.scrollTo(keep.x, keep.y);
 }
 
 // Redraws a table without moving the page (see renderAll).
 function keepScroll(draw){
   const keep = captureScrollPositions();
   const anchor = captureRowAnchor();
-  draw();
-  restoreScrollPositions(keep);
-  restoreRowAnchor(anchor);
+  const held = holdHeights();
+  try{
+    draw();
+    restoreScrollPositions(keep);
+    restoreRowAnchor(anchor);
+  } finally {
+    releaseHeights(held, keep);
+  }
 }
 
 function captureScrollPositions(){
@@ -4232,6 +4258,7 @@ function renderWeeklyEntryInto(entry, container, allWeeklyEntries, opts){
   table.style.tableLayout = 'fixed';
   table.style.width = wide ? '100%' : 'max-content';
 
+  const isCurrentWeek = entry.weekKey === getWeekKey(new Date(activityDayStr() + 'T12:00:00'));
   const fieldDefs = [
     { field: 'percent', label: '%', kind: 'percent' },
     { field: 'bonus', label: 'בונוס', kind: 'daily' },
@@ -4244,6 +4271,8 @@ function renderWeeklyEntryInto(entry, container, allWeeklyEntries, opts){
     ...WEEKLY_PARENT_FIELD_DEFS
   ].filter(f => {
     const mode = entryViewMode;
+    // The current week: the columns filled in once a week are not shown yet.
+    if (isCurrentWeek && (WEEKLY_CLASS_FIELD_DEFS.some(w => w.field === f.field) || WEEKLY_PARENT_FIELD_DEFS.some(w => w.field === f.field))) return false;
     if (mode === 'total' || mode === 'detail') return true;
     // One day: no Metivta on Friday; מבצעים only on Friday; the other weekly
     // columns (היום יום, חת"ת, גאומ"ש, מנחה) and the parents' updates are only
@@ -4680,44 +4709,6 @@ function buildHistoryDropdown(dayKey, groupType, options){
   return dropdown;
 }
 
-async function exportArchiveDaysCSV(days, allOptions, groupType){
-  try {
-    const dayLabel = (entry) => {
-      const d = new Date(entry.date);
-      return formatHebrewDateShort(d) + (entry.isLive ? ' (היום)' : '');
-    };
-    const perDayLabels = [...CATEGORIES.map(c => c.label), '-', '🛒'];
-
-    const headers = ['שם'];
-    days.forEach(entry => {
-      const dl = dayLabel(entry);
-      perDayLabels.forEach(label => headers.push(dl + ' · ' + label));
-    });
-
-    const rows = [headers];
-    state.students.forEach(student => {
-      const row = [studentName(student.id)];
-      days.forEach(entry => {
-        const s = entry.students.find(x => x.id === student.id) || {};
-        const cats = s.cats || {};
-        CATEGORIES.forEach(c => row.push(cats[c.key] || 0));
-        row.push(s.minusTotal || 0);
-        row.push(-((s.purchases || 0) * PURCHASE_COST));
-      });
-      rows.push(row);
-    });
-    const csv = rows.map(row => row.map(cell => {
-      const str = String(cell);
-      return /[",\n]/.test(str) ? '"' + str.replace(/"/g, '""') + '"' : str;
-    }).join(',')).join('\r\n');
-
-    const filename = 'ארכיון_' + todayStr() + '.csv';
-    await saveCsvFile(filename, csv);
-  } catch (err){
-    showModal('שגיאה בהורדה: ' + (err && err.message ? err.message : String(err)), { showCancel: false, confirmText: 'הבנתי' });
-  }
-}
-
 let todayArchiveSortIndex = null;
 let todayArchiveSortOrder = null;
 
@@ -4785,12 +4776,6 @@ function renderTodayHistoryTableNow(container){
 
   headerGroup.appendChild(buildHistoryDropdown('archive_shared', groupType, allOptions));
   dateEl.appendChild(headerGroup);
-
-  const exportBtn = document.createElement('button');
-  exportBtn.className = 'export-btn';
-  exportBtn.textContent = 'אקסל';
-  exportBtn.addEventListener('click', () => exportArchiveDaysCSV(days, allOptions, groupType));
-  dateEl.appendChild(exportBtn);
 
   wrap.appendChild(dateEl);
 
@@ -5305,7 +5290,7 @@ async function initApp(){
 
 // Editing the archive is opened with a code entered on a very small number
 // pad, whose digits change places after every press.
-const ARCHIVE_ACCESS_CODE = '963';
+const ARCHIVE_ACCESS_CODE = '199';
 // Once opened it stays open this long after the last use - also across a
 // reload and between the site's pages (it is kept in the browser).
 const ARCHIVE_EDIT_SECONDS = 90;
