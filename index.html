@@ -194,7 +194,6 @@
   .table-scroll{
     overflow-x: auto;
     overflow-y: visible;
-    -webkit-overflow-scrolling: touch;
   }
 
   table{
@@ -403,6 +402,7 @@
   table.ff-table.ff-wide thead tr:last-child th .ff-fit{ line-height: 1.2; vertical-align: middle; }
   /* The thin row with the group names, centered over their columns. */
   table.ff-table th.ff-tall-th{ vertical-align: middle; }
+  table.ff-table thead th{ top: auto; }
   table.ff-table th.ff-parent-group-th{
     background: var(--gold-bg);
     color: var(--ink);
