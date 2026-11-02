@@ -382,6 +382,8 @@
     font-weight: 800;
     color: var(--gold-bright);
   }
+  .ff-title-col{ display: flex; flex-direction: column; gap: 2px; }
+  .ff-title-col .missing-days{ font-size: 0.85em; }
   table.archive-table td.ff-percent{ font-weight: 700; color: var(--ink); }
   table.archive-table th.ff-parent-first,
   table.archive-table td.ff-parent-first{
@@ -4118,6 +4120,8 @@ function renderWeeklyEntryInto(entry, container, allWeeklyEntries){
   // The blue bar: the week picker and the days still missing.
   const dateEl = document.createElement('div');
   dateEl.className = 'archive-date weekly-header-row weekly-header-row-nowrap';
+  const titleColumn = document.createElement('div');
+  titleColumn.className = 'ff-title-col';
   const headerGroup = document.createElement('div');
   headerGroup.className = 'header-group';
   const titleSpan = document.createElement('span');
@@ -4127,17 +4131,16 @@ function renderWeeklyEntryInto(entry, container, allWeeklyEntries){
   sep1.textContent = '·';
   headerGroup.appendChild(sep1);
   headerGroup.appendChild(buildWeekDaySelectDropdown(allWeeklyEntries || [entry], entry));
+  titleColumn.appendChild(headerGroup);
+  // Below the title: the days still missing, as letters (א, ב, ג).
   const missingDays = weekMissingDayNames(entry);
   if (missingDays.length){
-    const sep2 = document.createElement('span');
-    sep2.textContent = '·';
-    headerGroup.appendChild(sep2);
-    const missingEl = document.createElement('span');
+    const missingEl = document.createElement('div');
     missingEl.className = 'missing-days';
-    missingEl.textContent = 'ימים חסרים: ' + missingDays.join(', ');
-    headerGroup.appendChild(missingEl);
+    missingEl.textContent = 'ימים חסרים: ' + missingDays.map(n => WEEKDAY_LETTERS[HEBREW_WEEKDAY_NAMES.indexOf(n)] || n).join(', ');
+    titleColumn.appendChild(missingEl);
   }
-  dateEl.appendChild(headerGroup);
+  dateEl.appendChild(titleColumn);
 
 
   entryWrap.appendChild(dateEl);
@@ -4176,11 +4179,13 @@ function renderWeeklyEntryInto(entry, container, allWeeklyEntries){
   const isParentField = (field) => WEEKLY_PARENT_FIELD_DEFS.some(f => f.field === field);
   const firstParentField = WEEKLY_PARENT_FIELD_DEFS[0].field;
 
+  // Two leading columns, as in the Metivta table: משפחה, פרטי.
+  const LEAD = 2;
   const colgroup = document.createElement('colgroup');
   const cols = [];
-  for (let i = 0; i <= fieldDefs.length; i++){
+  for (let i = 0; i < LEAD + fieldDefs.length; i++){
     const col = document.createElement('col');
-    if (wide) col.style.width = i === 0 ? '12%' : (88 / fieldDefs.length) + '%';
+    if (wide) col.style.width = i < LEAD ? '7%' : (86 / fieldDefs.length) + '%';
     cols.push(col);
     colgroup.appendChild(col);
   }
@@ -4219,19 +4224,24 @@ function renderWeeklyEntryInto(entry, container, allWeeklyEntries){
   const headerSpans = [];
   // The name and the % cells span both header rows, their text in the
   // middle of the height.
-  const nameTh = document.createElement('th');
-  nameTh.rowSpan = 2;
-  nameTh.className = 'ff-tall-th';
-  headerSpans.push(fitTextSpan(nameTh, 'שם'));
-  groupRow.insertBefore(nameTh, groupRow.firstChild);
-  const headerCells = [nameTh];
+  const familyTh = document.createElement('th');
+  familyTh.rowSpan = 2;
+  familyTh.className = 'ff-tall-th';
+  headerSpans.push(fitTextSpan(familyTh, 'משפחה'));
+  groupRow.insertBefore(familyTh, groupRow.firstChild);
+  const firstNameTh = document.createElement('th');
+  firstNameTh.rowSpan = 2;
+  firstNameTh.className = 'ff-tall-th';
+  headerSpans.push(fitTextSpan(firstNameTh, 'פרטי'));
+  groupRow.insertBefore(firstNameTh, groupRow.children[1]);
+  const headerCells = [familyTh, firstNameTh];
   fieldDefs.forEach(({ field, label }) => {
     const th = document.createElement('th');
     th.style.cursor = 'pointer';
     if (field === 'percent'){
       th.rowSpan = 2;
       th.className = 'ff-tall-th';
-      groupRow.insertBefore(th, groupRow.children[1]);
+      groupRow.insertBefore(th, groupRow.children[LEAD]);
     }
     headerCells.push(th);
     if (field === firstParentField) th.classList.add('ff-parent-first');
@@ -4247,7 +4257,7 @@ function renderWeeklyEntryInto(entry, container, allWeeklyEntries){
   });
   thead.appendChild(trh);
   table.appendChild(thead);
-  const pctTh = headerCells[1];
+  const pctTh = headerCells[LEAD];
 
   const tbody = document.createElement('tbody');
   const seenIds = new Set();
@@ -4277,13 +4287,18 @@ function renderWeeklyEntryInto(entry, container, allWeeklyEntries){
     const rank = new Map(weeklySortOrder.ids.map((id, i) => [id, i]));
     uniqueStudents = uniqueStudents.slice().sort((a, b) => (rank.has(a.id) ? rank.get(a.id) : 1e9) - (rank.has(b.id) ? rank.get(b.id) : 1e9));
   }
-  const nameSpans = [];
+  const familySpans = [];
+  const firstSpans = [];
   const valueSpans = [];
   uniqueStudents.forEach(s => {
     const tr = document.createElement('tr');
-    const nameTd = document.createElement('td');
-    nameSpans.push(fitTextSpan(nameTd, studentName(s.id)));
-    tr.appendChild(nameTd);
+    tr.dataset.studentId = s.id;
+    const familyTd = document.createElement('td');
+    familySpans.push(fitTextSpan(familyTd, metivtaFamilyName(s.id, false)));
+    tr.appendChild(familyTd);
+    const firstTd = document.createElement('td');
+    firstSpans.push(fitTextSpan(firstTd, metivtaFirstName(s.id, false)));
+    tr.appendChild(firstTd);
 
     fieldDefs.forEach(({ field, kind }) => {
       const td = document.createElement('td');
@@ -4352,7 +4367,7 @@ function renderWeeklyEntryInto(entry, container, allWeeklyEntries){
 
   if (!table.isConnected || container.clientWidth === 0) return;
   if (wide){
-    const isParentSpan = (i) => i > 0 && isParentField(fieldDefs[i - 1].field);
+    const isParentSpan = (i) => i >= LEAD && isParentField(fieldDefs[i - LEAD].field);
     // Headers: one size for all (small - the header row is kept low). The
     // parents' headers are whole labels on one line, so their columns are
     // widened below to fit them instead of shrinking the text.
@@ -4360,17 +4375,23 @@ function renderWeeklyEntryInto(entry, container, allWeeklyEntries){
     fitSpanGroupToCells(plainHeaderSpans, 12, 16);
     const headerSize = plainHeaderSpans[0].style.fontSize;
     headerSpans.forEach(sp => { sp.style.fontSize = headerSize; });
+    const nameSpans = [...familySpans, ...firstSpans];
     fitSpanGroupToCells(nameSpans, 12, 40, 6);
     fitSpanGroupToCells(valueSpans, 12, 22);
-    // Names no larger than the numbers; the name column is then narrowed to
+    // Names no larger than the numbers; each name column is then narrowed to
     // its longest name.
     const valueFont = parseFloat(valueSpans.length ? valueSpans[0].style.fontSize : '') || 40;
     if ((parseFloat(nameSpans.length ? nameSpans[0].style.fontSize : '') || 0) > valueFont){
       nameSpans.forEach(sp => { sp.style.fontSize = valueFont + 'px'; });
     }
-    const nameCs = getComputedStyle(nameTh);
-    const nameW = Math.ceil(Math.max(...nameSpans.map(sp => sp.offsetWidth)) + (parseFloat(nameCs.paddingLeft) || 0) + (parseFloat(nameCs.paddingRight) || 0) + 8);
-    cols[0].style.width = nameW + 'px';
+    const nameCs = getComputedStyle(familyTh);
+    const namePad = (parseFloat(nameCs.paddingLeft) || 0) + (parseFloat(nameCs.paddingRight) || 0) + 8;
+    const columnWidth = (spans, headerSpan) => Math.ceil(Math.max(headerSpan.offsetWidth, ...spans.map(sp => sp.offsetWidth)) + namePad);
+    const familyW = columnWidth(familySpans, headerSpans[0]);
+    const firstW = columnWidth(firstSpans, headerSpans[1]);
+    const nameW = familyW + firstW;
+    cols[0].style.width = familyW + 'px';
+    cols[1].style.width = firstW + 'px';
     // The parents' columns: wide enough for the whole header; the others
     // share the rest equally.
     const tableW = table.clientWidth;
@@ -4388,20 +4409,23 @@ function renderWeeklyEntryInto(entry, container, allWeeklyEntries){
     });
     const others = fieldDefs.length - parentCount;
     headerSpans.forEach((sp, i) => {
-      if (i > 0 && !isParentSpan(i)) cols[i].style.width = 'calc((100% - ' + (nameW + parentsW) + 'px) / ' + others + ')';
+      if (i >= LEAD && !isParentSpan(i)) cols[i].style.width = 'calc((100% - ' + (nameW + parentsW) + 'px) / ' + others + ')';
     });
-    fitSpanGroupToCells(headerSpans.slice(1), 9, 16);
+    fitSpanGroupToCells(headerSpans.slice(LEAD), 9, 16);
     fitSpanGroupToCells(valueSpans, 12, 22);
-    stickLeadingColumns(table, [nameW, pctTh.offsetWidth]);
+    stickLeadingColumns(table, [familyW, firstW, pctTh.offsetWidth]);
   } else {
     // Compact layout: each column as narrow as its widest header word (the
     // name column as wide as the longest name), applied through the
     // colgroup since the group-label row above spans several columns.
     headerCells.forEach(th => { if (th.dataset.fitLabel) fitHeaderCellToWidestWord(th); });
-    nameTh.dataset.fitNamesCol = '1';
-    fitNamesColumnWidth(nameTh, uniqueStudents.map(s => studentName(s.id)));
+    familyTh.dataset.fitNamesCol = '1';
+    firstNameTh.dataset.fitNamesCol = '1';
+    fitNamesColumnWidth(familyTh, uniqueStudents.map(s => metivtaFamilyName(s.id, false)));
+    fitNamesColumnWidth(firstNameTh, uniqueStudents.map(s => metivtaFirstName(s.id, false)));
     headerCells.forEach((th, i) => { if (cols[i]) cols[i].style.width = th.style.width; });
-    stickLeadingColumns(table, [nameTh.offsetWidth, pctTh.offsetWidth]);
+    // On a narrow screen only the two names stay in place (the % scrolls).
+    stickLeadingColumns(table, [familyTh.offsetWidth, firstNameTh.offsetWidth]);
   }
 }
 
