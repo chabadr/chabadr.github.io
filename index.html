@@ -216,6 +216,7 @@
     top: 0;
     z-index: 10;
   }
+  .th-name-text{ display: inline-block; }
   .th-inner{
     display: flex;
     align-items: center;
@@ -383,7 +384,7 @@
     color: var(--gold-bright);
   }
   .ff-title-col{ display: flex; flex-direction: column; gap: 2px; }
-  .ff-title-col .missing-days{ font-size: 0.85em; }
+  .ff-title-col .missing-days{ font-size: inherit; }
   table.archive-table td.ff-percent{ font-weight: 700; color: var(--ink); }
   table.archive-table th.ff-parent-first,
   table.archive-table td.ff-parent-first{
@@ -405,6 +406,13 @@
   /* The thin row with the group names, centered over their columns. */
   table.ff-table th.ff-tall-th{ vertical-align: middle; }
   table.ff-table thead th{ top: auto; }
+  /* The class archive: the same low rows and text size as הנוסע המתמיד. */
+  table.archive-table.arch-table td{ padding: 4px 6px; line-height: 1.2; font-size: 13px; }
+  table.archive-table.arch-table th{ padding: 2px 6px; line-height: 1.2; font-size: 12.5px; }
+  @media (min-width: 760px){
+    table.archive-table.arch-table td{ padding: 4px 8px; font-size: var(--arch-font, 20px); line-height: 1.25; }
+    table.archive-table.arch-table th{ padding: 2px 8px; font-size: 12.5px; }
+  }
   table.ff-table th.ff-parent-group-th{
     background: var(--gold-bg);
     color: var(--ink);
@@ -461,16 +469,26 @@
     background: var(--gold-bg);
   }
 
+  /* A week (parsha) is a block of its own: a bold header with a gold edge,
+     and its days hang below it on a vertical line, indented and lighter. */
   .parsha-option{
     padding: 0;
     text-align: right;
+    margin: 0 0 6px;
+    border: 1px solid var(--line);
+    border-right: 4px solid var(--gold);
+    border-radius: 6px;
+    overflow: hidden;
+    background: var(--paper);
   }
   .parsha-option-main{
     display: flex;
     align-items: center;
     justify-content: space-between;
     gap: 8px;
-    padding: 10px 14px;
+    padding: 10px 12px;
+    font-weight: 700;
+    background: var(--gold-bg);
   }
   .parsha-option-label{
     flex: 1;
@@ -490,20 +508,31 @@
   .merged-dropdown-sublist{
     display: none;
     border-top: 1px solid var(--line);
-    border-bottom: 1px solid var(--line);
     background: var(--paper);
+    padding: 4px 0;
   }
   .parsha-option.open .merged-dropdown-sublist{
     display: block;
   }
   .merged-dropdown-sublist .merged-dropdown-option{
-    padding-right: 28px;
+    margin-right: 18px;
+    padding: 6px 12px 6px 8px;
+    border-right: 2px solid var(--line);
     font-size: 0.9em;
     font-weight: 500;
+    color: var(--ink-soft);
+  }
+  .merged-dropdown-sublist .merged-dropdown-option:hover{
+    border-right-color: var(--gold);
   }
   .merged-dropdown-option-active{
     color: var(--gold);
     font-weight: 700;
+  }
+  .merged-dropdown-sublist .merged-dropdown-option-active{
+    color: var(--gold);
+    font-weight: 700;
+    border-right-color: var(--gold);
   }
 
   .col-reset-btn{
@@ -2175,7 +2204,7 @@ function buildBoard(title, students){
   const table = document.createElement('table');
   const colSpec = buildColSpec();
 
-  const PX_BY_KIND = { name: 70, total: 45, plus: 40, minus: 40, merged: 45, individual: 45, shop: 40 };
+  const PX_BY_KIND = { name: 115, total: 45, plus: 40, minus: 40, merged: 45, individual: 45, shop: 40 };
   const colgroup = document.createElement('colgroup');
   let totalPx = 0;
   colSpec.forEach(s => {
@@ -2205,7 +2234,10 @@ function buildBoard(title, students){
     if (isColHidden(s.category)) th.style.display = 'none';
 
     if (s.kind === 'name'){
-      th.textContent = 'שם';
+      const nameLabel = document.createElement('span');
+      nameLabel.className = 'th-name-text';
+      nameLabel.textContent = 'שם';
+      th.appendChild(nameLabel);
     } else if (s.kind === 'total'){
       th.className = (th.className ? th.className + ' ' : '') + 'col-hide-narrow';
       const totalBtn = document.createElement('button');
@@ -2336,7 +2368,7 @@ function buildBoard(title, students){
       if (isColHidden(s.category)) td.style.display = 'none';
 
       if (s.kind === 'name'){
-        td.className = (td.className ? td.className + ' ' : '') + 'num-cell';
+        td.className = (td.className ? td.className + ' ' : '') + 'num-cell name-cell';
         const numSpan = document.createElement('span');
         numSpan.className = 'cell-text';
         numSpan.textContent = studentName(student.id);
@@ -2535,7 +2567,14 @@ function weeklyDayHasNoMetivta(weekStartD, dayKeyStr){
 // School days are Sunday-Friday. A past day counts as missing when any of its
 // expected columns is empty for every student (no data for the day at all
 // included); days from today on (still live or in the future) are never listed.
-function weekMissingDayNames(entry){
+// Who fills in each daily column (the names over the columns of the table).
+function dailyFieldResponsible(field){
+  return field === 'rambamVal' ? 'שמעון' : field === 'metivtaVal' ? 'חננאל' : 'תורנים';
+}
+
+// The missing days as { name, key, who }: who = those in charge of the
+// columns that are empty on that day.
+function weekMissingDays(entry){
   const weekStartD = new Date(entry.weekStart);
   const today = todayStr();
   const students = entry.students || [];
@@ -2547,10 +2586,12 @@ function weekMissingDayNames(entry){
     if (k >= today) break;
     const fields = WEEKLY_EXPECTED_DAY_FIELDS.filter(f => !(i === FRIDAY_INDEX && f === 'metivtaVal'));
     const filled = (f) => students.some(s => ((s.days || {})[k] || {})[f] > 0);
-    if (!fields.every(filled)) missing.push(HEBREW_WEEKDAY_NAMES[i]);
+    const empty = fields.filter(f => !filled(f));
+    if (empty.length) missing.push({ name: HEBREW_WEEKDAY_NAMES[i], key: k, who: [...new Set(empty.map(dailyFieldResponsible))] });
   }
   return missing;
 }
+
 
 function renderFrequentFlyerView(){
   keepScroll(() => renderFrequentFlyerViewNow());
@@ -3284,7 +3325,7 @@ function buildMetivtaTable({ days, archivedKeys, archiveTable, availableWidth })
     const weekdaySpan = document.createElement('div');
     weekdaySpan.textContent = entry.isLive ? 'היום' : d.toLocaleDateString('he-IL', { weekday: 'short' });
     weekdaySpan.style.fontWeight = entry.isLive ? '700' : '400';
-    weekdaySpan.style.fontSize = '0.75em';
+    weekdaySpan.style.fontSize = '0.9em';
     weekdaySpan.style.color = 'var(--ink-soft)';
     th.appendChild(dateSpan);
     th.appendChild(weekdaySpan);
@@ -3765,7 +3806,7 @@ function buildWeekDaySelectDropdown(allWeeklyEntries, selectedEntry, ctx){
   toggle.type = 'button';
   toggle.className = 'merged-dropdown-toggle';
   const weekStartD = new Date(selectedEntry.weekStart);
-  toggle.textContent = currentMode === 'total' ? weeklyEntryLabel(selectedEntry) : dayLabelWithinWeek(weekStartD, currentMode);
+  toggle.textContent = currentMode === 'total' ? weeklyEntryLabel(selectedEntry) : weeklyEntryLabel(selectedEntry) + ' · ' + dayLabelWithinWeek(weekStartD, currentMode);
   toggle.addEventListener('click', (e) => {
     e.stopPropagation();
     document.querySelectorAll('.merged-dropdown-list.open').forEach(l => {
@@ -3787,10 +3828,10 @@ function buildWeekDaySelectDropdown(allWeeklyEntries, selectedEntry, ctx){
 // step/max: the points that can be given, picked from a list (0, step, 2*step, ... max).
 const WEEKLY_CLASS_FIELD_DEFS = [
   { field: 'mivtzaim', label: 'מבצעים', kind: 'weekly-number', group: 'את"ה', step: 6, max: 6 },
-  { field: 'hayomYom', label: 'היום יום', kind: 'weekly-number', group: 'משה', step: 1, max: 7 },
+  { field: 'hayomYom', label: 'היום יום', kind: 'weekly-number', group: 'משה', step: 2, max: 14 },
   { field: 'chitasClass', label: 'חת"ת', kind: 'weekly-number', group: 'משה', step: 3, max: 21 },
   { field: 'gaomash', label: 'גאומ"ש', kind: 'weekly-number', group: 'משה', step: 2, max: 10 },
-  { field: 'mincha', label: 'מנחה', kind: 'weekly-number', group: 'מנהל', step: 1, max: 6 }
+  { field: 'mincha', label: 'מנחה', kind: 'weekly-number', group: 'מנהל', step: 1, max: 5 }
 ];
 
 // Points of a weekly column in הנוסע המתמיד. Parents report days (0-7) or a
@@ -3812,10 +3853,10 @@ function weeklyPercent(s){
 
 const WEEKLY_PARENT_FIELD_DEFS = [
   { field: 'chitas', label: 'חת"ת', kind: 'weekly-number', ratio: 2 },
-  { field: 'shema', label: 'ישן חסיד', kind: 'weekly-number', ratio: 2 },
-  { field: 'netilatYadaim', label: 'נטילת ידיים', kind: 'weekly-number' },
+  { field: 'shema', label: 'ישן חסיד', kind: 'weekly-number' },
+  { field: 'netilatYadaim', label: 'קם חסיד', kind: 'weekly-number' },
   { field: 'minchaMaariv', label: 'מנחה מעריב', kind: 'weekly-number', ratio: 2 },
-  { field: 'mikveh', label: 'מקווה שישי', kind: 'weekly-bool' },
+  { field: 'mikveh', label: 'מקווה שישי', kind: 'weekly-bool', ratio: 3 },
   { field: 'dvarTorah', label: 'שיחה', kind: 'weekly-bool', ratio: 4 }
 ];
 
@@ -4109,9 +4150,14 @@ function fitSpanGroupToCells(spans, minSize, maxSize, slack){
   fits(Math.floor(lo * 2) / 2);
 }
 
+// From this width the table spans the whole page and its text fills the cells.
 const FREQUENT_WIDE_MIN_WIDTH = 900;
+// Computers and tablets: the table is exactly as tall as the screen.
+const FILL_SCREEN_MIN_WIDTH = 760;
 
-function renderWeeklyEntryInto(entry, container, allWeeklyEntries){
+function renderWeeklyEntryInto(entry, container, allWeeklyEntries, opts){
+  opts = opts || {};
+  const entryViewMode = opts.forceTotal ? 'total' : (weeklyArchiveViewMode[entry.weekKey] || 'total');
   const entryWrap = document.createElement('div');
   entryWrap.className = 'archive-entry';
 
@@ -4131,15 +4177,22 @@ function renderWeeklyEntryInto(entry, container, allWeeklyEntries){
   sep1.textContent = '·';
   headerGroup.appendChild(sep1);
   headerGroup.appendChild(buildWeekDaySelectDropdown(allWeeklyEntries || [entry], entry));
-  titleColumn.appendChild(headerGroup);
-  // Below the title: the days still missing, as letters (א, ב, ג).
-  const missingDays = weekMissingDayNames(entry);
+  // On the same line, after a dot: the days still missing, as letters (א, ב, ג).
+  const missingDays = weekMissingDays(entry);
   if (missingDays.length){
-    const missingEl = document.createElement('div');
+    const sep2 = document.createElement('span');
+    sep2.textContent = '·';
+    headerGroup.appendChild(sep2);
+    const missingEl = document.createElement('span');
     missingEl.className = 'missing-days';
-    missingEl.textContent = 'ימים חסרים: ' + missingDays.map(n => WEEKDAY_LETTERS[HEBREW_WEEKDAY_NAMES.indexOf(n)] || n).join(', ');
-    titleColumn.appendChild(missingEl);
+    // On a day that is missing data: in brackets, who still has to fill it in.
+    missingEl.textContent = 'ימים חסרים: ' + missingDays.map(m => {
+      const letter = WEEKDAY_LETTERS[HEBREW_WEEKDAY_NAMES.indexOf(m.name)] || m.name;
+      return m.key === entryViewMode ? letter + ' (' + m.who.join(', ') + ')' : letter;
+    }).join(', ');
+    headerGroup.appendChild(missingEl);
   }
+  titleColumn.appendChild(headerGroup);
   dateEl.appendChild(titleColumn);
 
 
@@ -4165,7 +4218,7 @@ function renderWeeklyEntryInto(entry, container, allWeeklyEntries){
     ...WEEKLY_CLASS_FIELD_DEFS,
     ...WEEKLY_PARENT_FIELD_DEFS
   ].filter(f => {
-    const mode = weeklyArchiveViewMode[entry.weekKey] || 'total';
+    const mode = entryViewMode;
     if (mode === 'total') return true;
     // One day: no Metivta on Friday; מבצעים only on Friday; the other weekly
     // columns (היום יום, חת"ת, גאומ"ש, מנחה) and the parents' updates are only
@@ -4194,7 +4247,7 @@ function renderWeeklyEntryInto(entry, container, allWeeklyEntries){
   let currentSortField = weeklyArchiveSortField[entry.weekKey] || 'percent';
   // A column that is not shown in this view cannot be the sort column.
   if (!fieldDefs.some(f => f.field === currentSortField)) currentSortField = 'percent';
-  const viewMode = weeklyArchiveViewMode[entry.weekKey] || 'total';
+  const viewMode = entryViewMode;
   const isDayView = viewMode !== 'total';
 
   const thead = document.createElement('thead');
@@ -4290,6 +4343,7 @@ function renderWeeklyEntryInto(entry, container, allWeeklyEntries){
   const familySpans = [];
   const firstSpans = [];
   const valueSpans = [];
+  const pctSpans = []; // the % column has its own size (its text is longer)
   uniqueStudents.forEach(s => {
     const tr = document.createElement('tr');
     tr.dataset.studentId = s.id;
@@ -4306,7 +4360,7 @@ function renderWeeklyEntryInto(entry, container, allWeeklyEntries){
       const val = getFieldVal(s, field, kind);
       if (kind === 'percent'){
         // The week's score, whichever day is shown.
-        valueSpans.push(fitTextSpan(td, val + '%'));
+        pctSpans.push(fitTextSpan(td, val + '%'));
         td.className = 'ff-percent';
         td.title = 'מתוך ' + WEEKLY_FULL_POINTS + ' נקודות בשבוע';
       } else if (kind === 'weekly-bool'){
@@ -4366,6 +4420,8 @@ function renderWeeklyEntryInto(entry, container, allWeeklyEntries){
   container.appendChild(entryWrap);
 
   if (!table.isConnected || container.clientWidth === 0) return;
+  const rowCount = Math.max(tbody.rows.length, 1);
+  const fillRowHeight = () => Math.max(0, Math.floor((window.innerHeight - (entryWrap.offsetHeight - tbody.offsetHeight)) / rowCount * 10) / 10);
   if (wide){
     const isParentSpan = (i) => i >= LEAD && isParentField(fieldDefs[i - LEAD].field);
     // Headers: one size for all (small - the header row is kept low). The
@@ -4376,8 +4432,23 @@ function renderWeeklyEntryInto(entry, container, allWeeklyEntries){
     const headerSize = plainHeaderSpans[0].style.fontSize;
     headerSpans.forEach(sp => { sp.style.fontSize = headerSize; });
     const nameSpans = [...familySpans, ...firstSpans];
-    fitSpanGroupToCells(nameSpans, 12, 40, 6);
-    fitSpanGroupToCells(valueSpans, 12, 22);
+    // The rows share the screen's height with the bar and the header; the
+    // text may be as tall as a row allows (a row = 8px padding + 1.25 lines).
+    const heightFont = Math.max(12, Math.floor((fillRowHeight() - 8) / 1.25));
+    fitSpanGroupToCells(nameSpans, 12, heightFont, 6);
+    fitSpanGroupToCells(valueSpans, 12, heightFont);
+    fitSpanGroupToCells(pctSpans, 10, heightFont);
+    // Settles the rows to exactly the screen's height (the text is made a bit
+    // smaller if the header ended up taller than expected).
+    const fillScreenHeight = () => {
+      for (let i = 0; i < 8; i++){
+        const rh = fillRowHeight();
+        [...tbody.rows].forEach(tr => { tr.style.height = rh + 'px'; });
+        if (entryWrap.offsetHeight <= window.innerHeight + 1) break;
+        [...valueSpans, ...pctSpans, ...nameSpans].forEach(sp => { sp.style.fontSize = Math.max(10, (parseFloat(sp.style.fontSize) || 12) - 1) + 'px'; });
+        [...tbody.rows].forEach(tr => { tr.style.height = ''; });
+      }
+    };
     // Names no larger than the numbers; each name column is then narrowed to
     // its longest name.
     const valueFont = parseFloat(valueSpans.length ? valueSpans[0].style.fontSize : '') || 40;
@@ -4385,11 +4456,25 @@ function renderWeeklyEntryInto(entry, container, allWeeklyEntries){
       nameSpans.forEach(sp => { sp.style.fontSize = valueFont + 'px'; });
     }
     const nameCs = getComputedStyle(familyTh);
-    const namePad = (parseFloat(nameCs.paddingLeft) || 0) + (parseFloat(nameCs.paddingRight) || 0) + 8;
+    const namePad = (parseFloat(nameCs.paddingLeft) || 0) + (parseFloat(nameCs.paddingRight) || 0) + 24;
     const columnWidth = (spans, headerSpan) => Math.ceil(Math.max(headerSpan.offsetWidth, ...spans.map(sp => sp.offsetWidth)) + namePad);
     const familyW = columnWidth(familySpans, headerSpans[0]);
     const firstW = columnWidth(firstSpans, headerSpans[1]);
     const nameW = familyW + firstW;
+    // A single day uses exactly the column widths of the week summary.
+    const sameAs = isDayView && !opts.forceTotal ? weekSummaryColumnWidths(entry, allWeeklyEntries, container) : null;
+    if (sameAs){
+      fieldDefs.forEach((f, i) => { if (sameAs[f.field]) cols[LEAD + i].style.width = sameAs[f.field] + 'px'; });
+      cols[0].style.width = sameAs.L0 + 'px';
+      cols[1].style.width = sameAs.L1 + 'px';
+      table.style.width = (sameAs.L0 + sameAs.L1 + fieldDefs.reduce((t, f) => t + (sameAs[f.field] || 0), 0)) + 'px';
+      fitSpanGroupToCells(headerSpans.slice(LEAD), 9, 16);
+      fitSpanGroupToCells(valueSpans, 12, heightFont);
+      fitSpanGroupToCells(pctSpans, 10, heightFont);
+      fillScreenHeight();
+      stickLeadingColumns(table, [sameAs.L0, sameAs.L1, sameAs.percent || pctTh.offsetWidth]);
+      return;
+    }
     cols[0].style.width = familyW + 'px';
     cols[1].style.width = firstW + 'px';
     // The parents' columns: wide enough for the whole header; the others
@@ -4412,8 +4497,15 @@ function renderWeeklyEntryInto(entry, container, allWeeklyEntries){
       if (i >= LEAD && !isParentSpan(i)) cols[i].style.width = 'calc((100% - ' + (nameW + parentsW) + 'px) / ' + others + ')';
     });
     fitSpanGroupToCells(headerSpans.slice(LEAD), 9, 16);
-    fitSpanGroupToCells(valueSpans, 12, 22);
+    fitSpanGroupToCells(valueSpans, 12, heightFont);
+    fitSpanGroupToCells(pctSpans, 10, heightFont);
+    fillScreenHeight();
     stickLeadingColumns(table, [familyW, firstW, pctTh.offsetWidth]);
+    if (opts.onWidths){
+      const w = { L0: cols[0].getBoundingClientRect().width, L1: cols[1].getBoundingClientRect().width };
+      fieldDefs.forEach((f, i) => { w[f.field] = cols[LEAD + i].getBoundingClientRect().width; });
+      opts.onWidths(w);
+    }
   } else {
     // Compact layout: each column as narrow as its widest header word (the
     // name column as wide as the longest name), applied through the
@@ -4424,9 +4516,37 @@ function renderWeeklyEntryInto(entry, container, allWeeklyEntries){
     fitNamesColumnWidth(familyTh, uniqueStudents.map(s => metivtaFamilyName(s.id, false)));
     fitNamesColumnWidth(firstNameTh, uniqueStudents.map(s => metivtaFirstName(s.id, false)));
     headerCells.forEach((th, i) => { if (cols[i]) cols[i].style.width = th.style.width; });
+    // A tablet: rows as tall as the screen allows, with larger text.
+    if (window.innerWidth >= FILL_SCREEN_MIN_WIDTH){
+      const font = Math.min(24, Math.max(13, Math.floor((fillRowHeight() - 8) / 1.25)));
+      [...tbody.querySelectorAll('td')].forEach(td => { td.style.fontSize = font + 'px'; td.style.lineHeight = '1.25'; });
+      fitNamesColumnWidth(familyTh, uniqueStudents.map(s => metivtaFamilyName(s.id, false)));
+      fitNamesColumnWidth(firstNameTh, uniqueStudents.map(s => metivtaFirstName(s.id, false)));
+      cols[0].style.width = familyTh.style.width;
+      cols[1].style.width = firstNameTh.style.width;
+      for (let i = 0; i < 6; i++){
+        [...tbody.rows].forEach(tr => { tr.style.height = ''; });
+        const rh = fillRowHeight();
+        [...tbody.rows].forEach(tr => { tr.style.height = rh + 'px'; });
+        if (entryWrap.offsetHeight <= window.innerHeight) break;
+      }
+    }
     // On a narrow screen only the two names stay in place (the % scrolls).
     stickLeadingColumns(table, [familyTh.offsetWidth, firstNameTh.offsetWidth]);
   }
+}
+
+// The column widths of the week summary (laid out off-screen), so a single
+// day's table can use the very same widths.
+function weekSummaryColumnWidths(entry, allWeeklyEntries, container){
+  const probe = document.createElement('div');
+  probe.className = container.className;
+  probe.style.cssText = 'position:absolute;visibility:hidden;pointer-events:none;left:0;top:0;width:' + container.getBoundingClientRect().width + 'px';
+  document.body.appendChild(probe);
+  let widths = null;
+  try{ renderWeeklyEntryInto(entry, probe, allWeeklyEntries, { forceTotal: true, onWidths: w => { widths = w; } }); }
+  finally{ probe.remove(); }
+  return widths;
 }
 
 let historyMergedActive = {};
@@ -4623,7 +4743,7 @@ function renderTodayHistoryTableNow(container){
   wrap.appendChild(dateEl);
 
   const table = document.createElement('table');
-  table.className = 'archive-table';
+  table.className = 'archive-table arch-table';
   // Each column is exactly as wide as its date needs, on one line.
   table.style.tableLayout = 'auto';
   table.style.width = 'max-content';
@@ -4646,18 +4766,10 @@ function renderTodayHistoryTableNow(container){
     th.style.lineHeight = '1.2';
     if (endsWeek(dayIndex)) th.classList.add('week-end');
     const d = new Date(entry.date);
-    const dateLine = formatHebrewDateShort(d) + (entry.isLive ? ' (היום)' : '');
-    const weekdayLine = d.toLocaleDateString('he-IL', { weekday: 'short' });
+    // The weekday letter and the date on one line, split by a dot.
     const dateSpan = document.createElement('div');
-    dateSpan.style.fontSize = '0.85em';
-    dateSpan.textContent = dateLine + (todayArchiveSortIndex === dayIndex ? ' ▼' : '');
-    const weekdaySpan = document.createElement('div');
-    weekdaySpan.textContent = weekdayLine;
-    weekdaySpan.style.fontWeight = '400';
-    weekdaySpan.style.fontSize = '0.75em';
-    weekdaySpan.style.color = 'var(--ink-soft)';
+    dateSpan.textContent = WEEKDAY_LETTERS[d.getDay()] + ' · ' + formatHebrewDateShort(d) + (entry.isLive ? ' (היום)' : '') + (todayArchiveSortIndex === dayIndex ? ' ▼' : '');
     th.appendChild(dateSpan);
-    th.appendChild(weekdaySpan);
     th.addEventListener('click', () => {
       todayArchiveSortIndex = dayIndex;
       todayArchiveSortOrder = null;
@@ -4749,6 +4861,31 @@ function renderTodayHistoryTableNow(container){
   wrap.appendChild(scrollWrap);
   container.appendChild(wrap);
 
+  // On a computer or tablet the table is exactly as tall as the screen: the
+  // rows grow and the text is as large as a row allows, as long as the day
+  // columns do not become wider than their dates need.
+  if (table.isConnected && window.innerWidth >= FILL_SCREEN_MIN_WIDTH){
+    const dayThs = [...trDate.children].slice(1);
+    const daysWidth = () => dayThs.reduce((t, th) => t + th.offsetWidth, 0);
+    const baseWidth = daysWidth();
+    const rowCount = Math.max(tbody.rows.length, 1);
+    const fillRowHeight = () => Math.max(0, Math.floor((window.innerHeight - (wrap.offsetHeight - tbody.offsetHeight)) / rowCount * 10) / 10);
+    let font = Math.min(36, Math.max(13, Math.floor((fillRowHeight() - 8) / 1.25)));
+    for (; font > 13; font--){
+      table.style.setProperty('--arch-font', font + 'px');
+      if (daysWidth() <= baseWidth + 2) break;
+    }
+    // Rows exactly as tall as what is left of the screen (a scrollbar that
+    // appears under the table takes its share, so this is repeated).
+    for (let i = 0; i < 8; i++){
+      table.style.setProperty('--arch-font', font + 'px');
+      [...tbody.rows].forEach(tr => { tr.style.height = ''; });
+      const rh = fillRowHeight();
+      [...tbody.rows].forEach(tr => { tr.style.height = rh + 'px'; });
+      if (wrap.offsetHeight <= window.innerHeight || font <= 13) break;
+      font--;
+    }
+  }
   // The name column stays in place while the days scroll under it.
   if (table.isConnected) stickLeadingColumns(table, [nameTh.offsetWidth]);
 }
@@ -4819,11 +4956,14 @@ function render(){
 }
 
 function fitAllTextCells(){
+  // The names have a size of their own: as large as the name cell allows,
+  // the whole name inside it. The numbers share another size.
   const bodyItems = [];
+  const nameItems = [];
   document.querySelectorAll('.num-cell .cell-text, .total-cell .cell-text, .point-val').forEach(el => {
     el.style.fontSize = '';
     const container = el.closest('td');
-    if (container) bodyItems.push({ el, container });
+    if (container) (container.classList.contains('name-cell') ? nameItems : bodyItems).push({ el, container });
   });
 
   const headerGroups = new Map();
@@ -4831,18 +4971,23 @@ function fitAllTextCells(){
   // Metivta table's own header font size instead of this JS auto-shrink,
   // which would otherwise size it independently of the other headers and
   // end up visibly mismatched from them.
-  document.querySelectorAll('thead .col-reset-btn, thead .merged-dropdown-toggle:not(.metivta-header-toggle)').forEach(el => {
+  document.querySelectorAll('thead .col-reset-btn, thead .th-name-text, thead .merged-dropdown-toggle:not(.metivta-header-toggle)').forEach(el => {
     el.style.fontSize = '';
     const container = el.closest('th');
     const table = el.closest('table');
     if (!container || !table) return;
-    if (!headerGroups.has(table)) headerGroups.set(table, []);
-    headerGroups.get(table).push({ el, container });
+    // Today's board: every header of both tables is one group, one size.
+    const groupKey = table.closest('.board-wrap') ? 'board' : table;
+    if (!headerGroups.has(groupKey)) headerGroups.set(groupKey, []);
+    headerGroups.get(groupKey).push({ el, container });
   });
 
   requestAnimationFrame(() => {
-    function fitGroup(items, startSize){
+    function fitGroup(items, startSize, ownBox){
       function fitsAll(size){
+        // ownBox (the names): the whole name inside its own box, no wider
+        // and no taller than the box.
+        if (ownBox) return items.every(({ el }) => el.scrollWidth <= el.clientWidth && size <= el.clientHeight * 0.95);
         return items.every(({ el, container }) => {
           const limitW = Math.max(container.clientWidth - 2, 0);
           const limitH = Math.max(container.clientHeight - 2, 0);
@@ -4865,7 +5010,14 @@ function fitAllTextCells(){
     }
 
     fitGroup(bodyItems, 90);
-    headerGroups.forEach(items => fitGroup(items, 40));
+    fitGroup(nameItems, 90, true);
+    // The text in the cells is as large as the names (the smaller of the two
+    // sizes, so that everything still fits in its cell).
+    if (bodyItems.length && nameItems.length){
+      const common = Math.min(parseFloat(bodyItems[0].el.style.fontSize) || 90, parseFloat(nameItems[0].el.style.fontSize) || 90);
+      bodyItems.concat(nameItems).forEach(({ el }) => { el.style.fontSize = common + 'px'; });
+    }
+    headerGroups.forEach((items, key) => fitGroup(items, key === 'board' ? 35 : 40));
   });
 }
 
@@ -5016,6 +5168,34 @@ async function loadStateUntilConnected(){
   }
 }
 
+// One-time change of the data: היום יום became 2 points a day, so every value
+// already entered (a number of days) is doubled. Each week is changed in its
+// own transaction and marked, so it can never be doubled twice. Only weeks up
+// to this one are touched - later weeks are entered in the new way.
+const HAYOM_YOM_LAST_OLD_WEEK = '2026-11-01';
+async function migrateHayomYomDoubled(){
+  if (!firestoreDb) return;
+  let changed = false;
+  try{
+    const snaps = await getDocs(weeklyArchiveCollectionRef);
+    const keys = [];
+    snaps.forEach(sn => { const d = sn.data(); if (d && d.weekKey && d.weekKey <= HAYOM_YOM_LAST_OLD_WEEK && !d.hayomYomDoubledV1) keys.push(d.weekKey); });
+    for (const weekKey of keys){
+      await runTransaction(firestoreDb, async (tx) => {
+        const ref = weekDocRef(weekKey);
+        const sn = await tx.get(ref);
+        if (!sn.exists()) return;
+        const data = sn.data();
+        if (data.hayomYomDoubledV1) return;
+        const students = (data.students || []).map(st => (st && st.hayomYom > 0) ? { ...st, hayomYom: st.hayomYom * 2 } : st);
+        tx.set(ref, { ...data, students, hayomYomDoubledV1: true });
+        changed = true;
+      });
+    }
+  } catch(e){ console.warn('hayomYom migration', e); }
+  if (changed) refreshArchiveAndRender();
+}
+
 async function initApp(){
   try{
     // The מתיבתא ז1 page has no menu - nothing on it leads to the rest of the site.
@@ -5052,6 +5232,7 @@ async function initApp(){
     if (isZ1Page) showZ1();
     setStatus('');
     if (pdfJobParams.get('sendpdf')) runSendPdfJob(pdfJobParams);
+    else migrateHayomYomDoubled();
     checkAutoReset();
     scheduleNextAutoResetCheck();
     subscribeToRemoteStateChanges();
@@ -5184,7 +5365,9 @@ function showArchiveCodePrompt(onSuccess){
   }
   function press(digit){
     entered += digit;
-    if (entered.length < ARCHIVE_ACCESS_CODE.length){ shuffleKeys(); return; }
+    // The digits change places after every single press.
+    shuffleKeys();
+    if (entered.length < ARCHIVE_ACCESS_CODE.length) return;
     if (entered === ARCHIVE_ACCESS_CODE){
       writeArchiveLock({ tries: 0, until: 0 });
       overlay.remove();
@@ -5196,7 +5379,6 @@ function showArchiveCodePrompt(onSuccess){
     box.classList.add('wrong');
     setTimeout(() => box.classList.remove('wrong'), 350);
     if (archiveWrongTry()) showLockState();
-    else shuffleKeys();
   }
 
   overlay.appendChild(box);
