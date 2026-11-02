@@ -2203,7 +2203,7 @@ function buildBoard(title, students){
   const table = document.createElement('table');
   const colSpec = buildColSpec();
 
-  const PX_BY_KIND = { name: 70, total: 45, plus: 40, minus: 40, merged: 45, individual: 45, shop: 40 };
+  const PX_BY_KIND = { name: 115, total: 45, plus: 40, minus: 40, merged: 45, individual: 45, shop: 40 };
   const colgroup = document.createElement('colgroup');
   let totalPx = 0;
   colSpec.forEach(s => {
@@ -2364,7 +2364,7 @@ function buildBoard(title, students){
       if (isColHidden(s.category)) td.style.display = 'none';
 
       if (s.kind === 'name'){
-        td.className = (td.className ? td.className + ' ' : '') + 'num-cell';
+        td.className = (td.className ? td.className + ' ' : '') + 'num-cell name-cell';
         const numSpan = document.createElement('span');
         numSpan.className = 'cell-text';
         numSpan.textContent = studentName(student.id);
@@ -4959,11 +4959,14 @@ function render(){
 }
 
 function fitAllTextCells(){
+  // The names have a size of their own: as large as the name cell allows,
+  // the whole name inside it. The numbers share another size.
   const bodyItems = [];
+  const nameItems = [];
   document.querySelectorAll('.num-cell .cell-text, .total-cell .cell-text, .point-val').forEach(el => {
     el.style.fontSize = '';
     const container = el.closest('td');
-    if (container) bodyItems.push({ el, container });
+    if (container) (container.classList.contains('name-cell') ? nameItems : bodyItems).push({ el, container });
   });
 
   const headerGroups = new Map();
@@ -4981,8 +4984,11 @@ function fitAllTextCells(){
   });
 
   requestAnimationFrame(() => {
-    function fitGroup(items, startSize){
+    function fitGroup(items, startSize, ownBox){
       function fitsAll(size){
+        // ownBox (the names): the whole name inside its own box, no wider
+        // and no taller than the box.
+        if (ownBox) return items.every(({ el }) => el.scrollWidth <= el.clientWidth && size <= el.clientHeight * 0.95);
         return items.every(({ el, container }) => {
           const limitW = Math.max(container.clientWidth - 2, 0);
           const limitH = Math.max(container.clientHeight - 2, 0);
@@ -5005,6 +5011,7 @@ function fitAllTextCells(){
     }
 
     fitGroup(bodyItems, 90);
+    fitGroup(nameItems, 90, true);
     headerGroups.forEach(items => fitGroup(items, 40));
   });
 }
