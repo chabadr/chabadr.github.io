@@ -759,7 +759,7 @@ async function renderPhonesTab(container){
         name.className = 'send-pdf-name';
         name.textContent = weekLabel(w);
         line.appendChild(name);
-        const choices = [{ label: 'סיכום שבועי', day: 'total' }];
+        const choices = [{ label: 'דוח מפורט', day: 'total' }];
         const start = new Date(w.weekStart || w.weekKey + 'T12:00:00');
         for (let i = 0; i < 6; i++){
           const d = new Date(start); d.setHours(12, 0, 0, 0); d.setDate(d.getDate() + i);
