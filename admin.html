@@ -89,6 +89,17 @@
     margin-bottom: -2px;
   }
   .tab-link{ margin-inline-start: auto; text-decoration: none; }
+  .edits-day{ border: 1px solid var(--line); border-radius: 10px; background: #fff; margin-bottom: 8px; }
+  .edits-day > summary{ cursor: pointer; padding: 10px 14px; font-weight: 700; font-size: 15px; }
+  .edits-day[open] > summary{ border-bottom: 1px solid var(--line); background: var(--paper-dark, #F6F3EA); }
+  .edits-day-count{ font-weight: 500; color: var(--ink-soft); font-size: 13px; margin-inline-start: 8px; }
+  .edits-list{ padding: 4px 14px 8px; }
+  .edit-row{ display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; padding: 7px 0; border-bottom: 1px solid var(--line); font-size: 14px; }
+  .edit-row:last-child{ border-bottom: none; }
+  .edit-time{ color: var(--ink-soft); font-size: 13px; min-width: 42px; direction: ltr; text-align: right; }
+  .edit-tag{ font-size: 12px; font-weight: 700; padding: 1px 8px; border-radius: 10px; background: var(--gold-bg, #F6EBCB); color: var(--ink); }
+  .edit-name{ font-weight: 700; }
+  .edit-change{ margin-inline-start: auto; font-weight: 700; }
   .tab-btn.active{
     color: var(--ink);
     border-bottom-color: var(--gold);
@@ -403,7 +414,8 @@ const SMS4FREE_ERROR_MESSAGES = {
 const TABS = [
   { key: 'phones', label: 'משתנים' },
   { key: 'history', label: 'עדכוני הורים' },
-  { key: 'sms', label: 'שליחת הודעות' }
+  { key: 'sms', label: 'שליחת הודעות' },
+  { key: 'edits', label: 'היסטוריית עדכונים' }
 ];
 
 const DEFAULT_SENDER = '058-4012374';
@@ -502,6 +514,76 @@ function renderActiveTab(){
   if (activeTab === 'history') renderHistoryTab(content);
   else if (activeTab === 'phones') renderPhonesTab(content);
   else if (activeTab === 'sms') renderSmsTab(content);
+  else if (activeTab === 'edits') renderEditsTab(content);
+}
+
+// ---------- Tab: היסטוריית עדכונים ----------
+// Every edit of the archive tables and of הנוסע המתמיד, by day (each day opens
+// and closes). The history is kept from the day it was added.
+async function renderEditsTab(container){
+  const status = document.createElement('div');
+  status.className = 'loading';
+  status.textContent = 'טוען…';
+  container.appendChild(status);
+  try{
+    const snaps = await getDocs(collection(db, FIRESTORE_COLLECTION, STORAGE_KEY, 'editLog'));
+    const days = [];
+    snaps.forEach(d => { const v = d.data(); if (v && Array.isArray(v.entries) && v.entries.length) days.push({ day: v.day || d.id, entries: v.entries }); });
+    days.sort((a, b) => (a.day < b.day ? 1 : -1));
+    status.remove();
+    if (!days.length){
+      const empty = document.createElement('div');
+      empty.className = 'hint';
+      empty.textContent = 'עדיין אין עדכונים בהיסטוריה. עדכונים בטבלאות הארכיון ובנוסע המתמיד יופיעו כאן, לפי ימים.';
+      container.appendChild(empty);
+      return;
+    }
+    const hebrewDay = (dayKey) => {
+      const d = new Date(dayKey + 'T12:00:00');
+      const letters = ['א', 'ב', 'ג', 'ד', 'ה', 'ו', 'ש'];
+      const heb = new Intl.DateTimeFormat('he-IL-u-ca-hebrew', { day: 'numeric', month: 'long' }).format(d);
+      return 'יום ' + letters[d.getDay()] + "' · " + heb + ' · ' + d.getDate() + '.' + (d.getMonth() + 1);
+    };
+    days.forEach(({ day, entries }, index) => {
+      const details = document.createElement('details');
+      details.className = 'edits-day';
+      if (index === 0) details.open = true;
+      const summary = document.createElement('summary');
+      summary.textContent = hebrewDay(day);
+      const count = document.createElement('span');
+      count.className = 'edits-day-count';
+      count.textContent = '· ' + entries.length + (entries.length === 1 ? ' עדכון' : ' עדכונים');
+      summary.appendChild(count);
+      details.appendChild(summary);
+      const list = document.createElement('div');
+      list.className = 'edits-list';
+      entries.slice().sort((a, b) => b.t - a.t).forEach(e => {
+        const row = document.createElement('div');
+        row.className = 'edit-row';
+        const time = document.createElement('span');
+        time.className = 'edit-time';
+        time.textContent = new Date(e.t).toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit' });
+        const tag = document.createElement('span');
+        tag.className = 'edit-tag';
+        tag.textContent = e.table;
+        const name = document.createElement('span');
+        name.className = 'edit-name';
+        name.textContent = e.name;
+        const what = document.createElement('span');
+        what.textContent = e.field + (e.dayLabel ? ' · ' + e.dayLabel : '') + (e.table === 'הנוסע המתמיד' && e.week ? ' · ' + e.week : '');
+        const change = document.createElement('span');
+        change.className = 'edit-change';
+        change.textContent = e.old + ' ← ' + e.new;
+        [time, tag, name, what, change].forEach(x => row.appendChild(x));
+        list.appendChild(row);
+      });
+      details.appendChild(list);
+      container.appendChild(details);
+    });
+  } catch(e){
+    status.className = 'loading';
+    status.textContent = 'שגיאה בטעינה: ' + (e && e.message ? e.message : String(e));
+  }
 }
 
 // ---------- Tab: עדכוני הורים ----------
