@@ -4351,6 +4351,8 @@ function renderWeeklyEntryInto(entry, container, allWeeklyEntries, opts){
   const getFieldVal = (s, field, kind) => {
     if (kind === 'percent') return weeklyPercent(s);
     if (kind === 'weekly-number' || kind === 'weekly-bool') return weeklyFieldPoints(s, defOf(field));
+    // The detailed report shows the points the student collected in the week.
+    if (isDetail) return weeklyDailySum(s, field);
     if (!isDayView) return weeklyDaysDone(s, field);
     return weeklyDayFieldValue((s.days || {})[viewMode], field);
   };
@@ -4424,7 +4426,7 @@ function renderWeeklyEntryInto(entry, container, allWeeklyEntries, opts){
           });
         });
       } else if (isDetail){
-        // Big: on how many days it was received. Small: the days it was not.
+        // Big: the points collected in the week. Small: the days it was not received.
         valueSpans.push(fitTextSpan(td, String(val)));
         const missing = weeklyMissingDayLetters(entry, s, field);
         if (missing){
