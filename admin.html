@@ -307,6 +307,11 @@
     font-size: 12.5px;
     font-weight: 600;
   }
+  .send-pdf-row{ display: flex; align-items: center; gap: 10px; margin-top: 10px; }
+  .send-pdf-menu{ margin-top: 8px; border: 1px solid var(--line); border-radius: 8px; background: #fff; max-height: 320px; overflow-y: auto; padding: 4px 8px; }
+  .send-pdf-week{ display: flex; align-items: center; gap: 6px; flex-wrap: wrap; padding: 6px 0; border-bottom: 1px solid var(--line); }
+  .send-pdf-week:last-child{ border-bottom: none; }
+  .send-pdf-name{ min-width: 90px; font-weight: 600; font-size: 14px; }
   .small-btn:disabled{ opacity: 0.5; cursor: default; }
   .info-btn{
     width: 22px; height: 22px; border-radius: 50%;
@@ -709,7 +714,102 @@ async function renderPhonesTab(container){
     pdfStatus.className = 'save-status';
     pdfRow.appendChild(pdfStatus);
     pdfCard.appendChild(pdfRow);
+
+    // The "שליחה" button: a menu of the tables of הנוסע המתמיד (each week's
+    // summary, or one of its days); the chosen one is sent as a PDF.
+    const sendRow = document.createElement('div');
+    sendRow.className = 'send-pdf-row';
+    const sendBtn = document.createElement('button');
+    sendBtn.type = 'button';
+    sendBtn.className = 'btn-secondary';
+    sendBtn.textContent = 'שליחה ▾';
+    sendRow.appendChild(sendBtn);
+    const sendStatus = document.createElement('span');
+    sendStatus.className = 'save-status';
+    sendRow.appendChild(sendStatus);
+    const sendMenu = document.createElement('div');
+    sendMenu.className = 'send-pdf-menu';
+    sendMenu.style.display = 'none';
+    pdfCard.appendChild(sendRow);
+    pdfCard.appendChild(sendMenu);
     container.appendChild(pdfCard);
+
+    const WEEKDAY_LETTERS = ['א', 'ב', 'ג', 'ד', 'ה', 'ו'];
+    const dayKeyOf = (d) => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+    const weekLabel = (w) => {
+      let cache = {};
+      try{ cache = JSON.parse(localStorage.getItem('parshaNamesV1')) || {}; } catch(e){}
+      const name = w.weekParsha || cache[w.weekKey];
+      return name ? name.replace(/^פרשת\s+/, '') : 'שבוע ' + new Date(w.weekStart || w.weekKey).toLocaleDateString('he-IL');
+    };
+
+    async function buildSendMenu(){
+      sendMenu.textContent = 'טוען…';
+      const snaps = await getDocs(collection(db, FIRESTORE_COLLECTION, STORAGE_KEY, 'archiveWeeks'));
+      const weeks = [];
+      snaps.forEach(d => { const w = d.data(); if (w && w.weekKey) weeks.push(w); });
+      weeks.sort((a, b) => (a.weekKey < b.weekKey ? 1 : -1));
+      sendMenu.innerHTML = '';
+      if (!weeks.length){ sendMenu.textContent = 'אין עדיין שבועות בארכיון.'; return; }
+      const today = dayKeyOf(new Date());
+      weeks.forEach(w => {
+        const line = document.createElement('div');
+        line.className = 'send-pdf-week';
+        const name = document.createElement('span');
+        name.className = 'send-pdf-name';
+        name.textContent = weekLabel(w);
+        line.appendChild(name);
+        const choices = [{ label: 'סיכום שבועי', day: 'total' }];
+        const start = new Date(w.weekStart || w.weekKey + 'T12:00:00');
+        for (let i = 0; i < 6; i++){
+          const d = new Date(start); d.setHours(12, 0, 0, 0); d.setDate(d.getDate() + i);
+          if (dayKeyOf(d) < today) choices.push({ label: WEEKDAY_LETTERS[i], day: dayKeyOf(d) });
+        }
+        choices.forEach(c => {
+          const b = document.createElement('button');
+          b.type = 'button';
+          b.className = 'small-btn';
+          b.textContent = c.label;
+          b.addEventListener('click', () => { sendMenu.style.display = 'none'; sendPdf(w.weekKey, c.day, weekLabel(w) + ' · ' + c.label); });
+          line.appendChild(b);
+        });
+        sendMenu.appendChild(line);
+      });
+    }
+    sendBtn.addEventListener('click', async () => {
+      if (sendMenu.style.display !== 'none'){ sendMenu.style.display = 'none'; return; }
+      sendMenu.style.display = '';
+      try{ await buildSendMenu(); } catch(e){ sendMenu.textContent = 'שגיאה בטעינה: ' + (e && e.message ? e.message : String(e)); }
+    });
+
+    // The table is made by the main page, loaded in a hidden frame; it sends
+    // the PDF and reports back.
+    function sendPdf(weekKey, day, label){
+      const job = 'job' + Date.now();
+      const frame = document.createElement('iframe');
+      frame.style.cssText = 'position:fixed;left:-10000px;top:0;width:1400px;height:1000px;border:0;';
+      frame.src = 'index.html?sendpdf=' + encodeURIComponent(weekKey) + '&day=' + encodeURIComponent(day) + '&job=' + job;
+      sendStatus.className = 'save-status';
+      sendStatus.textContent = label + ': מכין…';
+      let finished = false;
+      const finish = (ok, message) => {
+        finished = true;
+        window.removeEventListener('message', onMessage);
+        clearTimeout(giveUp);
+        frame.remove();
+        sendStatus.className = 'save-status ' + (ok ? '' : 'err');
+        sendStatus.textContent = label + ': ' + message;
+      };
+      function onMessage(e){
+        if (e.origin !== location.origin || !e.data || e.data.type !== 'pdf-job' || e.data.job !== job) return;
+        // a progress line ("מכין…", "שולח…") or the final answer
+        if (/^(מכין|שולח)/.test(e.data.message) && e.data.ok) sendStatus.textContent = label + ': ' + e.data.message;
+        else finish(e.data.ok, e.data.message);
+      }
+      window.addEventListener('message', onMessage);
+      const giveUp = setTimeout(() => { if (!finished) finish(false, 'לא התקבלה תשובה, נסה שוב'); }, 180000);
+      document.body.appendChild(frame);
+    }
     let pdfTimer = null;
     pdfInput.addEventListener('input', () => {
       clearTimeout(pdfTimer);

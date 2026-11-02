@@ -3549,45 +3549,52 @@ async function canvasToPdfBase64(canvas){
   throw new Error('הטבלה גדולה מדי לשליחה');
 }
 
-async function sendTablePdf(table, title, button){
-  const label = button.textContent;
-  const setLabel = (text) => { button.textContent = text; };
-  button.disabled = true;
+// Puts the table's PDF in the queue and waits for the server to send it.
+// Returns { ok, message }. Started from the admin page (see runSendPdfJob).
+async function sendTablePdf(table, title, onProgress){
   try{
     const settings = await getDoc(doc(firestoreDb, FIRESTORE_COLLECTION, STORAGE_KEY, 'meta', 'pdfSettings'));
     const email = settings.exists() ? (settings.data().email || '') : '';
-    if (!email){
-      showModal('לא הוגדרה כתובת לשליחה. מגדירים אותה בעמוד הניהול, בלשונית "משתנים".', { showCancel: false, confirmText: 'הבנתי' });
-      return;
-    }
-    setLabel('מכין…');
+    if (!email) return { ok: false, message: 'לא הוגדרה כתובת לשליחה. מגדירים אותה כאן, בלשונית "משתנים".' };
+    onProgress('מכין…');
     const pdfBase64 = await canvasToPdfBase64(await renderTableToCanvas(table, title));
     const id = 'pdf-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8);
     const ref = doc(firestoreDb, FIRESTORE_COLLECTION, STORAGE_KEY, 'pdfOutbox', id);
-    setLabel('שולח…');
+    onProgress('שולח…');
     await setDoc(ref, { status: 'pending', createdAt: new Date().toISOString(), subject: title, filename: 'הנוסע-המתמיד.pdf', pdfBase64 });
     // The server function picks it up within a minute or so.
     for (let i = 0; i < 45; i++){
       await new Promise(resolve => setTimeout(resolve, 3000));
       const snap = await getDoc(ref);
       const data = snap.exists() ? snap.data() : null;
-      if (data && data.status === 'sent'){
-        setLabel('נשלח ✓');
-        setStatus('הטבלה נשלחה ל-' + email);
-        setTimeout(() => setStatus(''), 6000);
-        return;
-      }
-      if (data && data.status === 'failed'){
-        showModal('השליחה נכשלה: ' + (data.error || 'שגיאה לא ידועה'), { showCancel: false, confirmText: 'הבנתי' });
-        return;
-      }
+      if (data && data.status === 'sent') return { ok: true, message: 'נשלח ל-' + email };
+      if (data && data.status === 'failed') return { ok: false, message: 'השליחה נכשלה: ' + (data.error || 'שגיאה לא ידועה') };
     }
-    showModal('השליחה עדיין בתור. אם לא תגיע בדקות הקרובות, בדוק את הגדרות הדוא"ל בשרת.', { showCancel: false, confirmText: 'הבנתי' });
+    return { ok: false, message: 'השליחה עדיין בתור. אם לא תגיע בדקות הקרובות, בדוק את הגדרות הדוא"ל בשרת.' };
   } catch(e){
-    showModal('השליחה נכשלה: ' + (e && e.message ? e.message : String(e)), { showCancel: false, confirmText: 'הבנתי' });
-  } finally {
-    button.disabled = false;
-    setTimeout(() => { button.textContent = label; }, 2500);
+    return { ok: false, message: 'השליחה נכשלה: ' + (e && e.message ? e.message : String(e)) };
+  }
+}
+
+// The admin page sends a table by loading this page in a hidden frame with
+// ?sendpdf=<week>&day=<day or total>&job=<id>: the page shows that table, sends
+// it, and tells the admin page how it went.
+async function runSendPdfJob(params){
+  const job = params.get('job');
+  const report = (ok, message) => { try{ parent.postMessage({ type: 'pdf-job', job, ok, message }, location.origin); } catch(e){} };
+  try{
+    if (document.fonts && document.fonts.ready) await document.fonts.ready;
+    await new Promise(resolve => setTimeout(resolve, 800));
+    const table = document.querySelector('#frequentArchiveView table');
+    const weekEntry = getDisplayArchive().find(e => e.type === 'weekly' && e.weekKey === params.get('sendpdf'));
+    if (!table || !weekEntry){ report(false, 'הטבלה לא נמצאה'); return; }
+    const box = document.querySelector('#frequentArchiveView .archive-date');
+    const label = (box.querySelector('.merged-dropdown-toggle') || {}).textContent || '';
+    const missing = (box.querySelector('.missing-days') || {}).textContent || '';
+    const result = await sendTablePdf(table, 'הנוסע המתמיד · ' + label + (missing ? ' · ' + missing : ''), (text) => report(true, text));
+    report(result.ok, result.message);
+  } catch(e){
+    report(false, 'השליחה נכשלה: ' + (e && e.message ? e.message : String(e)));
   }
 }
 
@@ -4107,8 +4114,6 @@ function renderWeeklyEntryInto(entry, container, allWeeklyEntries){
   entryWrap.className = 'archive-entry';
 
   const weekStartD = new Date(entry.weekStart);
-  const weekEndD = new Date(weekStartD);
-  weekEndD.setDate(weekEndD.getDate() + 6);
 
   // The blue bar: the week picker and the days still missing.
   const dateEl = document.createElement('div');
@@ -4134,17 +4139,6 @@ function renderWeeklyEntryInto(entry, container, allWeeklyEntries){
   }
   dateEl.appendChild(headerGroup);
 
-  // Sends the table as it is shown now (PDF) to the address set in the admin page.
-  const sendBtn = document.createElement('button');
-  sendBtn.className = 'export-btn';
-  sendBtn.textContent = 'שליחה';
-  // Sending needs the same code as editing.
-  sendBtn.addEventListener('click', () => requireArchiveEditAccess(() => {
-    const weekLabel = (dateEl.querySelector('.merged-dropdown-toggle') || {}).textContent || '';
-    const missing = (dateEl.querySelector('.missing-days') || {}).textContent || '';
-    sendTablePdf(table, 'הנוסע המתמיד · ' + weekLabel + (missing ? ' · ' + missing : ''), sendBtn);
-  }));
-  dateEl.appendChild(sendBtn);
 
   entryWrap.appendChild(dateEl);
 
@@ -5021,6 +5015,11 @@ async function initApp(){
     setStatus('טוען…');
     await loadStateUntilConnected();
     lastViewJson = JSON.stringify(state);
+    const pdfJobParams = new URLSearchParams(location.search);
+    if (pdfJobParams.get('sendpdf')){
+      selectedWeeklyKey = pdfJobParams.get('sendpdf');
+      weeklyArchiveViewMode[selectedWeeklyKey] = pdfJobParams.get('day') || 'total';
+    }
     render();
     renderFrequentFlyerView();
     if (new URLSearchParams(location.search).get('view') === 'metivta'){
@@ -5028,6 +5027,7 @@ async function initApp(){
     }
     if (isZ1Page) showZ1();
     setStatus('');
+    if (pdfJobParams.get('sendpdf')) runSendPdfJob(pdfJobParams);
     checkAutoReset();
     scheduleNextAutoResetCheck();
     subscribeToRemoteStateChanges();
