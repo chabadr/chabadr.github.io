@@ -4169,12 +4169,12 @@ function renderWeeklyEntryInto(entry, container, allWeeklyEntries){
     const mode = weeklyArchiveViewMode[entry.weekKey] || 'total';
     if (mode === 'total') return true;
     // One day: no Metivta on Friday; מבצעים only on Friday; the other weekly
-    // columns (היום יום, חת"ת, גאומ"ש) and the parents' updates are only in
-    // the weekly summary.
+    // columns (היום יום, חת"ת, גאומ"ש, מנחה) and the parents' updates are only
+    // in the weekly summary.
     const friday = weeklyDayHasNoMetivta(weekStartD, mode);
     if (f.field === 'metivtaVal') return !friday;
     if (f.field === 'mivtzaim') return friday;
-    if (['hayomYom', 'chitasClass', 'gaomash'].includes(f.field)) return false;
+    if (['hayomYom', 'chitasClass', 'gaomash', 'mincha'].includes(f.field)) return false;
     return !WEEKLY_PARENT_FIELD_DEFS.some(pf => pf.field === f.field);
   });
   const isParentField = (field) => WEEKLY_PARENT_FIELD_DEFS.some(f => f.field === field);
