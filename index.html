@@ -4157,10 +4157,10 @@ function renderWeeklyEntryInto(entry, container, allWeeklyEntries){
 
   const fieldDefs = [
     { field: 'percent', label: '%', kind: 'percent' },
+    { field: 'bonus', label: 'בונוס', kind: 'daily' },
     { field: 'morning', label: 'חסידות', kind: 'daily' },
     { field: 'tefila', label: 'תפילה', kind: 'daily' },
     { field: 'mikvaotVal', label: 'מקוואות', kind: 'daily' },
-    { field: 'bonus', label: 'בונוס', kind: 'daily' },
     { field: 'rambamVal', label: 'רמב"ם', kind: 'daily' },
     { field: 'metivtaVal', label: 'מתיבתא', kind: 'daily' },
     ...WEEKLY_CLASS_FIELD_DEFS,
@@ -4202,6 +4202,7 @@ function renderWeeklyEntryInto(entry, container, allWeeklyEntries){
   // between columns stop there and continue below).
   const groupRow = document.createElement('tr');
   const groupOf = (field) => isParentField(field) ? 'עדכוני הורים'
+    : field === 'bonus' ? ''
     : field === 'rambamVal' ? 'שמעון'
     : field === 'metivtaVal' ? 'חננאל'
     : (WEEKLY_CLASS_FIELD_DEFS.find(f => f.field === field) || { group: 'תורנים' }).group;
