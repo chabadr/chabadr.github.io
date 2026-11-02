@@ -4766,17 +4766,10 @@ function renderTodayHistoryTableNow(container){
     th.style.lineHeight = '1.2';
     if (endsWeek(dayIndex)) th.classList.add('week-end');
     const d = new Date(entry.date);
-    const dateLine = formatHebrewDateShort(d) + (entry.isLive ? ' (היום)' : '');
-    const weekdayLine = d.toLocaleDateString('he-IL', { weekday: 'short' });
+    // The weekday letter and the date on one line, split by a dot.
     const dateSpan = document.createElement('div');
-    dateSpan.textContent = dateLine + (todayArchiveSortIndex === dayIndex ? ' ▼' : '');
-    const weekdaySpan = document.createElement('div');
-    weekdaySpan.textContent = weekdayLine;
-    weekdaySpan.style.fontWeight = '400';
-    weekdaySpan.style.fontSize = '0.75em';
-    weekdaySpan.style.color = 'var(--ink-soft)';
+    dateSpan.textContent = WEEKDAY_LETTERS[d.getDay()] + ' · ' + formatHebrewDateShort(d) + (entry.isLive ? ' (היום)' : '') + (todayArchiveSortIndex === dayIndex ? ' ▼' : '');
     th.appendChild(dateSpan);
-    th.appendChild(weekdaySpan);
     th.addEventListener('click', () => {
       todayArchiveSortIndex = dayIndex;
       todayArchiveSortOrder = null;
