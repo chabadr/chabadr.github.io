@@ -36,7 +36,10 @@ self.addEventListener('fetch', (event) => {
   event.respondWith((async () => {
     const cache = await caches.open(CACHE);
     const fromCache = () => cache.match(req, { ignoreSearch: url.origin === self.location.origin });
-    const fromNetwork = fetch(req).then(res => {
+    // The site's own files are checked with the server every time (GitHub Pages
+    // lets a browser keep a file for 10 minutes, so an update would arrive late).
+    const fresh = url.origin === self.location.origin ? { cache: 'no-cache' } : undefined;
+    const fromNetwork = fetch(req, fresh).then(res => {
       if (res && (res.ok || res.type === 'opaque')) cache.put(req, res.clone());
       return res;
     });
