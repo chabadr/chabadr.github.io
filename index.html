@@ -3357,11 +3357,13 @@ function weeklyDayFieldValue(dayData, field){
 // (0). The value stays in הנוסע המתמיד only - the class archive is not
 // changed. A later edit in the class archive of that day overrides it (see
 // refreshWeeklyFromDay: the later edit of a cell wins).
-const WEEKLY_DAY_FULL_VALUE = { morning: 2, tefila: 3, bonus: 1, mikvaotVal: 2, rambamVal: 2 };
+// מתיבתא: 4 is a full day; clearing it makes the day "no attendance" (-1),
+// which is how the Metivta marks a day nobody attended.
+const WEEKLY_DAY_FULL_VALUE = { morning: 2, tefila: 3, bonus: 1, mikvaotVal: 2, rambamVal: 2, metivtaVal: 4 };
 
 function toggleWeeklyDayCell(weekKey, dayKey, sid, field, current){
   requireArchiveEditAccess(() => {
-    commitOp({ kind: 'weekCell', weekKey, sid, field, target: dayKey, value: current > 0 ? 0 : WEEKLY_DAY_FULL_VALUE[field] });
+    commitOp({ kind: 'weekCell', weekKey, sid, field, target: dayKey, value: current > 0 ? (field === 'metivtaVal' ? -1 : 0) : WEEKLY_DAY_FULL_VALUE[field] });
   });
 }
 
@@ -4301,7 +4303,7 @@ function renderWeeklyEntryInto(entry, container, allWeeklyEntries){
           td.addEventListener('click', () => toggleWeeklyDayCell(entry.weekKey, viewMode, s.id, field, val));
         } else {
           // The weekly summary is taken from the days; מתיבתא from its own table.
-          td.title = field === 'metivtaVal' ? 'מתעדכן מטבלת המתיבתא' : 'מתעדכן מהימים';
+          td.title = 'מתעדכן מהימים';
         }
       }
       tr.appendChild(td);
