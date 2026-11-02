@@ -4133,8 +4133,18 @@ function renderWeeklyEntryInto(entry, container, allWeeklyEntries){
     { field: 'metivtaVal', label: 'מתיבתא', kind: 'daily' },
     ...WEEKLY_CLASS_FIELD_DEFS,
     ...WEEKLY_PARENT_FIELD_DEFS
-  ].filter(f => !(f.field === 'metivtaVal' && (weeklyArchiveViewMode[entry.weekKey] || 'total') !== 'total'
-    && weeklyDayHasNoMetivta(weekStartD, weeklyArchiveViewMode[entry.weekKey])));
+  ].filter(f => {
+    const mode = weeklyArchiveViewMode[entry.weekKey] || 'total';
+    if (mode === 'total') return true;
+    // One day: no Metivta on Friday; מבצעים only on Friday; the other weekly
+    // columns (היום יום, חת"ת, גאומ"ש) and the parents' updates are only in
+    // the weekly summary.
+    const friday = weeklyDayHasNoMetivta(weekStartD, mode);
+    if (f.field === 'metivtaVal') return !friday;
+    if (f.field === 'mivtzaim') return friday;
+    if (['hayomYom', 'chitasClass', 'gaomash'].includes(f.field)) return false;
+    return !WEEKLY_PARENT_FIELD_DEFS.some(pf => pf.field === f.field);
+  });
   const isParentField = (field) => WEEKLY_PARENT_FIELD_DEFS.some(f => f.field === field);
   const firstParentField = WEEKLY_PARENT_FIELD_DEFS[0].field;
 
@@ -4148,7 +4158,9 @@ function renderWeeklyEntryInto(entry, container, allWeeklyEntries){
   }
   table.appendChild(colgroup);
 
-  const currentSortField = weeklyArchiveSortField[entry.weekKey] || 'percent';
+  let currentSortField = weeklyArchiveSortField[entry.weekKey] || 'percent';
+  // A column that is not shown in this view cannot be the sort column.
+  if (!fieldDefs.some(f => f.field === currentSortField)) currentSortField = 'percent';
   const viewMode = weeklyArchiveViewMode[entry.weekKey] || 'total';
   const isDayView = viewMode !== 'total';
 
