@@ -3763,9 +3763,8 @@ function buildWeekDaySelectDropdown(allWeeklyEntries, selectedEntry, ctx){
       subList.appendChild(dayOpt);
     };
 
-    // The detailed report of the week, then its days. (The week's total is the
-    // parsha itself, above.) No Shabbat day, and no day that hasn't come yet.
-    if (ctx === FREQUENT_WEEK_PICKER) addDayOption('detail', 'דוח מפורט');
+    // The week itself is the detailed report (the parsha above); below it its
+    // days. No Shabbat day, and no day that hasn't come yet.
     const today = activityDayStr();
     for (let i = 0; i < 6; i++){
       const d = new Date(weekStartD);
@@ -3782,8 +3781,7 @@ function buildWeekDaySelectDropdown(allWeeklyEntries, selectedEntry, ctx){
   toggle.type = 'button';
   toggle.className = 'merged-dropdown-toggle';
   const weekStartD = new Date(selectedEntry.weekStart);
-  toggle.textContent = currentMode === 'total' ? weeklyEntryLabel(selectedEntry)
-    : currentMode === 'detail' ? weeklyEntryLabel(selectedEntry) + ' · דוח מפורט'
+  toggle.textContent = currentMode === 'total' || currentMode === 'detail' ? weeklyEntryLabel(selectedEntry)
     : weeklyEntryLabel(selectedEntry) + ' · ' + dayLabelWithinWeek(weekStartD, currentMode);
   toggle.addEventListener('click', (e) => {
     e.stopPropagation();
@@ -4117,7 +4115,10 @@ const FILL_SCREEN_MIN_WIDTH = 760;
 
 function renderWeeklyEntryInto(entry, container, allWeeklyEntries, opts){
   opts = opts || {};
-  const entryViewMode = opts.forceTotal ? 'total' : (weeklyArchiveViewMode[entry.weekKey] || 'total');
+  // The week itself ('total') is the detailed report; the old weekly summary
+  // page no longer exists.
+  const chosenMode = opts.forceTotal ? 'total' : (weeklyArchiveViewMode[entry.weekKey] || 'total');
+  const entryViewMode = chosenMode === 'total' ? 'detail' : chosenMode;
   const entryWrap = document.createElement('div');
   entryWrap.className = 'archive-entry';
 
