@@ -205,6 +205,8 @@
   .th-name-text{ display: inline-block; }
   /* The detailed report: the number, and on its left the missing days in two lines. */
   .ff-fit.ff-dwrap{ display: inline-flex; align-items: center; justify-content: center; gap: 0.3em; white-space: nowrap; }
+  /* The numbers of the daily columns line up on the right of their cells. */
+  table.archive-table td.ff-daily-detail{ text-align: right; padding-right: 10px; }
   .ff-dletters{ font-size: 0.45em; line-height: 1.1; color: var(--ink-soft); text-align: start; }
   .th-inner{
     display: flex;
@@ -4361,6 +4363,7 @@ function renderWeeklyEntryInto(entry, container, allWeeklyEntries, opts){
       } else if (isDetail){
         // On the right, big: the points collected in the week. On its left,
         // small and in two lines: the days it was not received.
+        td.classList.add('ff-daily-detail');
         const cell = fitTextSpan(td, '');
         cell.classList.add('ff-dwrap');
         const numEl = document.createElement('span');
