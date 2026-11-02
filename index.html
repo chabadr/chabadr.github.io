@@ -5018,6 +5018,12 @@ function fitAllTextCells(){
 
     fitGroup(bodyItems, 90);
     fitGroup(nameItems, 90, true);
+    // The text in the cells is as large as the names (the smaller of the two
+    // sizes, so that everything still fits in its cell).
+    if (bodyItems.length && nameItems.length){
+      const common = Math.min(parseFloat(bodyItems[0].el.style.fontSize) || 90, parseFloat(nameItems[0].el.style.fontSize) || 90);
+      bodyItems.concat(nameItems).forEach(({ el }) => { el.style.fontSize = common + 'px'; });
+    }
     headerGroups.forEach((items, key) => fitGroup(items, key === 'board' ? 35 : 40));
   });
 }
