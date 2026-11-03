@@ -4333,7 +4333,9 @@ function renderWeeklyEntryInto(entry, container, allWeeklyEntries, opts){
     ...WEEKLY_CLASS_FIELD_DEFS,
     ...WEEKLY_PARENT_FIELD_DEFS
   ].filter(f => {
-    // The current week: the columns filled in once a week are not shown yet.
+    // The current week: the columns filled in once a week are not shown yet, and
+    // neither is the % (the rows are still ordered by it).
+    if (isCurrentWeek && f.kind === 'percent') return false;
     return !(isCurrentWeek && (WEEKLY_CLASS_FIELD_DEFS.some(w => w.field === f.field) || WEEKLY_PARENT_FIELD_DEFS.some(w => w.field === f.field)));
   });
   const isParentField = (field) => WEEKLY_PARENT_FIELD_DEFS.some(f => f.field === field);
@@ -4417,7 +4419,7 @@ function renderWeeklyEntryInto(entry, container, allWeeklyEntries, opts){
   });
   thead.appendChild(trh);
   table.appendChild(thead);
-  const pctTh = headerCells[LEAD];
+  const pctTh = fieldDefs[0].kind === 'percent' ? headerCells[LEAD] : null; // none in the current week
 
   const tbody = document.createElement('tbody');
   const seenIds = new Set();
@@ -4434,7 +4436,7 @@ function renderWeeklyEntryInto(entry, container, allWeeklyEntries, opts){
     // The points the student collected in the week.
     return weeklyDailySum(s, field);
   };
-  const kindOf = (field) => (fieldDefs.find(f => f.field === field) || {}).kind;
+  const kindOf = (field) => field === 'percent' ? 'percent' : (fieldDefs.find(f => f.field === field) || {}).kind;
 
   if (currentSortField){
     const sortSig = entry.weekKey + '|' + viewMode + '|' + currentSortField + '|' + uniqueStudents.length;
@@ -4625,7 +4627,7 @@ function renderWeeklyEntryInto(entry, container, allWeeklyEntries, opts){
       fitSpanGroupToCells(pctSpans, 10, heightFont);
       widenDaily();
       fillScreenHeight();
-      stickLeadingColumns(table, [sameAs.L0, sameAs.L1, sameAs.percent || pctTh.offsetWidth]);
+      stickLeadingColumns(table, pctTh ? [sameAs.L0, sameAs.L1, sameAs.percent || pctTh.offsetWidth] : [sameAs.L0, sameAs.L1]);
       return;
     }
     cols[0].style.width = familyW + 'px';
@@ -4662,7 +4664,7 @@ function renderWeeklyEntryInto(entry, container, allWeeklyEntries, opts){
     fitSpanGroupToCells(pctSpans, 10, heightFont);
     widenDaily();
     fillScreenHeight();
-    stickLeadingColumns(table, [familyW, firstW, pctTh.offsetWidth]);
+    stickLeadingColumns(table, pctTh ? [familyW, firstW, pctTh.offsetWidth] : [familyW, firstW]);
     if (opts.onWidths){
       const w = { L0: cols[0].getBoundingClientRect().width, L1: cols[1].getBoundingClientRect().width };
       fieldDefs.forEach((f, i) => { w[f.field] = cols[LEAD + i].getBoundingClientRect().width; });
