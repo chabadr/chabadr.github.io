@@ -207,10 +207,13 @@
   }
   .th-name-text{ display: inline-block; }
   /* The detailed report: the number, and on its left the missing days in two lines. */
+  .ff-picker-title{ padding: 6px 14px 2px; font-size: 12px; color: var(--ink-soft); font-weight: 700; }
+  .ff-picker-none{ padding: 6px 14px; font-size: 13px; color: var(--ink-soft); }
+  .ff-picker-line{ border-top: 2px solid var(--gold); margin: 6px 0 2px; }
   .ff-fit.ff-dwrap{ display: inline-flex; align-items: center; justify-content: center; gap: 0.3em; white-space: nowrap; }
   /* The numbers of the daily columns line up on the right of their cells. */
   table.archive-table td.ff-daily-detail{ text-align: right; padding-right: 10px; }
-  .ff-dletters{ font-size: 0.45em; line-height: 1.1; color: var(--ink-soft); text-align: start; }
+  .ff-dletters{ font-size: max(7px, 0.45em); line-height: 1.1; color: var(--ink-soft); text-align: start; }
   .th-inner{
     display: flex;
     align-items: center;
@@ -1296,7 +1299,9 @@ function rebuildViewAndRender(){
 function captureRowAnchor(){
   const el = document.elementFromPoint(window.innerWidth / 2, window.innerHeight / 2);
   const tr = el && el.closest ? el.closest('tbody tr') : null;
-  const container = tr && tr.closest('#frequentArchiveView, #todaySummary, #boards, #metivtaView, #z1View');
+  // (Not for הנוסע המתמיד and the archive: their rows never move after an
+  // update, and a page that scrolls by itself after an edit is not wanted.)
+  const container = tr && tr.closest('#boards, #metivtaView, #z1View');
   if (!container) return null;
   const table = tr.closest('table');
   return { containerId: container.id, tableIndex: [...container.querySelectorAll('table')].indexOf(table), key: rowAnchorKey(tr), top: tr.getBoundingClientRect().top };
@@ -3467,21 +3472,73 @@ function weeklyDayFieldValue(dayData, field){
 // which is how the Metivta marks a day nobody attended.
 const WEEKLY_DAY_FULL_VALUE = { morning: 2, tefila: 3, bonus: 1, mikvaotVal: 2, rambamVal: 2, metivtaVal: 4 };
 
-function toggleWeeklyDayCell(weekKey, dayKey, sid, field, current){
-  requireArchiveEditAccess(() => {
-    commitOp({ kind: 'weekCell', weekKey, sid, field, target: dayKey, value: current > 0 ? (field === 'metivtaVal' ? -1 : 0) : WEEKLY_DAY_FULL_VALUE[field] });
-  });
-}
-
-// In the weekly view: on how many days of the week the student did it (not
-// how many points that gave). Metivta counts the days he attended - its
-// stored value is -1 for a day with no attendance.
-function weeklyDaysDone(s, field){
-  return Object.values(s.days || {}).filter(d => {
-    if (!d) return false;
-    if (field === 'metivtaVal') return typeof d.metivtaVal === 'number' && d.metivtaVal >= 0;
-    return (d[field] || 0) > 0;
-  }).length;
+// A day-by-day update of a daily column: the days of the week (so far) on which
+// the student does not have it yet, to update, and under a line the days that
+// are updated, to cancel. Each choice asks for confirmation first; the change
+// stays in הנוסע המתמיד only (a later edit of that day in the class archive
+// overrides it).
+function showDayUpdatePicker(td, entry, s, field){
+  document.querySelectorAll('.ff-value-picker').forEach(el => el.remove());
+  const weekStartD = new Date(entry.weekStart);
+  const today = activityDayStr();
+  const missing = [], done = [];
+  for (let i = 0; i < 6; i++){
+    const d = new Date(weekStartD);
+    d.setDate(d.getDate() + i);
+    const key = dayKeyOf(d.toISOString());
+    if (key >= today) break;
+    if (i === FRIDAY_INDEX && field === 'metivtaVal') continue;
+    const dd = (s.days || {})[key] || {};
+    const isDone = field === 'metivtaVal' ? (typeof dd.metivtaVal === 'number' && dd.metivtaVal >= 0) : (dd[field] || 0) > 0;
+    (isDone ? done : missing).push({ key, label: WEEKDAY_LETTERS[i] + ' · ' + formatHebrewDateShort(d), points: weeklyDayFieldValue(dd, field) });
+  }
+  const name = metivtaFullName(s.id, false);
+  const fieldLabel = editLogFieldLabel(field);
+  const points = WEEKLY_DAY_FULL_VALUE[field];
+  const list = document.createElement('div');
+  list.className = 'merged-dropdown-list ff-value-picker open';
+  const addTitle = (text) => {
+    const t = document.createElement('div');
+    t.className = 'ff-picker-title';
+    t.textContent = text;
+    list.appendChild(t);
+  };
+  const addOption = (label, onClick) => {
+    const opt = document.createElement('div');
+    opt.className = 'merged-dropdown-option';
+    opt.textContent = label;
+    opt.addEventListener('click', (e) => {
+      e.stopPropagation();
+      list.remove();
+      onClick();
+    });
+    list.appendChild(opt);
+  };
+  addTitle('לעדכון:');
+  if (!missing.length){
+    const none = document.createElement('div');
+    none.className = 'ff-picker-none';
+    none.textContent = 'אין ימים לא מעודכנים';
+    list.appendChild(none);
+  }
+  missing.forEach(day => addOption(day.label, () => showModal(
+    'לעדכן ' + fieldLabel + ' של ' + name + ' ליום ' + day.label + '?\nיתווספו ' + points + (points === 1 ? ' נקודה.' : ' נקודות.'),
+    { confirmText: 'עדכון', onConfirm: () => commitOp({ kind: 'weekCell', weekKey: entry.weekKey, sid: s.id, field, target: day.key, value: points }) }
+  )));
+  if (done.length){
+    const line = document.createElement('div');
+    line.className = 'ff-picker-line';
+    list.appendChild(line);
+    addTitle('לביטול:');
+    done.forEach(day => addOption(day.label, () => showModal(
+      'לבטל ' + fieldLabel + ' של ' + name + ' ביום ' + day.label + '?\nיורדו ' + day.points + (day.points === 1 ? ' נקודה.' : ' נקודות.'),
+      { confirmText: 'ביטול היום', cancelText: 'השארה', onConfirm: () => commitOp({ kind: 'weekCell', weekKey: entry.weekKey, sid: s.id, field, target: day.key, value: field === 'metivtaVal' ? -1 : 0 }) }
+    )));
+  }
+  list.addEventListener('click', (e) => e.stopPropagation());
+  document.body.appendChild(list);
+  placeDropdownListFixed(td, list);
+  list.style.minWidth = Math.max(td.offsetWidth, 120) + 'px';
 }
 
 // The detailed report: the letters of the school days (so far) on which the
@@ -3813,7 +3870,7 @@ function buildWeekDaySelectDropdown(allWeeklyEntries, selectedEntry, ctx){
     const isSelectedWeek = weekEntry.weekKey === selectedEntry.weekKey;
 
     const parshaRow = document.createElement('div');
-    parshaRow.className = 'parsha-option' + (isSelectedWeek ? ' open' : '');
+    parshaRow.className = 'parsha-option' + (isSelectedWeek && ctx !== FREQUENT_WEEK_PICKER ? ' open' : '');
 
     const parshaMain = document.createElement('div');
     parshaMain.className = 'merged-dropdown-option parsha-option-main';
@@ -3828,15 +3885,20 @@ function buildWeekDaySelectDropdown(allWeeklyEntries, selectedEntry, ctx){
       ctx.select(weekEntry.weekKey, 'total');
     });
 
-    const expandBtn = document.createElement('span');
-    expandBtn.className = 'parsha-option-caret';
-    expandBtn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      const alreadyOpen = parshaRow.classList.contains('open');
-      list.querySelectorAll('.parsha-option.open').forEach(p => p.classList.remove('open'));
-      if (!alreadyOpen) parshaRow.classList.add('open');
-    });
-    parshaMain.appendChild(expandBtn);
+    // הנוסע המתמיד has no tables by day: a week is just the week. (The ז1 page
+    // still opens a list of the week's days.)
+    const hasDays = ctx !== FREQUENT_WEEK_PICKER;
+    if (hasDays){
+      const expandBtn = document.createElement('span');
+      expandBtn.className = 'parsha-option-caret';
+      expandBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const alreadyOpen = parshaRow.classList.contains('open');
+        list.querySelectorAll('.parsha-option.open').forEach(p => p.classList.remove('open'));
+        if (!alreadyOpen) parshaRow.classList.add('open');
+      });
+      parshaMain.appendChild(expandBtn);
+    }
 
     parshaRow.appendChild(parshaMain);
 
@@ -3859,14 +3921,14 @@ function buildWeekDaySelectDropdown(allWeeklyEntries, selectedEntry, ctx){
     // The week itself is the detailed report (the parsha above); below it its
     // days. No Shabbat day, and no day that hasn't come yet.
     const today = activityDayStr();
-    for (let i = 0; i < 6; i++){
+    for (let i = 0; hasDays && i < 6; i++){
       const d = new Date(weekStartD);
       d.setDate(d.getDate() + i);
       const key = dayKeyOf(d.toISOString());
       if (key > today) break;
       addDayOption(key, WEEKDAY_LETTERS[i] + ' · ' + formatHebrewDateShort(d));
     }
-    parshaRow.appendChild(subList);
+    if (hasDays) parshaRow.appendChild(subList);
     list.appendChild(parshaRow);
   });
 
@@ -4208,10 +4270,9 @@ const FILL_SCREEN_MIN_WIDTH = 760;
 
 function renderWeeklyEntryInto(entry, container, allWeeklyEntries, opts){
   opts = opts || {};
-  // The week itself ('total') is the detailed report; the old weekly summary
-  // page no longer exists.
-  const chosenMode = opts.forceTotal ? 'total' : (weeklyArchiveViewMode[entry.weekKey] || 'total');
-  const entryViewMode = chosenMode === 'total' ? 'detail' : chosenMode;
+  // A week is shown as the detailed report - there is no weekly summary page
+  // and no table by day. opts.showAllColumns (the off-screen probe that
+  // measures the column widths) shows the weekly columns of the current week too.
   const entryWrap = document.createElement('div');
   entryWrap.className = 'archive-entry';
 
@@ -4239,11 +4300,7 @@ function renderWeeklyEntryInto(entry, container, allWeeklyEntries, opts){
     headerGroup.appendChild(sep2);
     const missingEl = document.createElement('span');
     missingEl.className = 'missing-days';
-    // On a day that is missing data: in brackets, who still has to fill it in.
-    missingEl.textContent = 'ימים חסרים: ' + missingDays.map(m => {
-      const letter = WEEKDAY_LETTERS[HEBREW_WEEKDAY_NAMES.indexOf(m.name)] || m.name;
-      return m.key === entryViewMode ? letter + ' (' + m.who.join(', ') + ')' : letter;
-    }).join(', ');
+    missingEl.textContent = 'ימים חסרים: ' + missingDays.map(m => WEEKDAY_LETTERS[HEBREW_WEEKDAY_NAMES.indexOf(m.name)] || m.name).join(', ');
     headerGroup.appendChild(missingEl);
   }
   titleColumn.appendChild(headerGroup);
@@ -4261,7 +4318,7 @@ function renderWeeklyEntryInto(entry, container, allWeeklyEntries, opts){
   table.style.tableLayout = 'fixed';
   table.style.width = wide ? '100%' : 'max-content';
 
-  const isCurrentWeek = entry.weekKey === getWeekKey(new Date(activityDayStr() + 'T12:00:00'));
+  const isCurrentWeek = !opts.showAllColumns && entry.weekKey === getWeekKey(new Date(activityDayStr() + 'T12:00:00'));
   const fieldDefs = [
     { field: 'percent', label: '%', kind: 'percent' },
     { field: 'bonus', label: 'בונוס', kind: 'daily' },
@@ -4273,18 +4330,8 @@ function renderWeeklyEntryInto(entry, container, allWeeklyEntries, opts){
     ...WEEKLY_CLASS_FIELD_DEFS,
     ...WEEKLY_PARENT_FIELD_DEFS
   ].filter(f => {
-    const mode = entryViewMode;
     // The current week: the columns filled in once a week are not shown yet.
-    if (isCurrentWeek && (WEEKLY_CLASS_FIELD_DEFS.some(w => w.field === f.field) || WEEKLY_PARENT_FIELD_DEFS.some(w => w.field === f.field))) return false;
-    if (mode === 'total' || mode === 'detail') return true;
-    // One day: no Metivta on Friday; מבצעים only on Friday; the other weekly
-    // columns (היום יום, חת"ת, גאומ"ש, מנחה) and the parents' updates are only
-    // in the weekly summary.
-    const friday = weeklyDayHasNoMetivta(weekStartD, mode);
-    if (f.field === 'metivtaVal') return !friday;
-    if (f.field === 'mivtzaim') return friday;
-    if (['hayomYom', 'chitasClass', 'gaomash', 'mincha'].includes(f.field)) return false;
-    return !WEEKLY_PARENT_FIELD_DEFS.some(pf => pf.field === f.field);
+    return !(isCurrentWeek && (WEEKLY_CLASS_FIELD_DEFS.some(w => w.field === f.field) || WEEKLY_PARENT_FIELD_DEFS.some(w => w.field === f.field)));
   });
   const isParentField = (field) => WEEKLY_PARENT_FIELD_DEFS.some(f => f.field === field);
   const firstParentField = WEEKLY_PARENT_FIELD_DEFS[0].field;
@@ -4304,10 +4351,8 @@ function renderWeeklyEntryInto(entry, container, allWeeklyEntries, opts){
   let currentSortField = weeklyArchiveSortField[entry.weekKey] || 'percent';
   // A column that is not shown in this view cannot be the sort column.
   if (!fieldDefs.some(f => f.field === currentSortField)) currentSortField = 'percent';
-  const viewMode = entryViewMode;
-  // The detailed report: the weekly table, with the days in the daily cells.
-  const isDetail = viewMode === 'detail';
-  const isDayView = viewMode !== 'total' && !isDetail;
+  const viewMode = 'detail';
+  const isDetail = true;
 
   const thead = document.createElement('thead');
   // Who is in charge of each group of columns: a thin row on top of the
@@ -4383,10 +4428,8 @@ function renderWeeklyEntryInto(entry, container, allWeeklyEntries, opts){
   const getFieldVal = (s, field, kind) => {
     if (kind === 'percent') return weeklyPercent(s);
     if (kind === 'weekly-number' || kind === 'weekly-bool') return weeklyFieldPoints(s, defOf(field));
-    // The detailed report shows the points the student collected in the week.
-    if (isDetail) return weeklyDailySum(s, field);
-    if (!isDayView) return weeklyDaysDone(s, field);
-    return weeklyDayFieldValue((s.days || {})[viewMode], field);
+    // The points the student collected in the week.
+    return weeklyDailySum(s, field);
   };
   const kindOf = (field) => (fieldDefs.find(f => f.field === field) || {}).kind;
 
@@ -4481,18 +4524,16 @@ function renderWeeklyEntryInto(entry, container, allWeeklyEntries, opts){
           cell.appendChild(lettersEl);
         }
         detailSpans.push(cell);
-        td.title = 'מתעדכן מהימים';
+        // A click opens the days of this column that are not updated yet (and
+        // below them the updated ones, to cancel).
+        td.style.cursor = 'pointer';
+        td.title = 'לחיצה: עדכון או ביטול של ימים';
+        td.addEventListener('click', (e) => {
+          e.stopPropagation();
+          requireArchiveEditAccess(() => showDayUpdatePicker(td, entry, s, field));
+        });
       } else {
         valueSpans.push(fitTextSpan(td, val || ''));
-        if (isDayView && WEEKLY_DAY_FULL_VALUE[field] !== undefined && viewMode < activityDayStr()){
-          // One day: a click puts the value, another click clears it.
-          td.style.cursor = 'pointer';
-          td.title = 'לחיצה מכניסה את הערך, לחיצה נוספת מבטלת';
-          td.addEventListener('click', () => toggleWeeklyDayCell(entry.weekKey, viewMode, s.id, field, val));
-        } else {
-          // The weekly summary is taken from the days; מתיבתא from its own table.
-          td.title = 'מתעדכן מהימים';
-        }
       }
       tr.appendChild(td);
     });
@@ -4525,7 +4566,26 @@ function renderWeeklyEntryInto(entry, container, allWeeklyEntries, opts){
     fitSpanGroupToCells(nameSpans, 12, heightFont, 6);
     fitSpanGroupToCells(valueSpans, 12, heightFont);
     fitSpanGroupToCells(pctSpans, 10, heightFont);
-    fitSpanGroupToCells(detailSpans, 10, heightFont);
+    // The small letters of the missing days are never under 7px (their size
+    // is 0.45 of the number's): the number is at least 16px, and a daily column
+    // that is too narrow for that is widened - the table is then wider than the
+    // screen and scrolls sideways.
+    const minDetailFont = 16;
+    const dailyIdx = fieldDefs.map((f, i) => f.kind === 'daily' ? LEAD + i : -1).filter(i => i >= 0);
+    const widenDaily = () => {
+      if (!detailSpans.length) return;
+      fitSpanGroupToCells(detailSpans, minDetailFont, Math.max(minDetailFont, heightFont));
+      const need = Math.ceil(Math.max(...detailSpans.map(sp => sp.offsetWidth)) + 20);
+      const widths = cols.map(c => c.getBoundingClientRect().width);
+      let widened = false;
+      dailyIdx.forEach(i => { if (widths[i] < need){ widths[i] = need; widened = true; } });
+      if (!widened) return;
+      cols.forEach((c, i) => { c.style.width = Math.round(widths[i] * 100) / 100 + 'px'; });
+      const total = widths.reduce((a, b) => a + b, 0);
+      if (total > table.parentElement.clientWidth) table.style.width = total + 'px';
+      fitSpanGroupToCells(detailSpans, minDetailFont, Math.max(minDetailFont, heightFont));
+    };
+    fitSpanGroupToCells(detailSpans, minDetailFont, Math.max(minDetailFont, heightFont));
     // Settles the rows to exactly the screen's height (the text is made a bit
     // smaller if the header ended up taller than expected).
     const fillScreenHeight = () => {
@@ -4549,8 +4609,9 @@ function renderWeeklyEntryInto(entry, container, allWeeklyEntries, opts){
     const familyW = columnWidth(familySpans, headerSpans[0]);
     const firstW = columnWidth(firstSpans, headerSpans[1]);
     const nameW = familyW + firstW;
-    // A single day uses exactly the column widths of the week summary.
-    const sameAs = isDayView && !opts.forceTotal ? weekSummaryColumnWidths(entry, allWeeklyEntries, container) : null;
+    // The current week has fewer columns: its columns are no wider than they
+    // are in the other weeks (it does not stretch over the whole screen).
+    const sameAs = isCurrentWeek ? weekSummaryColumnWidths(entry, allWeeklyEntries, container) : null;
     if (sameAs){
       fieldDefs.forEach((f, i) => { if (sameAs[f.field]) cols[LEAD + i].style.width = sameAs[f.field] + 'px'; });
       cols[0].style.width = sameAs.L0 + 'px';
@@ -4559,7 +4620,7 @@ function renderWeeklyEntryInto(entry, container, allWeeklyEntries, opts){
       fitSpanGroupToCells(headerSpans.slice(LEAD), 9, 16);
       fitSpanGroupToCells(valueSpans, 12, heightFont);
       fitSpanGroupToCells(pctSpans, 10, heightFont);
-      fitSpanGroupToCells(detailSpans, 10, heightFont);
+      widenDaily();
       fillScreenHeight();
       stickLeadingColumns(table, [sameAs.L0, sameAs.L1, sameAs.percent || pctTh.offsetWidth]);
       return;
@@ -4596,7 +4657,7 @@ function renderWeeklyEntryInto(entry, container, allWeeklyEntries, opts){
     fitSpanGroupToCells(headerSpans.slice(LEAD), 9, 16);
     fitSpanGroupToCells(valueSpans, 12, heightFont);
     fitSpanGroupToCells(pctSpans, 10, heightFont);
-    fitSpanGroupToCells(detailSpans, 10, heightFont);
+    widenDaily();
     fillScreenHeight();
     stickLeadingColumns(table, [familyW, firstW, pctTh.offsetWidth]);
     if (opts.onWidths){
@@ -4629,20 +4690,34 @@ function renderWeeklyEntryInto(entry, container, allWeeklyEntries, opts){
         if (entryWrap.offsetHeight <= window.innerHeight) break;
       }
     }
+    // The missing days under 7px are not readable: a daily column that is too
+    // narrow for them is widened.
+    if (detailSpans.length){
+      detailSpans.forEach(sp => { sp.style.fontSize = ''; });
+      const need = Math.ceil(Math.max(...detailSpans.map(sp => sp.offsetWidth)) + 20);
+      fieldDefs.forEach((f, i) => {
+        if (f.kind !== 'daily') return;
+        const col = cols[LEAD + i];
+        if ((parseFloat(col.style.width) || 0) < need){
+          col.style.width = need + 'px';
+          if (headerCells[LEAD + i]) headerCells[LEAD + i].style.width = need + 'px';
+        }
+      });
+    }
     // On a narrow screen only the two names stay in place (the % scrolls).
     stickLeadingColumns(table, [familyTh.offsetWidth, firstNameTh.offsetWidth]);
   }
 }
 
-// The column widths of the week summary (laid out off-screen), so a single
-// day's table can use the very same widths.
+// The column widths of a week with all its columns (laid out off-screen), so
+// the current week - which has fewer columns - can use the very same widths.
 function weekSummaryColumnWidths(entry, allWeeklyEntries, container){
   const probe = document.createElement('div');
   probe.className = container.className;
   probe.style.cssText = 'position:absolute;visibility:hidden;pointer-events:none;left:0;top:0;width:' + container.getBoundingClientRect().width + 'px';
   document.body.appendChild(probe);
   let widths = null;
-  try{ renderWeeklyEntryInto(entry, probe, allWeeklyEntries, { forceTotal: true, onWidths: w => { widths = w; } }); }
+  try{ renderWeeklyEntryInto(entry, probe, allWeeklyEntries, { showAllColumns: true, onWidths: w => { widths = w; } }); }
   finally{ probe.remove(); }
   return widths;
 }
