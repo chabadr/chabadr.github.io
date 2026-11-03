@@ -851,12 +851,8 @@ async function renderPhonesTab(container){
         name.className = 'send-pdf-name';
         name.textContent = weekLabel(w);
         line.appendChild(name);
+        // A week is sent as its detailed report (there are no tables by day).
         const choices = [{ label: 'דוח מפורט', day: 'total' }];
-        const start = new Date(w.weekStart || w.weekKey + 'T12:00:00');
-        for (let i = 0; i < 6; i++){
-          const d = new Date(start); d.setHours(12, 0, 0, 0); d.setDate(d.getDate() + i);
-          if (dayKeyOf(d) < today) choices.push({ label: WEEKDAY_LETTERS[i], day: dayKeyOf(d) });
-        }
         choices.forEach(c => {
           const b = document.createElement('button');
           b.type = 'button';
