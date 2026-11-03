@@ -752,24 +752,6 @@
     col:not(.col-hide-narrow){ width: 33.33% !important; }
   }
 
-  .lock-input{
-    width: 100%;
-    font-family: 'Rubik', sans-serif;
-    font-size: 20px;
-    text-align: center;
-    letter-spacing: 4px;
-    padding: 12px;
-    border: 1.5px solid var(--line);
-    border-radius: var(--radius);
-    margin-bottom: 10px;
-    background: var(--paper);
-    color: var(--ink);
-  }
-  .lock-input:focus{
-    outline: none;
-    border-color: var(--gold);
-  }
-
   .code-overlay{ position: fixed; inset: 0; z-index: 400; background: transparent; }
   .code-box-mini{
     position: absolute; left: 12px; bottom: 12px;
@@ -794,12 +776,6 @@
     background: #fff; color: var(--ink); cursor: pointer;
   }
   .mini-keypad button:active{ background: var(--gold-bg); }
-  .lock-error{
-    color: var(--danger);
-    font-size: 13px;
-    min-height: 18px;
-    margin-bottom: 10px;
-  }
 </style>
 </head>
 <body>
@@ -939,10 +915,6 @@ function setMetivtaClassValue(id, isExtra, value){
   commitOp({ kind: 'mclass', group: isExtra ? 'extra' : 'main', sid: id, value });
 }
 
-function metivtaStudentName(id){
-  return metivtaFullName(id, false);
-}
-
 const TOTAL_STUDENTS = 23;
 const STORAGE_KEY = 'classroom-points-v1';
 const FIRESTORE_COLLECTION = 'classroom_points';
@@ -1049,10 +1021,6 @@ const METIVTA_EXTRA_NAMES = [
   'יהונתן', 'נריה', 'יהודה', 'חסדיאל', 'אוריאל', 'מענדל', 'שניאור', 'מענדי דר.', 'מענדי זכ.', 'עוזי', 'מענדי יא.',
   'אופיר', 'לוי', 'מענדי מז.', 'מענדי מע.', 'אברמי', 'שמואל', 'מענדי סמ.', 'ברוכי', 'איזיק', 'בער', 'רמי', 'ניתאי'
 ];
-
-function metivtaExtraName(id){
-  return metivtaFullName(id, true);
-}
 
 function defaultState(){
   const students = [];
@@ -2652,20 +2620,11 @@ async function lookupMissingParshaNames(weeklyEntries){
 const WEEKLY_EXPECTED_DAY_FIELDS = ['morning', 'tefila', 'mikvaotVal', 'rambamVal', 'metivtaVal'];
 const FRIDAY_INDEX = 5;
 
-function weeklyDayHasNoMetivta(weekStartD, dayKeyStr){
-  return Math.round((new Date(dayKeyStr).getTime() - new Date(dayKeyOf(weekStartD.toISOString())).getTime()) / 86400000) === FRIDAY_INDEX;
-}
-
 // School days are Sunday-Friday. A past day counts as missing when any of its
 // expected columns is empty for every student (no data for the day at all
 // included); days from today on (still live or in the future) are never listed.
-// Who fills in each daily column (the names over the columns of the table).
-function dailyFieldResponsible(field){
-  return field === 'rambamVal' ? 'שמעון' : field === 'metivtaVal' ? 'חננאל' : 'תורנים';
-}
-
-// The missing days as { name, key, who }: who = those in charge of the
-// columns that are empty on that day.
+// The missing days as { name, key, columns, everything }: the columns that are
+// empty on that day, and whether all of them are.
 function weekMissingDays(entry){
   const weekStartD = new Date(entry.weekStart);
   const today = todayStr();
@@ -2680,7 +2639,7 @@ function weekMissingDays(entry){
     const filled = (f) => students.some(s => ((s.days || {})[k] || {})[f] > 0);
     const empty = fields.filter(f => !filled(f));
     // columns: the columns that are empty that day; everything: all of them are.
-    if (empty.length) missing.push({ name: HEBREW_WEEKDAY_NAMES[i], key: k, who: [...new Set(empty.map(dailyFieldResponsible))], columns: empty.map(editLogFieldLabel), everything: empty.length === fields.length });
+    if (empty.length) missing.push({ name: HEBREW_WEEKDAY_NAMES[i], key: k, columns: empty.map(editLogFieldLabel), everything: empty.length === fields.length });
   }
   return missing;
 }
@@ -4367,8 +4326,6 @@ function renderWeeklyEntryInto(entry, container, allWeeklyEntries, opts){
   const entryWrap = document.createElement('div');
   entryWrap.className = 'archive-entry';
 
-  const weekStartD = new Date(entry.weekStart);
-
   // The blue bar: the week picker and the days still missing.
   const dateEl = document.createElement('div');
   dateEl.className = 'archive-date weekly-header-row weekly-header-row-nowrap';
@@ -5447,7 +5404,6 @@ async function initApp(){
     const pdfJobParams = new URLSearchParams(location.search);
     if (pdfJobParams.get('sendpdf')){
       selectedWeeklyKey = pdfJobParams.get('sendpdf');
-      weeklyArchiveViewMode[selectedWeeklyKey] = pdfJobParams.get('day') || 'total';
     }
     render();
     renderFrequentFlyerView();

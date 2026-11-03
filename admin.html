@@ -979,8 +979,6 @@ async function renderPhonesTab(container){
     pdfCard.appendChild(sendMenu);
     container.appendChild(pdfCard);
 
-    const WEEKDAY_LETTERS = ['א', 'ב', 'ג', 'ד', 'ה', 'ו'];
-    const dayKeyOf = (d) => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
     const weekLabel = (w) => {
       let cache = {};
       try{ cache = JSON.parse(localStorage.getItem('parshaNamesV1')) || {}; } catch(e){}
@@ -996,7 +994,6 @@ async function renderPhonesTab(container){
       weeks.sort((a, b) => (a.weekKey < b.weekKey ? 1 : -1));
       sendMenu.innerHTML = '';
       if (!weeks.length){ sendMenu.textContent = 'אין עדיין שבועות בארכיון.'; return; }
-      const today = dayKeyOf(new Date());
       weeks.forEach(w => {
         const line = document.createElement('div');
         line.className = 'send-pdf-week';
