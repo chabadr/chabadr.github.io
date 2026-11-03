@@ -2669,7 +2669,8 @@ function weekMissingDays(entry){
     const fields = WEEKLY_EXPECTED_DAY_FIELDS.filter(f => !(i === FRIDAY_INDEX && f === 'metivtaVal'));
     const filled = (f) => students.some(s => ((s.days || {})[k] || {})[f] > 0);
     const empty = fields.filter(f => !filled(f));
-    if (empty.length) missing.push({ name: HEBREW_WEEKDAY_NAMES[i], key: k, who: [...new Set(empty.map(dailyFieldResponsible))] });
+    // columns: the columns that are empty that day; everything: all of them are.
+    if (empty.length) missing.push({ name: HEBREW_WEEKDAY_NAMES[i], key: k, who: [...new Set(empty.map(dailyFieldResponsible))], columns: empty.map(editLogFieldLabel), everything: empty.length === fields.length });
   }
   return missing;
 }
@@ -4180,7 +4181,7 @@ function renderZ1ViewNow(){
     group.appendChild(sep2);
     const m = document.createElement('span');
     m.className = 'missing-days';
-    m.textContent = 'ימים חסרים: ' + missing.join(', ');
+    m.textContent = 'חסר: ' + missing.join(', ');
     group.appendChild(m);
   }
   dateEl.appendChild(group);
@@ -4300,7 +4301,9 @@ function renderWeeklyEntryInto(entry, container, allWeeklyEntries, opts){
     headerGroup.appendChild(sep2);
     const missingEl = document.createElement('span');
     missingEl.className = 'missing-days';
-    missingEl.textContent = 'ימים חסרים: ' + missingDays.map(m => WEEKDAY_LETTERS[HEBREW_WEEKDAY_NAMES.indexOf(m.name)] || m.name).join(', ');
+    // "חסר: א (תפילה, רמב"ם), ב (הכל)" - after each day, in brackets, the columns
+    // that are missing that day.
+    missingEl.textContent = 'חסר: ' + missingDays.map(m => (WEEKDAY_LETTERS[HEBREW_WEEKDAY_NAMES.indexOf(m.name)] || m.name) + ' (' + (m.everything ? 'הכל' : m.columns.join(', ')) + ')').join(', ');
     headerGroup.appendChild(missingEl);
   }
   titleColumn.appendChild(headerGroup);
