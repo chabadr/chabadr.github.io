@@ -3759,8 +3759,8 @@ async function runSendPdfJob(params){
     if (!table || !weekEntry){ report(false, 'הטבלה לא נמצאה'); return; }
     const box = document.querySelector('#frequentArchiveView .archive-date');
     const label = (box.querySelector('.merged-dropdown-toggle') || {}).textContent || '';
-    const missing = (box.querySelector('.missing-days') || {}).textContent || '';
-    const result = await sendTablePdf(table, 'הנוסע המתמיד · ' + label + (missing ? ' · ' + missing : ''), (text) => report(true, text));
+    // (The list of what is missing is shown on the screen only, not in the PDF.)
+    const result = await sendTablePdf(table, 'הנוסע המתמיד · ' + label, (text) => report(true, text));
     report(result.ok, result.message);
   } catch(e){
     report(false, 'השליחה נכשלה: ' + (e && e.message ? e.message : String(e)));
