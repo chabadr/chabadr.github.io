@@ -155,10 +155,13 @@
   table.archive-table th:first-child{ white-space: nowrap; }
   table.archive-table tr:nth-child(even){ background: #FCFBF6; }
   table.archive-table th.week-end, table.archive-table td.week-end{ border-left: 3px solid var(--gold); }
-  /* The fixed columns are not "sticky": they are moved by a script while the
-     table scrolls sideways (see stickLeadingColumns). On an iPhone the text of
-     sticky cells disappeared when the page was scrolled up and down. */
-  table.archive-table .sticky-col{ position: relative; z-index: 1; background: #fff; }
+  /* The fixed columns (see stickLeadingColumns) are a table of their own next to
+     the scrolling one - not "sticky" cells, whose text disappeared on an iPhone
+     when the page was scrolled up and down. */
+  table.archive-table .sticky-col{ background: #fff; }
+  .pin-split{ display: flex; align-items: flex-start; width: 100%; }
+  .pin-split > .table-scroll{ flex: 1 1 0; min-width: 0; }
+  .pin-split > table.pin-table{ flex: none; width: auto; }
   table.archive-table tr:nth-child(even) td.sticky-col{ background: #FCFBF6; }
   table.archive-table th.sticky-col{ background: var(--paper-dark); z-index: 11; }
   table.archive-table .sticky-col-last{ box-shadow: inset 1px 0 0 var(--line); }
@@ -4053,10 +4056,16 @@ function textColumnWidth(texts, headerLabel, padding){
 
 // The leading (name) columns stay in place while the rest of the table
 // scrolls sideways under them. widths: each sticky column's width in px.
+// The first columns of a table that scrolls sideways stay in place. They are
+// moved (cells and all, so they keep working) into a table of their own that
+// stands next to the scrolling one - there is no position: sticky and no script
+// that follows the scrolling. The rows of the two tables are kept the same
+// height. Nothing is done when the table fits (nothing scrolls).
 function stickLeadingColumns(table, widths){
+  const rows = [...table.rows];
+  const pinnedByRow = rows.map(() => []);
   const taken = []; // columns still covered by a tall cell from a row above
-  const pinned = [];
-  [...table.rows].forEach(tr => {
+  rows.forEach((tr, rowIndex) => {
     let column = 0;
     const next = [];
     taken.forEach((n, c) => { if (n > 1) next[c] = n - 1; });
@@ -4069,39 +4078,87 @@ function stickLeadingColumns(table, widths){
       if (column + span > widths.length) break; // reaches past the fixed columns
       cell.classList.add('sticky-col');
       if (column + span === widths.length) cell.classList.add('sticky-col-last');
-      pinned.push(cell);
+      pinnedByRow[rowIndex].push(cell);
       column += span;
     }
     taken.length = 0;
     next.forEach((n, c) => { taken[c] = n; });
   });
-  pinColumnsWhileScrolling(table, pinned);
-}
-
-// The fixed columns stay in place while the table scrolls sideways: they are
-// moved by as much as the table has moved (no position: sticky, whose text
-// disappeared on an iPhone when the page was scrolled up and down).
-function pinColumnsWhileScrolling(table, cells){
-  const attach = () => {
+  // (The table can still be on its way into the page.)
+  const run = () => {
     const scroller = table.closest('.table-scroll');
-    if (!scroller) return false;
-    const update = () => {
-      let dx = 0;
-      if (scroller.scrollWidth > scroller.clientWidth + 1){
-        dx = Math.round(scroller.getBoundingClientRect().right - table.getBoundingClientRect().right);
-        if (dx > 0) dx = 0;
-      }
-      const value = dx ? 'translateX(' + dx + 'px)' : '';
-      cells.forEach(cell => { cell.style.transform = value; });
-    };
-    if (scroller._pinHandler) scroller.removeEventListener('scroll', scroller._pinHandler);
-    scroller._pinHandler = update;
-    scroller.addEventListener('scroll', update, { passive: true });
-    update();
+    if (!scroller || !table.isConnected) return false;
+    splitPinnedColumns(table, scroller, widths, rows, pinnedByRow);
     return true;
   };
-  // (A table can still be on its way into the page when its columns are fixed.)
-  if (!attach()) requestAnimationFrame(() => { if (!attach()) setTimeout(attach, 100); });
+  if (!run()) requestAnimationFrame(() => { if (!run()) setTimeout(run, 100); });
+}
+
+function splitPinnedColumns(table, scroller, widths, rows, pinnedByRow){
+  if (table._pinned || table.dataset.noPin || new URLSearchParams(location.search).get('sendpdf')) return;
+  if (scroller.scrollWidth <= scroller.clientWidth + 1) return; // it all fits
+  const pinnedWidth = widths.reduce((a, w) => a + w, 0);
+  const pinTable = document.createElement('table');
+  pinTable.className = table.className + ' pin-table';
+  pinTable.style.tableLayout = 'fixed';
+  pinTable.style.width = pinnedWidth + 'px';
+  for (let i = 0; i < table.style.length; i++){ // (the archive's text size is a custom property)
+    const name = table.style[i];
+    if (name.startsWith('--')) pinTable.style.setProperty(name, table.style.getPropertyValue(name));
+  }
+  const colgroup = document.createElement('colgroup');
+  widths.forEach(w => {
+    const col = document.createElement('col');
+    col.style.width = w + 'px';
+    colgroup.appendChild(col);
+  });
+  pinTable.appendChild(colgroup);
+  const sections = new Map();
+  const pinRows = rows.map((tr, i) => {
+    let section = sections.get(tr.parentNode);
+    if (!section){
+      section = document.createElement(tr.parentNode.tagName.toLowerCase());
+      sections.set(tr.parentNode, section);
+      pinTable.appendChild(section);
+    }
+    const ptr = document.createElement('tr');
+    ptr.className = tr.className;
+    Object.assign(ptr.dataset, tr.dataset);
+    pinnedByRow[i].forEach(cell => ptr.appendChild(cell));
+    section.appendChild(ptr);
+    return ptr;
+  });
+  // The scrolling table no longer has those columns.
+  const own = table.querySelector('colgroup');
+  if (own) for (let i = 0; i < widths.length && own.firstElementChild; i++) own.removeChild(own.firstElementChild);
+  const w = table.style.width;
+  const px = /^([\d.]+)px$/.exec(w);
+  const maxed = /^max\(100%,\s*([\d.]+)px\)$/.exec(w);
+  if (px) table.style.width = Math.max(0, parseFloat(px[1]) - pinnedWidth) + 'px';
+  else if (maxed) table.style.width = 'max(100%, ' + Math.max(0, parseFloat(maxed[1]) - pinnedWidth) + 'px)';
+  const split = document.createElement('div');
+  split.className = 'pin-split';
+  scroller.parentNode.insertBefore(split, scroller);
+  split.appendChild(pinTable);
+  split.appendChild(scroller);
+  table._pinned = pinTable;
+  // The two tables' rows are always the same height.
+  let queued = false;
+  const sync = () => {
+    queued = false;
+    rows.forEach((tr, i) => {
+      const a = tr.getBoundingClientRect().height, b = pinRows[i].getBoundingClientRect().height;
+      const h = Math.max(a, b);
+      if (Math.abs(a - h) > 0.4) tr.style.height = h + 'px';
+      if (Math.abs(b - h) > 0.4) pinRows[i].style.height = h + 'px';
+    });
+  };
+  sync();
+  if (window.ResizeObserver){
+    const observer = new ResizeObserver(() => { if (!queued){ queued = true; requestAnimationFrame(sync); } });
+    observer.observe(table);
+    observer.observe(pinTable);
+  }
 }
 
 function fitNamesColumnWidth(th, names){
@@ -4345,6 +4402,7 @@ function renderWeeklyEntryInto(entry, container, allWeeklyEntries, opts){
 
   const table = document.createElement('table');
   table.className = 'archive-table ff-table' + (wide ? ' ff-wide' : '');
+  if (opts.showAllColumns) table.dataset.noPin = '1'; // the off-screen probe
   table.style.tableLayout = 'fixed';
   table.style.width = wide ? '100%' : 'max-content';
 
