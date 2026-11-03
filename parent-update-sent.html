@@ -51,8 +51,14 @@
   <div class="wrap">
     <div class="box">
       <div class="checkmark">✓</div>
-      התשובות נשלחו בהצלחה, תודה!
+      <span id="sentText">התשובות נשלחו בהצלחה, תודה!</span>
     </div>
   </div>
+<script>
+  // An update of an old week waits for the teacher's approval.
+  if (new URLSearchParams(location.search).get('pending')){
+    document.getElementById('sentText').textContent = 'העדכון נשלח לאישור המורה, ויתעדכן לאחר שיאושר. תודה!';
+  }
+</script>
 </body>
 </html>

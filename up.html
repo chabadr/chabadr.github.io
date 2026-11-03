@@ -182,6 +182,16 @@ const FIRESTORE_COLLECTION = 'classroom_points';
 // anything earlier than this - there is no data to report before it existed.
 const LAUNCH_WEEK_START = '2026-10-04';
 
+// Parents may update up to two weeks back. An older week is not changed: the
+// update is sent to the teacher as a request and counts only once approved
+// (in the admin page).
+const MAX_WEEKS_BACK = 2;
+function isOldWeek(weekStart){
+  const cutoff = getWeekStart(new Date());
+  cutoff.setDate(cutoff.getDate() - 7 * MAX_WEEKS_BACK);
+  return new Date(weekStart) < cutoff;
+}
+
 function getWeekStart(date){
   const d = new Date(date);
   d.setHours(0, 0, 0, 0);
@@ -428,6 +438,18 @@ function renderForm(initialStudentId, weeks, weeklyEntriesByKey, db){
   weekSelect.addEventListener('change', loadValuesForWeek);
   nameSelect.addEventListener('change', loadValuesForWeek);
 
+  // For a week older than two weeks: the update waits for the teacher's approval.
+  const oldNote = document.createElement('div');
+  oldNote.className = 'intro';
+  oldNote.style.display = 'none';
+  oldNote.textContent = 'שבוע זה מעל שבועיים אחורה. העדכון יישלח לאישור המורה, ויתעדכן רק לאחר שיאושר.';
+  app.appendChild(oldNote);
+  function refreshOldNote(){
+    oldNote.style.display = isOldWeek(weeks[parseInt(weekSelect.value, 10)].weekStart) ? '' : 'none';
+  }
+  refreshOldNote();
+  weekSelect.addEventListener('change', refreshOldNote);
+
   const submitBtn = document.createElement('button');
   submitBtn.type = 'button';
   submitBtn.className = 'submit-btn';
@@ -454,6 +476,22 @@ function renderForm(initialStudentId, weeks, weeklyEntriesByKey, db){
     });
 
     try{
+      if (isOldWeek(w.weekStart)){
+        // Not applied: a request for the teacher to approve.
+        await addDoc(collection(db, FIRESTORE_COLLECTION, STORAGE_KEY, 'parentRequests'), {
+          status: 'pending',
+          studentId: submitStudentId,
+          studentName: STUDENT_NAMES[submitStudentId - 1] || String(submitStudentId),
+          weekKey: w.weekKey,
+          weekLabel: weekLabel(w),
+          weekStart: w.weekStart.toISOString(),
+          parsha: w.parsha || null,
+          values,
+          submittedAt: new Date().toISOString()
+        });
+        location.href = 'parent-update-sent.html?pending=1';
+        return;
+      }
       const weekRef = doc(db, FIRESTORE_COLLECTION, STORAGE_KEY, 'archiveWeeks', w.weekKey);
       await runTransaction(db, async (tx) => {
         const snap = await tx.get(weekRef);

@@ -355,7 +355,7 @@
 
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-app.js";
-import { initializeFirestore, doc, getDoc, setDoc, addDoc, deleteDoc, collection, query, orderBy, limit, getDocs } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
+import { initializeFirestore, doc, getDoc, setDoc, addDoc, deleteDoc, collection, query, orderBy, limit, getDocs, runTransaction } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
 import { firebaseConfig, isFirebaseConfigured } from "./firebase-config.js";
 import { sms4freeConfig } from "./sms-config.js";
 import { mountPageNav } from "./page-nav.js";
@@ -413,6 +413,7 @@ const SMS4FREE_ERROR_MESSAGES = {
 
 const TABS = [
   { key: 'phones', label: 'משתנים' },
+  { key: 'requests', label: 'בקשות אישור' },
   { key: 'history', label: 'עדכוני הורים' },
   { key: 'sms', label: 'שליחת הודעות' },
   { key: 'edits', label: 'היסטוריית עדכונים' }
@@ -500,6 +501,7 @@ function renderShell(){
   app.appendChild(content);
 
   renderActiveTab();
+  refreshRequestsBadge();
 }
 
 function switchTab(key){
@@ -515,6 +517,165 @@ function renderActiveTab(){
   else if (activeTab === 'phones') renderPhonesTab(content);
   else if (activeTab === 'sms') renderSmsTab(content);
   else if (activeTab === 'edits') renderEditsTab(content);
+  else if (activeTab === 'requests') renderRequestsTab(content);
+}
+
+// ---------- Tab: בקשות אישור ----------
+// A parent update of a week older than two weeks is not applied by the form: it
+// waits here until it is approved (then it is written to the week) or rejected.
+const requestsRef = () => collection(db, FIRESTORE_COLLECTION, STORAGE_KEY, 'parentRequests');
+
+async function refreshRequestsBadge(){
+  const btn = document.querySelector('.tab-btn[data-tab-key="requests"]');
+  if (!btn) return;
+  try{
+    const snaps = await getDocs(requestsRef());
+    let pending = 0;
+    snaps.forEach(d => { if ((d.data() || {}).status === 'pending') pending++; });
+    btn.textContent = 'בקשות אישור' + (pending ? ' (' + pending + ')' : '');
+    btn.style.color = pending ? 'var(--danger)' : '';
+  } catch(e){}
+}
+
+// The same change the parents' form makes to a week.
+async function applyParentValues(req){
+  const weekRef = doc(db, FIRESTORE_COLLECTION, STORAGE_KEY, 'archiveWeeks', req.weekKey);
+  await runTransaction(db, async (tx) => {
+    const snap = await tx.get(weekRef);
+    const weeklyEntry = snap.exists() ? snap.data() : {
+      type: 'weekly',
+      title: 'הנוסע המתמיד',
+      weekKey: req.weekKey,
+      weekStart: req.weekStart,
+      date: req.weekStart,
+      students: [],
+      weekParsha: null
+    };
+    if (!Array.isArray(weeklyEntry.students)) weeklyEntry.students = [];
+    let rec = weeklyEntry.students.find(x => x.id === req.studentId);
+    if (!rec){
+      rec = { id: req.studentId, morning: 0, tefila: 0, mikve: 0, minusDelta: 0, bonus: 0, days: {} };
+      weeklyEntry.students.push(rec);
+    }
+    Object.assign(rec, req.values, { parentSubmitted: true });
+    if (req.parsha) weeklyEntry.weekParsha = req.parsha;
+    tx.set(weekRef, weeklyEntry);
+  });
+}
+
+async function renderRequestsTab(container){
+  const status = document.createElement('div');
+  status.className = 'loading';
+  status.textContent = 'טוען…';
+  container.appendChild(status);
+  try{
+    const snaps = await getDocs(requestsRef());
+    const all = [];
+    snaps.forEach(d => all.push({ id: d.id, ...d.data() }));
+    all.sort((a, b) => (a.submittedAt < b.submittedAt ? 1 : -1));
+    status.remove();
+    const pending = all.filter(r => r.status === 'pending');
+    const handled = all.filter(r => r.status !== 'pending').slice(0, 20);
+
+    const hint = document.createElement('div');
+    hint.className = 'hint';
+    hint.textContent = 'הורים יכולים לעדכן עד שבועיים אחורה. עדכון לשבוע ישן יותר מחכה כאן לאישור, ועד האישור הוא לא נכנס לטבלה.';
+    container.appendChild(hint);
+
+    const valuesText = (v) => FIELD_ORDER.map(key => {
+      const val = (v || {})[key];
+      return (FIELD_LABELS[key] || key) + ': ' + (typeof val === 'boolean' ? (val ? '✓' : '—') : (val !== undefined ? val : ''));
+    }).join(' · ');
+    const whenText = (iso) => {
+      const when = new Date(iso);
+      return when.toLocaleDateString('he-IL') + ' ' + when.toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit' });
+    };
+
+    if (!pending.length){
+      const empty = document.createElement('div');
+      empty.className = 'empty';
+      empty.textContent = 'אין בקשות שמחכות לאישור.';
+      container.appendChild(empty);
+    }
+    pending.forEach(req => {
+      const card = document.createElement('div');
+      card.className = 'card';
+      const head = document.createElement('div');
+      head.style.fontWeight = '700';
+      head.textContent = req.studentName + ' · ' + (req.weekLabel || '').replace(/^פרשת\s+/, '');
+      card.appendChild(head);
+      const when = document.createElement('div');
+      when.className = 'hint';
+      when.textContent = 'נשלח ב-' + whenText(req.submittedAt);
+      card.appendChild(when);
+      const vals = document.createElement('div');
+      vals.style.margin = '8px 0';
+      vals.style.lineHeight = '1.7';
+      vals.textContent = valuesText(req.values);
+      card.appendChild(vals);
+      const row = document.createElement('div');
+      row.className = 'row-inline';
+      const msg = document.createElement('span');
+      msg.className = 'save-status';
+      const approve = document.createElement('button');
+      approve.type = 'button';
+      approve.className = 'small-btn';
+      approve.textContent = 'אישור';
+      const reject = document.createElement('button');
+      reject.type = 'button';
+      reject.className = 'small-btn';
+      reject.textContent = 'דחייה';
+      const done = async (fn, okText) => {
+        approve.disabled = reject.disabled = true;
+        msg.className = 'save-status';
+        msg.textContent = 'מעדכן…';
+        try{
+          await fn();
+          card.remove();
+          refreshRequestsBadge();
+          if (!container.querySelector('.card')) renderActiveTab();
+        } catch(e){
+          approve.disabled = reject.disabled = false;
+          msg.className = 'save-status err';
+          msg.textContent = 'הפעולה נכשלה: ' + describeSaveError(e);
+        }
+      };
+      approve.addEventListener('click', () => done(async () => {
+        await applyParentValues(req);
+        try{
+          await addDoc(collection(db, FIRESTORE_COLLECTION, STORAGE_KEY, 'parentUpdateLog'), {
+            studentId: req.studentId, studentName: req.studentName, weekKey: req.weekKey, weekLabel: req.weekLabel,
+            values: req.values, submittedAt: new Date().toISOString()
+          });
+        } catch(e){}
+        await setDoc(doc(db, FIRESTORE_COLLECTION, STORAGE_KEY, 'parentRequests', req.id), { status: 'approved', handledAt: new Date().toISOString() }, { merge: true });
+      }));
+      reject.addEventListener('click', () => done(async () => {
+        await setDoc(doc(db, FIRESTORE_COLLECTION, STORAGE_KEY, 'parentRequests', req.id), { status: 'rejected', handledAt: new Date().toISOString() }, { merge: true });
+      }));
+      row.appendChild(approve);
+      row.appendChild(reject);
+      row.appendChild(msg);
+      card.appendChild(row);
+      container.appendChild(card);
+    });
+
+    if (handled.length){
+      const title = document.createElement('div');
+      title.className = 'section-title';
+      title.textContent = 'בקשות שטופלו';
+      container.appendChild(title);
+      handled.forEach(req => {
+        const line = document.createElement('div');
+        line.className = 'hint';
+        line.textContent = (req.status === 'approved' ? '✓ אושר' : '✗ נדחה') + ' · ' + req.studentName + ' · ' + (req.weekLabel || '').replace(/^פרשת\s+/, '') + ' · ' + whenText(req.submittedAt);
+        container.appendChild(line);
+      });
+    }
+  } catch(e){
+    status.className = 'loading';
+    status.textContent = 'שגיאה בטעינה: ' + (e && e.message ? e.message : String(e));
+  }
 }
 
 // ---------- Tab: היסטוריית עדכונים ----------
