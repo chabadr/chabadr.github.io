@@ -155,9 +155,10 @@
   table.archive-table th:first-child{ white-space: nowrap; }
   table.archive-table tr:nth-child(even){ background: #FCFBF6; }
   table.archive-table th.week-end, table.archive-table td.week-end{ border-left: 3px solid var(--gold); }
-  /* The own layer keeps the text of the fixed columns from disappearing while
-     scrolling on a phone. */
-  table.archive-table .sticky-col{ position: sticky; z-index: 1; background: #fff; -webkit-transform: translateZ(0); transform: translateZ(0); -webkit-backface-visibility: hidden; backface-visibility: hidden; }
+  /* The fixed columns are not "sticky": they are moved by a script while the
+     table scrolls sideways (see stickLeadingColumns). On an iPhone the text of
+     sticky cells disappeared when the page was scrolled up and down. */
+  table.archive-table .sticky-col{ position: relative; z-index: 1; background: #fff; }
   table.archive-table tr:nth-child(even) td.sticky-col{ background: #FCFBF6; }
   table.archive-table th.sticky-col{ background: var(--paper-dark); z-index: 11; }
   table.archive-table .sticky-col-last{ box-shadow: inset 1px 0 0 var(--line); }
@@ -4054,27 +4055,53 @@ function textColumnWidth(texts, headerLabel, padding){
 // scrolls sideways under them. widths: each sticky column's width in px.
 function stickLeadingColumns(table, widths){
   const taken = []; // columns still covered by a tall cell from a row above
+  const pinned = [];
   [...table.rows].forEach(tr => {
-    let column = 0, right = 0;
+    let column = 0;
     const next = [];
     taken.forEach((n, c) => { if (n > 1) next[c] = n - 1; });
     for (let i = 0; i < tr.cells.length; i++){
-      while (taken[column] > 0){ right += widths[column] || 0; column++; }
+      while (taken[column] > 0) column++;
       if (column >= widths.length) break;
       const cell = tr.cells[i];
       const span = cell.colSpan || 1;
       if ((cell.rowSpan || 1) > 1) for (let c = column; c < column + span; c++) next[c] = cell.rowSpan - 1;
       if (column + span > widths.length) break; // reaches past the fixed columns
-      const width = widths.slice(column, column + span).reduce((a, w) => a + w, 0);
       cell.classList.add('sticky-col');
       if (column + span === widths.length) cell.classList.add('sticky-col-last');
-      cell.style.right = right + 'px';
-      right += width;
+      pinned.push(cell);
       column += span;
     }
     taken.length = 0;
     next.forEach((n, c) => { taken[c] = n; });
   });
+  pinColumnsWhileScrolling(table, pinned);
+}
+
+// The fixed columns stay in place while the table scrolls sideways: they are
+// moved by as much as the table has moved (no position: sticky, whose text
+// disappeared on an iPhone when the page was scrolled up and down).
+function pinColumnsWhileScrolling(table, cells){
+  const attach = () => {
+    const scroller = table.closest('.table-scroll');
+    if (!scroller) return false;
+    const update = () => {
+      let dx = 0;
+      if (scroller.scrollWidth > scroller.clientWidth + 1){
+        dx = Math.round(scroller.getBoundingClientRect().right - table.getBoundingClientRect().right);
+        if (dx > 0) dx = 0;
+      }
+      const value = dx ? 'translateX(' + dx + 'px)' : '';
+      cells.forEach(cell => { cell.style.transform = value; });
+    };
+    if (scroller._pinHandler) scroller.removeEventListener('scroll', scroller._pinHandler);
+    scroller._pinHandler = update;
+    scroller.addEventListener('scroll', update, { passive: true });
+    update();
+    return true;
+  };
+  // (A table can still be on its way into the page when its columns are fixed.)
+  if (!attach()) requestAnimationFrame(() => { if (!attach()) setTimeout(attach, 100); });
 }
 
 function fitNamesColumnWidth(th, names){
@@ -5386,7 +5413,7 @@ async function initApp(){
 }
 
 // Editing the archive is opened with a code entered on a very small number
-// pad, whose digits change places after every press.
+// pad, whose digits change places each time the code has to be entered.
 const ARCHIVE_ACCESS_CODE = '199';
 // Once opened it stays open this long after the last use - also across a
 // reload and between the site's pages (it is kept in the browser).
@@ -5457,8 +5484,9 @@ function showArchiveCodePrompt(onSuccess){
   const box = document.createElement('div');
   box.className = 'code-box-mini';
 
-  // A tiny number pad. The digits change places after every press, and
-  // nothing on it shows how many digits the code has.
+  // A tiny number pad. The digits change places each time the code has to be
+  // entered (when it opens, and after a wrong code), and nothing on it shows
+  // how many digits the code has.
   const keypad = document.createElement('div');
   keypad.className = 'mini-keypad';
   const keys = [];
@@ -5499,8 +5527,7 @@ function showArchiveCodePrompt(onSuccess){
   }
   function press(digit){
     entered += digit;
-    // The digits change places after every single press.
-    shuffleKeys();
+    // The digits keep their places while a code is being typed.
     if (entered.length < ARCHIVE_ACCESS_CODE.length) return;
     if (entered === ARCHIVE_ACCESS_CODE){
       writeArchiveLock({ tries: 0, until: 0 });
@@ -5512,7 +5539,9 @@ function showArchiveCodePrompt(onSuccess){
     // A wrong code: the frame blinks red (no text), the digits move.
     box.classList.add('wrong');
     setTimeout(() => box.classList.remove('wrong'), 350);
+    // A wrong code: the code must be entered again, so the digits change places.
     if (archiveWrongTry()) showLockState();
+    else shuffleKeys();
   }
 
   overlay.appendChild(box);
