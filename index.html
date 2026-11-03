@@ -162,6 +162,12 @@
   .pin-split{ display: flex; align-items: flex-start; width: 100%; }
   .pin-split > .table-scroll{ flex: 1 1 0; min-width: 0; }
   .pin-split > table.pin-table{ flex: none; width: auto; }
+  /* The corners are rounded only on the outside of the whole table, not where the
+     two tables meet. */
+  .pin-split > table.pin-table thead th:last-child{ border-top-left-radius: 0; }
+  .pin-split > table.pin-table tbody tr:last-child td:last-child{ border-bottom-left-radius: 0; }
+  .pin-split > .table-scroll thead th:first-child{ border-top-right-radius: 0; }
+  .pin-split > .table-scroll tbody tr:last-child td:first-child{ border-bottom-right-radius: 0; }
   table.archive-table tr:nth-child(even) td.sticky-col{ background: #FCFBF6; }
   table.archive-table th.sticky-col{ background: var(--paper-dark); z-index: 11; }
   table.archive-table .sticky-col-last{ box-shadow: inset 1px 0 0 var(--line); }
