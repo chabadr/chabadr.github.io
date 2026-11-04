@@ -8,7 +8,7 @@ const { logger } = require('firebase-functions');
 const admin = require('firebase-admin');
 const https = require('https');
 const nodemailer = require('nodemailer');
-const { sendQueuedPdf, MAX_AGE_MS } = require('./pdf-mail');
+const { sendQueuedBatch, MAX_AGE_MS } = require('./pdf-mail');
 const { computeDailyResetUpdate, isLiveDayDueForArchive, getWeekKey } = require('./daily-reset');
 
 admin.initializeApp();
@@ -160,13 +160,29 @@ exports.sendPendingPdfs = onSchedule({
     secure: true,
     auth: { user, pass: SMTP_PASS.value() }
   });
+  // The documents of one batch (the weeks of one send) go out together, in one
+  // e-mail with a file for each; a document without a batch goes out alone.
+  const groups = new Map();
   for (const docSnap of pending.docs){
-    const result = await sendQueuedPdf(docSnap.data(), email, transporter, user);
-    if (result.status === 'sent'){
-      await docSnap.ref.update({ status: 'sent', sentAt: new Date().toISOString(), to: email, pdfBase64: admin.firestore.FieldValue.delete() });
-    } else {
-      await docSnap.ref.update({ status: 'failed', error: result.error });
-      logger.error('PDF e-mail failed', { id: docSnap.id, error: result.error });
+    const data = docSnap.data();
+    const key = data.batchId || docSnap.id;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(docSnap);
+  }
+  for (const [key, docs] of groups){
+    docs.sort((a, b) => (a.data().batchIndex || 0) - (b.data().batchIndex || 0));
+    const size = docs[0].data().batchSize || 1;
+    const ageMs = Date.now() - new Date(docs[0].data().createdAt || 0).getTime();
+    // A batch that is not all here yet waits (the page writes it all at once, so this is rare).
+    if (docs.length < size && ageMs < 5 * 60 * 1000) continue;
+    const result = await sendQueuedBatch(docs.map((d) => d.data()), email, transporter, user);
+    for (const docSnap of docs){
+      if (result.status === 'sent'){
+        await docSnap.ref.update({ status: 'sent', sentAt: new Date().toISOString(), to: email, pdfBase64: admin.firestore.FieldValue.delete() });
+      } else {
+        await docSnap.ref.update({ status: 'failed', error: result.error });
+      }
     }
+    if (result.status !== 'sent') logger.error('PDF e-mail failed', { batch: key, error: result.error });
   }
 });

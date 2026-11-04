@@ -803,7 +803,7 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-app.js";
 import {
   getFirestore, initializeFirestore, persistentLocalCache, persistentMultipleTabManager,
-  doc, getDoc, getDocs, collection, setDoc, onSnapshot, runTransaction,
+  doc, getDoc, getDocs, collection, onSnapshot, runTransaction,
 } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
 import { firebaseConfig, isFirebaseConfigured } from "./firebase-config.js";
 import { mountPageNav } from "./page-nav.js";
@@ -3728,19 +3728,40 @@ async function canvasesToPdfBase64(canvases){
   throw new Error('הטבלאות גדולות מדי לשליחה');
 }
 
-// Puts the PDF made of these pictures in the queue (one e-mail) and waits for the
-// server to send it. Returns { ok, message }. Started from the admin page (see runSendPdfJob).
-async function sendCanvasesPdf(canvases, subject, onProgress){
+// Puts a PDF file for each week in the queue and waits for the server to send
+// them all in ONE e-mail (the documents of one batch are written together, and
+// the server function sends a whole batch as one message with all the files).
+// weeks = [{ canvas, label }]. Returns { ok, message }. Started from the admin
+// page (see runSendPdfJob).
+async function sendWeeksPdf(weeks, subject, onProgress){
   try{
     const settings = await getDoc(doc(firestoreDb, FIRESTORE_COLLECTION, STORAGE_KEY, 'meta', 'pdfSettings'));
     const email = settings.exists() ? (settings.data().email || '') : '';
     if (!email) return { ok: false, message: 'לא הוגדרה כתובת לשליחה. מגדירים אותה כאן, בלשונית "משתנים".' };
     onProgress('מכין…');
-    const pdfBase64 = await canvasesToPdfBase64(canvases);
-    const id = 'pdf-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8);
-    const ref = doc(firestoreDb, FIRESTORE_COLLECTION, STORAGE_KEY, 'pdfOutbox', id);
+    const batchId = 'batch-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8);
+    const used = new Set();
+    const entries = [];
+    for (let i = 0; i < weeks.length; i++){
+      // A file for each week, so none of them loses sharpness because of the others.
+      let name = 'הנוסע-המתמיד-' + weeks[i].label.replace(/[\\/:*?"<>|\s]+/g, '-');
+      if (used.has(name)) name += '-' + (i + 1);
+      used.add(name);
+      entries.push({
+        id: batchId + '-' + i,
+        data: {
+          status: 'pending', createdAt: new Date().toISOString(), subject: i === 0 ? subject : weeks[i].label,
+          filename: name + '.pdf', pdfBase64: await canvasesToPdfBase64([weeks[i].canvas]),
+          batchId, batchSize: weeks.length, batchIndex: i
+        }
+      });
+    }
     onProgress('שולח…');
-    await setDoc(ref, { status: 'pending', createdAt: new Date().toISOString(), subject, filename: 'הנוסע-המתמיד.pdf', pdfBase64 });
+    // All together, so the server never sees half a batch.
+    await runTransaction(firestoreDb, async (tx) => {
+      entries.forEach(e => tx.set(doc(firestoreDb, FIRESTORE_COLLECTION, STORAGE_KEY, 'pdfOutbox', e.id), e.data));
+    });
+    const ref = doc(firestoreDb, FIRESTORE_COLLECTION, STORAGE_KEY, 'pdfOutbox', entries[0].id);
     // The server function picks it up within a minute or so.
     for (let i = 0; i < 45; i++){
       await new Promise(resolve => setTimeout(resolve, 3000));
@@ -3795,28 +3816,26 @@ async function drawWeekForPaper(weekKey){
 }
 
 // The admin page sends the tables by loading this page in a hidden frame with
-// ?sendpdf=<week>,<week>,...&job=<id>: the page draws each of those weeks, puts
-// them in one PDF (a page for each week) and one e-mail, and tells the admin
-// page how it went.
+// ?sendpdf=<week>,<week>,...&job=<id>: the page draws each of those weeks, makes
+// a PDF file for each, sends them all in one e-mail, and tells the admin page
+// how it went.
 async function runSendPdfJob(params){
   const job = params.get('job');
   const report = (ok, message) => { try{ parent.postMessage({ type: 'pdf-job', job, ok, message }, location.origin); } catch(e){} };
   try{
     if (document.fonts && document.fonts.ready) await document.fonts.ready;
     const weekKeys = params.get('sendpdf').split(',').filter(Boolean);
-    const canvases = [];
-    const labels = [];
+    const weeks = [];
     for (const weekKey of weekKeys){
       const weekEntry = getDisplayArchive().find(e => e.type === 'weekly' && e.weekKey === weekKey);
       if (!weekEntry){ report(false, 'הטבלה לא נמצאה'); return; }
       const { table, box } = await drawWeekForPaper(weekKey);
       if (!table || !box){ report(false, 'הטבלה לא נמצאה'); return; }
       const label = (box.querySelector('.merged-dropdown-toggle') || {}).textContent || '';
-      labels.push(label);
       // (The list of what is missing is shown on the screen only, not in the PDF.)
-      canvases.push(await renderTableToCanvas(table, 'הנוסע המתמיד · ' + label));
+      weeks.push({ label, canvas: await renderTableToCanvas(table, 'הנוסע המתמיד · ' + label) });
     }
-    const result = await sendCanvasesPdf(canvases, 'הנוסע המתמיד · ' + labels.join(', '), (text) => report(true, text));
+    const result = await sendWeeksPdf(weeks, 'הנוסע המתמיד · ' + weeks.map(w => w.label).join(', '), (text) => report(true, text));
     report(result.ok, result.message);
   } catch(e){
     report(false, 'השליחה נכשלה: ' + (e && e.message ? e.message : String(e)));
