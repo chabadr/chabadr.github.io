@@ -223,7 +223,7 @@
   .ff-fit.ff-dwrap{ display: inline-flex; align-items: center; justify-content: center; gap: 0.3em; white-space: nowrap; }
   /* The numbers of the daily columns line up on the right of their cells. */
   table.archive-table td.ff-daily-detail{ text-align: right; padding-right: 10px; }
-  .ff-dletters{ font-size: max(7px, 0.45em); line-height: 1.1; color: var(--ink-soft); text-align: start; }
+  .ff-dletters{ font-size: max(var(--min-letter, 7px), 0.45em); line-height: 1.1; color: var(--ink-soft); text-align: start; }
   .th-inner{
     display: flex;
     align-items: center;
@@ -3668,7 +3668,7 @@ function buildPdfFromJpegs(images){
     const landscape = imgW >= imgH;
     const pw = landscape ? 842 : 595;
     const ph = landscape ? 595 : 842;
-    const margin = 18;
+    const margin = PDF_PAGE_MARGIN;
     const k = Math.min((pw - 2 * margin) / imgW, (ph - 2 * margin) / imgH);
     const w = imgW * k, h = imgH * k;
     const x = (pw - w) / 2, y = (ph - h) / 2;
@@ -3755,6 +3755,45 @@ async function sendCanvasesPdf(canvases, subject, onProgress){
   }
 }
 
+// Draws a week so that, shrunk to a page of A4, it fills the page: the "screen"
+// is given the shape of the page, and the letters of the missing days are never
+// smaller than 7 points on the paper. A few rounds, since the width of the table
+// (and so how much it is shrunk) depends on the sizes asked for.
+const PDF_PAGE_MARGIN = 10;
+const PDF_TITLE_HEIGHT = 44;
+async function drawWeekForPaper(weekKey){
+  PRINT.on = true;
+  PRINT.viewportHeight = 0;
+  PRINT.minLetterPx = 7 / 0.58;
+  let table = null, box = null;
+  for (let round = 0; round < 5; round++){
+    document.documentElement.style.setProperty('--min-letter', PRINT.minLetterPx + 'px');
+    selectedWeeklyKey = weekKey;
+    renderFrequentFlyerView();
+    await new Promise(resolve => setTimeout(resolve, 700));
+    table = document.querySelector('#frequentArchiveView table');
+    box = document.querySelector('#frequentArchiveView .archive-date');
+    if (!table || !box) break;
+    const rect = table.getBoundingClientRect();
+    const W = rect.width, H = rect.height + PDF_TITLE_HEIGHT;
+    const m = 2 * PDF_PAGE_MARGIN;
+    const landscapeScale = Math.min((842 - m) / W, (595 - m) / H);
+    const portraitScale = Math.min((595 - m) / W, (842 - m) / H);
+    const landscape = landscapeScale >= portraitScale;
+    const pageW = (landscape ? 842 : 595) - m, pageH = (landscape ? 595 : 842) - m;
+    const byWidth = pageW / W;
+    // The table as tall as the page allows at that scale, and the letters at 7pt.
+    const wantedHeight = pageH / byWidth;
+    const nextViewport = Math.round(wantedHeight - PDF_TITLE_HEIGHT + box.offsetHeight + 2);
+    const nextMinLetter = 7 / byWidth;
+    const settled = Math.abs(nextMinLetter - PRINT.minLetterPx) < 0.4 && Math.abs(nextViewport - PRINT.viewportHeight) < 8;
+    PRINT.minLetterPx = nextMinLetter;
+    PRINT.viewportHeight = nextViewport;
+    if (settled) break;
+  }
+  return { table, box };
+}
+
 // The admin page sends the tables by loading this page in a hidden frame with
 // ?sendpdf=<week>,<week>,...&job=<id>: the page draws each of those weeks, puts
 // them in one PDF (a page for each week) and one e-mail, and tells the admin
@@ -3770,11 +3809,7 @@ async function runSendPdfJob(params){
     for (const weekKey of weekKeys){
       const weekEntry = getDisplayArchive().find(e => e.type === 'weekly' && e.weekKey === weekKey);
       if (!weekEntry){ report(false, 'הטבלה לא נמצאה'); return; }
-      selectedWeeklyKey = weekKey;
-      renderFrequentFlyerView();
-      await new Promise(resolve => setTimeout(resolve, 800));
-      const table = document.querySelector('#frequentArchiveView table');
-      const box = document.querySelector('#frequentArchiveView .archive-date');
+      const { table, box } = await drawWeekForPaper(weekKey);
       if (!table || !box){ report(false, 'הטבלה לא נמצאה'); return; }
       const label = (box.querySelector('.merged-dropdown-toggle') || {}).textContent || '';
       labels.push(label);
@@ -4370,6 +4405,15 @@ const FREQUENT_WIDE_MIN_WIDTH = 900;
 // Computers and tablets: the table is exactly as tall as the screen.
 const FILL_SCREEN_MIN_WIDTH = 760;
 
+// While a table is drawn for the PDF (a page of A4), the "screen" is shaped like
+// the page: its height is set here, and the smallest size of the letters of the
+// missing days is 7 points *on the paper* (so more pixels when the table is
+// shrunk to fit the page).
+const PRINT = { on: false, minLetterPx: 7, viewportHeight: 0 };
+function layoutViewportHeight(){
+  return PRINT.on && PRINT.viewportHeight ? PRINT.viewportHeight : window.innerHeight;
+}
+
 function renderWeeklyEntryInto(entry, container, allWeeklyEntries, opts){
   opts = opts || {};
   // A week is shown as the detailed report - there is no weekly summary page
@@ -4654,7 +4698,7 @@ function renderWeeklyEntryInto(entry, container, allWeeklyEntries, opts){
 
   if (!table.isConnected || container.clientWidth === 0) return;
   const rowCount = Math.max(tbody.rows.length, 1);
-  const fillRowHeight = () => Math.max(0, Math.floor((window.innerHeight - (entryWrap.offsetHeight - tbody.offsetHeight)) / rowCount * 10) / 10);
+  const fillRowHeight = () => Math.max(0, Math.floor((layoutViewportHeight() - (entryWrap.offsetHeight - tbody.offsetHeight)) / rowCount * 10) / 10);
   if (wide){
     const isParentSpan = (i) => i >= LEAD && isParentField(fieldDefs[i - LEAD].field);
     // Headers: one size for all (small - the header row is kept low). The
@@ -4675,7 +4719,7 @@ function renderWeeklyEntryInto(entry, container, allWeeklyEntries, opts){
     // is 0.45 of the number's): the number is at least 16px, and a daily column
     // that is too narrow for that is widened - the table is then wider than the
     // screen and scrolls sideways.
-    const minDetailFont = 16;
+    const minDetailFont = Math.max(16, Math.ceil(PRINT.minLetterPx / 0.45));
     const dailyIdx = fieldDefs.map((f, i) => f.kind === 'daily' ? LEAD + i : -1).filter(i => i >= 0);
     const widenDaily = () => {
       if (!detailSpans.length) return;
@@ -4697,7 +4741,7 @@ function renderWeeklyEntryInto(entry, container, allWeeklyEntries, opts){
       for (let i = 0; i < 8; i++){
         const rh = fillRowHeight();
         [...tbody.rows].forEach(tr => { tr.style.height = rh + 'px'; });
-        if (entryWrap.offsetHeight <= window.innerHeight + 1) break;
+        if (entryWrap.offsetHeight <= layoutViewportHeight() + 1) break;
         [...valueSpans, ...pctSpans, ...detailSpans, ...nameSpans].forEach(sp => { sp.style.fontSize = Math.max(10, (parseFloat(sp.style.fontSize) || 12) - 1) + 'px'; });
         [...tbody.rows].forEach(tr => { tr.style.height = ''; });
       }
@@ -4722,7 +4766,7 @@ function renderWeeklyEntryInto(entry, container, allWeeklyEntries, opts){
       cols[0].style.width = sameAs.L0 + 'px';
       cols[1].style.width = sameAs.L1 + 'px';
       table.style.width = (sameAs.L0 + sameAs.L1 + fieldDefs.reduce((t, f) => t + (sameAs[f.field] || 0), 0)) + 'px';
-      fitSpanGroupToCells(headerSpans.slice(LEAD), 9, 16);
+      fitSpanGroupToCells(headerSpans.slice(LEAD), PRINT.on ? Math.ceil(PRINT.minLetterPx) : 9, 16);
       fitSpanGroupToCells(valueSpans, 12, heightFont);
       fitSpanGroupToCells(pctSpans, 10, heightFont);
       widenDaily();
@@ -4759,7 +4803,7 @@ function renderWeeklyEntryInto(entry, container, allWeeklyEntries, opts){
         ? Math.floor((tableW - nameW - parentsW) * weightOf(i) / weightSum) + 'px'
         : 'calc((100% - ' + (nameW + parentsW) + 'px) / ' + others + ')';
     });
-    fitSpanGroupToCells(headerSpans.slice(LEAD), 9, 16);
+    fitSpanGroupToCells(headerSpans.slice(LEAD), PRINT.on ? Math.ceil(PRINT.minLetterPx) : 9, 16);
     fitSpanGroupToCells(valueSpans, 12, heightFont);
     fitSpanGroupToCells(pctSpans, 10, heightFont);
     widenDaily();
