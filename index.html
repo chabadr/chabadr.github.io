@@ -645,6 +645,13 @@
     transform: scale(1.1);
   }
 
+  .point-cell.disturb{
+    background: #F6D5D5;
+  }
+  .point-cell.disturb .point-val{
+    color: var(--danger);
+  }
+  table.archive-table td.disturb{ background: #F6D5D5; color: var(--danger); }
   .point-cell:active .point-val{
     transform: scale(0.9);
   }
@@ -1815,11 +1822,20 @@ function highlightWinner(studentId){
   });
 }
 
+// The value a click on a point cell leads to. A cell is on (the category's
+// value) or off (0). The תפילה column (c3) has a third state: a disturbance, red
+// and worth -1. Clicks go: off -> on -> disturbance -> off.
+function nextCategoryValue(catKey, current){
+  const category = CATEGORIES.find(c => c.key === catKey);
+  const value = current || 0;
+  if (catKey === 'c3') return value > 0 ? -1 : (value < 0 ? 0 : category.value);
+  return value ? 0 : category.value;
+}
+
 function toggleCell(studentId, catKey){
   const student = state.students.find(s => s.id === studentId);
   if (!student) return;
-  const category = CATEGORIES.find(c => c.key === catKey);
-  commitOp({ kind: 'cat', group: 'main', sid: studentId, key: catKey, value: student.cats[catKey] ? 0 : category.value });
+  commitOp({ kind: 'cat', group: 'main', sid: studentId, key: catKey, value: nextCategoryValue(catKey, student.cats[catKey]) });
 }
 
 const PURCHASE_COST = 8;
@@ -2484,10 +2500,11 @@ function buildBoard(title, students){
           let sum = s.group.reduce((sum2, k) => sum2 + (student.cats[k] || 0), 0);
           if (s.group.includes('c5')) sum += (student.c5Total || 0);
           const activeHasPoints = (student.cats[activeKey] || 0) > 0;
-          td.className = (td.className ? td.className + ' ' : '') + 'point-cell col-hide-narrow' + (activeHasPoints ? ' active' : '');
+          const activeDisturbed = (student.cats[activeKey] || 0) < 0;
+          td.className = (td.className ? td.className + ' ' : '') + 'point-cell col-hide-narrow' + (activeHasPoints ? ' active' : '') + (activeDisturbed ? ' disturb' : '');
           const val = document.createElement('span');
           val.className = 'point-val';
-          val.textContent = sum > 0 ? sum : '';
+          val.textContent = sum !== 0 ? sum : '';
           td.appendChild(val);
           td.addEventListener('click', () => toggleCell(student.id, activeKey));
         }
@@ -2501,8 +2518,8 @@ function buildBoard(title, students){
           td.appendChild(val);
           td.addEventListener('click', () => toggleFrequent(student.id, s.key));
         } else {
-          const roundActive = !!student.cats[s.key];
-          td.className = (td.className ? td.className + ' ' : '') + 'point-cell' + (roundActive ? ' active' : '');
+          const roundActive = (student.cats[s.key] || 0) > 0;
+          td.className = (td.className ? td.className + ' ' : '') + 'point-cell' + (roundActive ? ' active' : '') + ((student.cats[s.key] || 0) < 0 ? ' disturb' : '');
           const val = document.createElement('span');
           val.className = 'point-val';
           val.textContent = student.cats[s.key] ? student.cats[s.key] : '';
@@ -3628,16 +3645,9 @@ async function renderTableToCanvas(table, titleText){
   return canvas;
 }
 
-// A one-page PDF (A4, landscape or portrait by the shape of the picture)
-// holding the JPEG picture, as large as fits.
-function buildPdfFromJpeg(jpeg, imgW, imgH){
-  const landscape = imgW >= imgH;
-  const pw = landscape ? 842 : 595;
-  const ph = landscape ? 595 : 842;
-  const margin = 18;
-  const k = Math.min((pw - 2 * margin) / imgW, (ph - 2 * margin) / imgH);
-  const w = imgW * k, h = imgH * k;
-  const x = (pw - w) / 2, y = (ph - h) / 2;
+// A PDF with a page (A4, landscape or portrait by the shape of the picture) for
+// each JPEG picture, each as large as fits: images = [{ jpeg, w, h }].
+function buildPdfFromJpegs(images){
   const enc = new TextEncoder();
   const parts = [];
   const offsets = [];
@@ -3648,20 +3658,35 @@ function buildPdfFromJpeg(jpeg, imgW, imgH){
     length += bytes.length;
   };
   const begin = (n) => { offsets[n] = length; push(n + ' 0 obj\n'); };
+  const count = images.length;
+  // Objects: 1 catalog, 2 pages, then for every page: the page, its picture, its content.
+  const pageObj = (i) => 3 + 3 * i;
   push('%PDF-1.4\n');
   begin(1); push('<< /Type /Catalog /Pages 2 0 R >>\nendobj\n');
-  begin(2); push('<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n');
-  begin(3); push('<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ' + pw + ' ' + ph + '] /Resources << /XObject << /Im0 4 0 R >> >> /Contents 5 0 R >>\nendobj\n');
-  begin(4);
-  push('<< /Type /XObject /Subtype /Image /Width ' + imgW + ' /Height ' + imgH + ' /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ' + jpeg.length + ' >>\nstream\n');
-  push(jpeg);
-  push('\nendstream\nendobj\n');
-  const content = 'q ' + w.toFixed(2) + ' 0 0 ' + h.toFixed(2) + ' ' + x.toFixed(2) + ' ' + y.toFixed(2) + ' cm /Im0 Do Q';
-  begin(5); push('<< /Length ' + content.length + ' >>\nstream\n' + content + '\nendstream\nendobj\n');
+  begin(2); push('<< /Type /Pages /Kids [' + images.map((_, i) => pageObj(i) + ' 0 R').join(' ') + '] /Count ' + count + ' >>\nendobj\n');
+  images.forEach(({ jpeg, w: imgW, h: imgH }, i) => {
+    const landscape = imgW >= imgH;
+    const pw = landscape ? 842 : 595;
+    const ph = landscape ? 595 : 842;
+    const margin = 18;
+    const k = Math.min((pw - 2 * margin) / imgW, (ph - 2 * margin) / imgH);
+    const w = imgW * k, h = imgH * k;
+    const x = (pw - w) / 2, y = (ph - h) / 2;
+    const page = pageObj(i);
+    begin(page);
+    push('<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ' + pw + ' ' + ph + '] /Resources << /XObject << /Im0 ' + (page + 1) + ' 0 R >> >> /Contents ' + (page + 2) + ' 0 R >>\nendobj\n');
+    begin(page + 1);
+    push('<< /Type /XObject /Subtype /Image /Width ' + imgW + ' /Height ' + imgH + ' /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ' + jpeg.length + ' >>\nstream\n');
+    push(jpeg);
+    push('\nendstream\nendobj\n');
+    const content = 'q ' + w.toFixed(2) + ' 0 0 ' + h.toFixed(2) + ' ' + x.toFixed(2) + ' ' + y.toFixed(2) + ' cm /Im0 Do Q';
+    begin(page + 2); push('<< /Length ' + content.length + ' >>\nstream\n' + content + '\nendstream\nendobj\n');
+  });
+  const total = 3 + 3 * count;
   const xref = length;
-  let table = 'xref\n0 6\n0000000000 65535 f \n';
-  for (let n = 1; n <= 5; n++) table += String(offsets[n]).padStart(10, '0') + ' 00000 n \n';
-  push(table + 'trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n' + xref + '\n%%EOF\n');
+  let table = 'xref\n0 ' + total + '\n0000000000 65535 f \n';
+  for (let n = 1; n < total; n++) table += String(offsets[n]).padStart(10, '0') + ' 00000 n \n';
+  push(table + 'trailer\n<< /Size ' + total + ' /Root 1 0 R >>\nstartxref\n' + xref + '\n%%EOF\n');
   const out = new Uint8Array(length);
   let pos = 0;
   parts.forEach(b => { out.set(b, pos); pos += b.length; });
@@ -3677,29 +3702,45 @@ function bytesToBase64(bytes){
 // Firestore keeps a document under 1 MB: the picture's quality goes down
 // until the PDF fits.
 const PDF_MAX_BASE64 = 880000;
-async function canvasToPdfBase64(canvas){
-  for (const quality of [0.9, 0.8, 0.7, 0.6, 0.5, 0.4]){
-    const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg', quality));
-    const pdf = buildPdfFromJpeg(new Uint8Array(await blob.arrayBuffer()), canvas.width, canvas.height);
-    const base64 = bytesToBase64(pdf);
-    if (base64.length <= PDF_MAX_BASE64) return base64;
-  }
-  throw new Error('הטבלה גדולה מדי לשליחה');
+function scaleCanvas(canvas, factor){
+  const small = document.createElement('canvas');
+  small.width = Math.max(1, Math.round(canvas.width * factor));
+  small.height = Math.max(1, Math.round(canvas.height * factor));
+  small.getContext('2d').drawImage(canvas, 0, 0, small.width, small.height);
+  return small;
 }
 
-// Puts the table's PDF in the queue and waits for the server to send it.
-// Returns { ok, message }. Started from the admin page (see runSendPdfJob).
-async function sendTablePdf(table, title, onProgress){
+// One PDF with a page for each picture. All of them together have to fit in
+// one queue document, so the pictures are made smaller as needed.
+async function canvasesToPdfBase64(canvases){
+  for (const factor of [1, 0.8, 0.65, 0.5]){
+    const sized = factor === 1 ? canvases : canvases.map(c => scaleCanvas(c, factor));
+    for (const quality of [0.9, 0.8, 0.7, 0.6, 0.5, 0.4]){
+      const images = [];
+      for (const c of sized){
+        const blob = await new Promise(resolve => c.toBlob(resolve, 'image/jpeg', quality));
+        images.push({ jpeg: new Uint8Array(await blob.arrayBuffer()), w: c.width, h: c.height });
+      }
+      const base64 = bytesToBase64(buildPdfFromJpegs(images));
+      if (base64.length <= PDF_MAX_BASE64) return base64;
+    }
+  }
+  throw new Error('הטבלאות גדולות מדי לשליחה');
+}
+
+// Puts the PDF made of these pictures in the queue (one e-mail) and waits for the
+// server to send it. Returns { ok, message }. Started from the admin page (see runSendPdfJob).
+async function sendCanvasesPdf(canvases, subject, onProgress){
   try{
     const settings = await getDoc(doc(firestoreDb, FIRESTORE_COLLECTION, STORAGE_KEY, 'meta', 'pdfSettings'));
     const email = settings.exists() ? (settings.data().email || '') : '';
     if (!email) return { ok: false, message: 'לא הוגדרה כתובת לשליחה. מגדירים אותה כאן, בלשונית "משתנים".' };
     onProgress('מכין…');
-    const pdfBase64 = await canvasToPdfBase64(await renderTableToCanvas(table, title));
+    const pdfBase64 = await canvasesToPdfBase64(canvases);
     const id = 'pdf-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8);
     const ref = doc(firestoreDb, FIRESTORE_COLLECTION, STORAGE_KEY, 'pdfOutbox', id);
     onProgress('שולח…');
-    await setDoc(ref, { status: 'pending', createdAt: new Date().toISOString(), subject: title, filename: 'הנוסע-המתמיד.pdf', pdfBase64 });
+    await setDoc(ref, { status: 'pending', createdAt: new Date().toISOString(), subject, filename: 'הנוסע-המתמיד.pdf', pdfBase64 });
     // The server function picks it up within a minute or so.
     for (let i = 0; i < 45; i++){
       await new Promise(resolve => setTimeout(resolve, 3000));
@@ -3714,22 +3755,33 @@ async function sendTablePdf(table, title, onProgress){
   }
 }
 
-// The admin page sends a table by loading this page in a hidden frame with
-// ?sendpdf=<week>&day=<day or total>&job=<id>: the page shows that table, sends
-// it, and tells the admin page how it went.
+// The admin page sends the tables by loading this page in a hidden frame with
+// ?sendpdf=<week>,<week>,...&job=<id>: the page draws each of those weeks, puts
+// them in one PDF (a page for each week) and one e-mail, and tells the admin
+// page how it went.
 async function runSendPdfJob(params){
   const job = params.get('job');
   const report = (ok, message) => { try{ parent.postMessage({ type: 'pdf-job', job, ok, message }, location.origin); } catch(e){} };
   try{
     if (document.fonts && document.fonts.ready) await document.fonts.ready;
-    await new Promise(resolve => setTimeout(resolve, 800));
-    const table = document.querySelector('#frequentArchiveView table');
-    const weekEntry = getDisplayArchive().find(e => e.type === 'weekly' && e.weekKey === params.get('sendpdf'));
-    if (!table || !weekEntry){ report(false, 'הטבלה לא נמצאה'); return; }
-    const box = document.querySelector('#frequentArchiveView .archive-date');
-    const label = (box.querySelector('.merged-dropdown-toggle') || {}).textContent || '';
-    // (The list of what is missing is shown on the screen only, not in the PDF.)
-    const result = await sendTablePdf(table, 'הנוסע המתמיד · ' + label, (text) => report(true, text));
+    const weekKeys = params.get('sendpdf').split(',').filter(Boolean);
+    const canvases = [];
+    const labels = [];
+    for (const weekKey of weekKeys){
+      const weekEntry = getDisplayArchive().find(e => e.type === 'weekly' && e.weekKey === weekKey);
+      if (!weekEntry){ report(false, 'הטבלה לא נמצאה'); return; }
+      selectedWeeklyKey = weekKey;
+      renderFrequentFlyerView();
+      await new Promise(resolve => setTimeout(resolve, 800));
+      const table = document.querySelector('#frequentArchiveView table');
+      const box = document.querySelector('#frequentArchiveView .archive-date');
+      if (!table || !box){ report(false, 'הטבלה לא נמצאה'); return; }
+      const label = (box.querySelector('.merged-dropdown-toggle') || {}).textContent || '';
+      labels.push(label);
+      // (The list of what is missing is shown on the screen only, not in the PDF.)
+      canvases.push(await renderTableToCanvas(table, 'הנוסע המתמיד · ' + label));
+    }
+    const result = await sendCanvasesPdf(canvases, 'הנוסע המתמיד · ' + labels.join(', '), (text) => report(true, text));
     report(result.ok, result.message);
   } catch(e){
     report(false, 'השליחה נכשלה: ' + (e && e.message ? e.message : String(e)));
@@ -4979,7 +5031,6 @@ function renderTodayHistoryTableNow(container){
     const rank = new Map(todayArchiveSortOrder.ids.map((id, i) => [id, i]));
     orderedStudents.sort((a, b) => rank.get(a.id) - rank.get(b.id));
   }
-  const category = CATEGORIES.find(c => c.key === activeKey);
   orderedStudents.forEach(student => {
     const tr = document.createElement('tr');
     const nameTd = document.createElement('td');
@@ -4996,6 +5047,7 @@ function renderTodayHistoryTableNow(container){
       // מקוואות/רמב"ם: a checkmark, like on today's board (worth 2 points
       // only in הנוסע המתמיד).
       td.textContent = ARCHIVE_WEEKLY_KEYS[activeKey] ? (val > 0 ? '✓' : '') : (val || '');
+      if (activeKey === 'c3' && val < 0) td.classList.add('disturb'); // a disturbance: red, -1
       if (activeKey === 'total') { tr.appendChild(td); return; }
       td.style.cursor = 'pointer';
       const editCell = (field, value) => requireArchiveEditAccess(() => {
@@ -5017,7 +5069,7 @@ function renderTodayHistoryTableNow(container){
         onClick = () => editCell('purchases', (s.purchases || 0) + 1);
         if ((s.purchases || 0) > 0) undo = () => editCell('purchases', s.purchases - 1);
       } else {
-        onClick = () => editCell('cat:' + activeKey, cats[activeKey] ? 0 : category.value);
+        onClick = () => editCell('cat:' + activeKey, nextCategoryValue(activeKey, cats[activeKey]));
       }
       td.addEventListener('click', onClick);
       if (undo){
@@ -5403,7 +5455,7 @@ async function initApp(){
     lastViewJson = JSON.stringify(state);
     const pdfJobParams = new URLSearchParams(location.search);
     if (pdfJobParams.get('sendpdf')){
-      selectedWeeklyKey = pdfJobParams.get('sendpdf');
+      selectedWeeklyKey = pdfJobParams.get('sendpdf').split(',')[0];
     }
     render();
     renderFrequentFlyerView();

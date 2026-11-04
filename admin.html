@@ -995,9 +995,10 @@ async function renderPhonesTab(container){
       sendMenu.innerHTML = '';
       if (!weeks.length){ sendMenu.textContent = 'אין עדיין שבועות בארכיון.'; return; }
       weeks.forEach(w => {
-        const line = document.createElement('div');
+        // Every week has a tick; the ticked weeks are sent together, in one file.
+        const line = document.createElement('label');
         line.className = 'send-pdf-week';
-        // A tick to pick this week; the picked weeks are sent together below.
+        line.style.cursor = 'pointer';
         const pick = document.createElement('input');
         pick.type = 'checkbox';
         pick.className = 'send-pdf-pick';
@@ -1009,16 +1010,6 @@ async function renderPhonesTab(container){
         name.className = 'send-pdf-name';
         name.textContent = weekLabel(w);
         line.appendChild(name);
-        // A week is sent as its detailed report (there are no tables by day).
-        const choices = [{ label: 'דוח מפורט', day: 'total' }];
-        choices.forEach(c => {
-          const b = document.createElement('button');
-          b.type = 'button';
-          b.className = 'small-btn';
-          b.textContent = c.label;
-          b.addEventListener('click', () => { sendMenu.style.display = 'none'; sendPdf(w.weekKey, c.day, weekLabel(w) + ' · ' + c.label); });
-          line.appendChild(b);
-        });
         sendMenu.appendChild(line);
       });
       const multi = document.createElement('div');
@@ -1026,20 +1017,14 @@ async function renderPhonesTab(container){
       multiBtn = document.createElement('button');
       multiBtn.type = 'button';
       multiBtn.className = 'small-btn';
-      multiBtn.addEventListener('click', async () => {
-        const picked = [...sendMenu.querySelectorAll('.send-pdf-pick:checked')].map(c => ({ weekKey: c.dataset.weekKey, label: c.dataset.label }));
+      multiBtn.addEventListener('click', () => {
+        // The weeks are the pages of one PDF, oldest first, in one e-mail.
+        const picked = [...sendMenu.querySelectorAll('.send-pdf-pick:checked')]
+          .map(c => ({ weekKey: c.dataset.weekKey, label: c.dataset.label }))
+          .sort((a, b) => (a.weekKey < b.weekKey ? -1 : 1));
         if (!picked.length) return;
         sendMenu.style.display = 'none';
-        // One e-mail for each week, one after the other.
-        let sent = 0;
-        for (let i = 0; i < picked.length; i++){
-          const prefix = '(' + (i + 1) + '/' + picked.length + ') ';
-          const result = await sendPdf(picked[i].weekKey, 'total', picked[i].label + ' · דוח מפורט', prefix);
-          if (result.ok) sent++;
-          else break;
-        }
-        sendStatus.className = 'save-status' + (sent === picked.length ? '' : ' err');
-        sendStatus.textContent = sent === picked.length ? 'נשלחו ' + sent + ' שבועות' : 'נשלחו ' + sent + ' מתוך ' + picked.length + ' - ' + sendStatus.textContent;
+        sendPdf(picked.map(x => x.weekKey), picked.length === 1 ? picked[0].label : picked.length + ' שבועות');
       });
       multi.appendChild(multiBtn);
       sendMenu.appendChild(multi);
@@ -1049,7 +1034,7 @@ async function renderPhonesTab(container){
     function updateMultiBtn(){
       if (!multiBtn) return;
       const n = sendMenu.querySelectorAll('.send-pdf-pick:checked').length;
-      multiBtn.textContent = n ? 'שליחת השבועות שסומנו (' + n + ')' : 'סמן שבועות לשליחה';
+      multiBtn.textContent = n ? 'שליחה (' + n + (n === 1 ? ' שבוע' : ' שבועות') + ')' : 'סמן שבועות לשליחה';
       multiBtn.disabled = !n;
     }
     sendBtn.addEventListener('click', async () => {
@@ -1058,17 +1043,16 @@ async function renderPhonesTab(container){
       try{ await buildSendMenu(); } catch(e){ sendMenu.textContent = 'שגיאה בטעינה: ' + (e && e.message ? e.message : String(e)); }
     });
 
-    // The table is made by the main page, loaded in a hidden frame; it sends
-    // the PDF and reports back.
-    function sendPdf(weekKey, day, label, prefix){
-      prefix = prefix || '';
+    // The tables are made by the main page, loaded in a hidden frame; it puts
+    // them in one PDF, sends it in one e-mail and reports back.
+    function sendPdf(weekKeys, label){
       return new Promise((resolve) => {
       const job = 'job' + Date.now();
       const frame = document.createElement('iframe');
       frame.style.cssText = 'position:fixed;left:-10000px;top:0;width:1400px;height:1000px;border:0;';
-      frame.src = 'index.html?sendpdf=' + encodeURIComponent(weekKey) + '&day=' + encodeURIComponent(day) + '&job=' + job;
+      frame.src = 'index.html?sendpdf=' + weekKeys.map(encodeURIComponent).join(',') + '&job=' + job;
       sendStatus.className = 'save-status';
-      sendStatus.textContent = prefix + label + ': מכין…';
+      sendStatus.textContent = label + ': מכין…';
       let finished = false;
       const finish = (ok, message) => {
         finished = true;
@@ -1076,17 +1060,17 @@ async function renderPhonesTab(container){
         clearTimeout(giveUp);
         frame.remove();
         sendStatus.className = 'save-status ' + (ok ? '' : 'err');
-        sendStatus.textContent = prefix + label + ': ' + message;
+        sendStatus.textContent = label + ': ' + message;
         resolve({ ok, message });
       };
       function onMessage(e){
         if (e.origin !== location.origin || !e.data || e.data.type !== 'pdf-job' || e.data.job !== job) return;
         // a progress line ("מכין…", "שולח…") or the final answer
-        if (/^(מכין|שולח)/.test(e.data.message) && e.data.ok) sendStatus.textContent = prefix + label + ': ' + e.data.message;
+        if (/^(מכין|שולח)/.test(e.data.message) && e.data.ok) sendStatus.textContent = label + ': ' + e.data.message;
         else finish(e.data.ok, e.data.message);
       }
       window.addEventListener('message', onMessage);
-      const giveUp = setTimeout(() => { if (!finished) finish(false, 'לא התקבלה תשובה, נסה שוב'); }, 180000);
+      const giveUp = setTimeout(() => { if (!finished) finish(false, 'לא התקבלה תשובה, נסה שוב'); }, 120000 + 30000 * weekKeys.length);
       document.body.appendChild(frame);
       });
     }
