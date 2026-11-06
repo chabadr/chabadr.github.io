@@ -2983,6 +2983,21 @@ function showTestDetailsModal(col, onSave, onDelete){
   input.focus();
 }
 
+// Sorting of the tests table by a column (click its header; again = the other
+// direction). The order is made once and kept while scores are entered, so a row
+// does not jump to another place under the cursor.
+let testsSort = { key: null, dir: 1, order: null };
+function testsSortDefaultDir(key){ return (key === 'family' || key === 'first' || key === 'class') ? 1 : -1; }
+function setTestsSort(key){
+  if (testsSort.key === key) testsSort = { key, dir: -testsSort.dir, order: null };
+  else testsSort = { key, dir: testsSortDefaultDir(key), order: null };
+  renderMetivtaView();
+}
+function testsSortArrow(key){
+  if (testsSort.key !== key) return '';
+  return testsSort.dir === testsSortDefaultDir(key) ? ' ▼' : ' ▲';
+}
+
 function buildMetivtaTestsSection(archivedKeys){
   const wrap = document.createElement('div');
   wrap.className = 'archive-entry';
@@ -3014,6 +3029,31 @@ function buildMetivtaTestsSection(archivedKeys){
     first: metivtaFirstName(r.id, r.isExtra),
     clsLabel: metivtaClassLabel(r.id, r.isExtra)
   })).filter(r => !archivedKeys.has(r.key));
+  if (testsSort.key){
+    const scoreOf = (row) => {
+      const v = (tests.scores[testsSort.key] || {})[row.key];
+      const n = typeof v === 'number' ? v : (v !== undefined && v !== '' && Number.isFinite(Number(v)) ? Number(v) : null);
+      return n;
+    };
+    const sorted = rows.map((row, index) => ({ row, index })).sort((a, b) => {
+      let c;
+      if (testsSort.key === 'family') c = a.row.family.localeCompare(b.row.family, 'he');
+      else if (testsSort.key === 'first') c = a.row.first.localeCompare(b.row.first, 'he');
+      else if (testsSort.key === 'class') c = a.row.clsLabel.localeCompare(b.row.clsLabel, 'he', { numeric: true });
+      else {
+        // Scores: numbers by value, rows with no score always at the end.
+        const x = scoreOf(a.row), y = scoreOf(b.row);
+        if (x === null && y === null) c = 0;
+        else if (x === null) return 1;
+        else if (y === null) return -1;
+        else c = x - y;
+      }
+      return c * testsSort.dir || a.index - b.index;
+    }).map(x => x.row);
+    if (!testsSort.order) testsSort.order = sorted.map(r => r.key);
+    const rank = new Map(testsSort.order.map((k, i) => [k, i]));
+    rows.sort((a, b) => (rank.has(a.key) ? rank.get(a.key) : 1e9) - (rank.has(b.key) ? rank.get(b.key) : 1e9));
+  }
 
   const W = {
     family: textColumnWidth(rows.map(r => r.family), 'משפחה', 4),
@@ -3026,10 +3066,13 @@ function buildMetivtaTestsSection(archivedKeys){
 
   const thead = document.createElement('thead');
   const trh = document.createElement('tr');
-  [['משפחה', W.family], ['פרטי', W.first], ['כיתה', W.cls]].forEach(([label, width]) => {
+  [['משפחה', W.family, 'family'], ['פרטי', W.first, 'first'], ['כיתה', W.cls, 'class']].forEach(([label, width, key]) => {
     const th = document.createElement('th');
-    th.textContent = label;
+    th.textContent = label + testsSortArrow(key);
     th.style.width = width + 'px';
+    th.style.cursor = 'pointer';
+    th.title = 'מיון לפי הטור הזה';
+    th.addEventListener('click', () => setTestsSort(key));
     trh.appendChild(th);
   });
   // Each test column: its title (click to change it or delete the test).
@@ -3039,12 +3082,25 @@ function buildMetivtaTestsSection(archivedKeys){
     th.style.width = W.test + 'px';
     th.style.cursor = 'pointer';
     th.style.whiteSpace = 'normal';
-    th.title = 'שינוי פרטי המבחן';
-    th.textContent = col.title || ('מבחן ' + (i + 1));
+    th.title = 'מיון לפי הטור הזה';
+    const label = document.createElement('span');
+    label.textContent = (col.title || ('מבחן ' + (i + 1))) + testsSortArrow(col.id);
     if (!col.title) th.style.color = 'var(--ink-soft)';
-    th.addEventListener('click', guarded(() => showTestDetailsModal(col,
-      (title) => commitOp({ kind: 'testTitle', colId: col.id, value: title }),
-      () => commitOp({ kind: 'testDelete', colId: col.id }))));
+    th.appendChild(label);
+    // The pencil changes the details of the test; the header itself sorts.
+    const edit = document.createElement('button');
+    edit.type = 'button';
+    edit.textContent = '✎';
+    edit.title = 'שינוי פרטי המבחן';
+    edit.style.cssText = 'margin-inline-start:4px;border:none;background:transparent;cursor:pointer;font-size:14px;color:var(--ink-soft);padding:0 2px;';
+    edit.addEventListener('click', (e) => {
+      e.stopPropagation();
+      guarded(() => showTestDetailsModal(col,
+        (title) => commitOp({ kind: 'testTitle', colId: col.id, value: title }),
+        () => commitOp({ kind: 'testDelete', colId: col.id })))();
+    });
+    th.appendChild(edit);
+    th.addEventListener('click', () => setTestsSort(col.id));
     trh.appendChild(th);
   });
   thead.appendChild(trh);
