@@ -1085,7 +1085,19 @@ function normalizeMain(raw){
   });
   if (!Array.isArray(parsed.metivtaArchivedKeys)) parsed.metivtaArchivedKeys = [];
   if (!Array.isArray(parsed.recentOpIds)) parsed.recentOpIds = [];
+  ensureMetivtaTests(parsed);
   return parsed;
+}
+
+// The Metivta tests table: columns = [{ id, title }], scores = { column id: { row key: score } }.
+// There is always an empty column at the end, ready for the next test.
+function ensureMetivtaTests(main){
+  let t = main.metivtaTests;
+  if (!t || typeof t !== 'object' || Array.isArray(t)) t = main.metivtaTests = {};
+  if (!Array.isArray(t.columns)) t.columns = [];
+  if (!t.scores || typeof t.scores !== 'object' || Array.isArray(t.scores)) t.scores = {};
+  if (!t.columns.length) t.columns.push({ id: 't-first', title: '' });
+  return t;
 }
 
 function emptyMainDoc(){
@@ -1492,6 +1504,26 @@ function applyGlobalOp(main, op){
   } else if (op.kind === 'mclass'){
     if (!acceptEdit(main, 'g:mclass:' + op.group + ':' + op.sid, op.t)) return;
     (op.group === 'extra' ? main.metivtaExtraClass : main.metivtaClass)[op.sid] = op.value;
+  } else if (op.kind === 'testTitle'){
+    if (!acceptEdit(main, 'g:ttitle:' + op.colId, op.t)) return;
+    const col = ensureMetivtaTests(main).columns.find(c => c.id === op.colId);
+    if (col) col.title = op.value;
+  } else if (op.kind === 'testScore'){
+    if (!acceptEdit(main, 'g:tscore:' + op.colId + ':' + op.rowKey, op.t)) return;
+    const tests = ensureMetivtaTests(main);
+    if (!tests.columns.some(c => c.id === op.colId)) return;
+    const scores = tests.scores[op.colId] || (tests.scores[op.colId] = {});
+    if (op.value === '' || op.value === null || op.value === undefined) delete scores[op.rowKey];
+    else scores[op.rowKey] = op.value;
+    // A test column that got a score: the next, empty one is added after it.
+    const last = tests.columns[tests.columns.length - 1];
+    if (last && Object.keys(tests.scores[last.id] || {}).length) tests.columns.push({ id: 't-' + op.id, title: '' });
+  } else if (op.kind === 'testDelete'){
+    if (!acceptEdit(main, 'g:tdelete:' + op.colId, op.t)) return;
+    const tests = ensureMetivtaTests(main);
+    tests.columns = tests.columns.filter(c => c.id !== op.colId);
+    delete tests.scores[op.colId];
+    ensureMetivtaTests(main);
   } else if (op.kind === 'marchived'){
     if (!acceptEdit(main, 'g:marchived:' + op.key, op.t)) return;
     const set = new Set(main.metivtaArchivedKeys || []);
@@ -2898,7 +2930,158 @@ function renderMetivtaViewNow(){
   if (archivedKeys.size > 0){
     el.appendChild(buildMetivtaTable({ days, archivedKeys, archiveTable: true, availableWidth }));
   }
+  el.appendChild(buildMetivtaTestsSection(archivedKeys));
   el.querySelectorAll('table.metivta-table th, table.metivta-table td').forEach(shrinkCellTextToFit);
+}
+
+// ---- The tests table (opens with the admin code) ----
+function scoreFromText(text){
+  const t = String(text).trim();
+  if (t === '') return '';
+  const n = Number(t);
+  return Number.isFinite(n) ? n : t;
+}
+
+// Title and delete button of one test, in a small window.
+function showTestDetailsModal(col, onSave, onDelete){
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  const box = document.createElement('div');
+  box.className = 'modal-box';
+  const msg = document.createElement('div');
+  msg.className = 'modal-msg';
+  msg.textContent = 'פרטי המבחן (שם, תאריך, חומר...):';
+  box.appendChild(msg);
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.value = col.title || '';
+  input.style.cssText = "width:100%;box-sizing:border-box;font:inherit;font-size:16px;padding:10px;margin:8px 0 12px;border:1.5px solid var(--line);border-radius:8px;background:var(--paper);color:var(--ink);";
+  box.appendChild(input);
+  const row = document.createElement('div');
+  row.className = 'modal-btns';
+  const close = () => overlay.remove();
+  const save = document.createElement('button');
+  save.className = 'modal-btn modal-btn-confirm';
+  save.textContent = 'שמירה';
+  save.addEventListener('click', () => { close(); onSave(input.value.trim()); });
+  const del = document.createElement('button');
+  del.className = 'modal-btn modal-btn-cancel';
+  del.style.color = 'var(--danger)';
+  del.textContent = 'מחיקת המבחן';
+  del.addEventListener('click', () => {
+    close();
+    showModal('למחוק את המבחן "' + (col.title || 'ללא שם') + '" ואת כל הציונים שלו?', { confirmText: 'מחיקה', onConfirm: onDelete });
+  });
+  const cancel = document.createElement('button');
+  cancel.className = 'modal-btn modal-btn-cancel';
+  cancel.textContent = 'ביטול';
+  cancel.addEventListener('click', close);
+  [save, del, cancel].forEach(b => row.appendChild(b));
+  box.appendChild(row);
+  overlay.appendChild(box);
+  document.body.appendChild(overlay);
+  input.focus();
+}
+
+function buildMetivtaTestsSection(archivedKeys){
+  const wrap = document.createElement('div');
+  wrap.className = 'archive-entry';
+  const open = testsOpen();
+  const dateEl = document.createElement('div');
+  dateEl.className = 'archive-date weekly-header-row';
+  const headerGroup = document.createElement('div');
+  headerGroup.className = 'header-group';
+  const titleSpan = document.createElement('span');
+  titleSpan.textContent = (open ? '▾ ' : '◂ 🔒 ') + 'מבחנים';
+  titleSpan.style.cursor = 'pointer';
+  titleSpan.title = open ? 'סגירה' : 'פתיחה בקוד ניהול';
+  titleSpan.addEventListener('click', () => {
+    if (testsOpen()){ setTestsOpen(false); renderMetivtaView(); return; }
+    showArchiveCodePrompt(() => { setTestsOpen(true); renderMetivtaView(); }, ADMIN_ACCESS_CODE);
+  });
+  headerGroup.appendChild(titleSpan);
+  dateEl.appendChild(headerGroup);
+  wrap.appendChild(dateEl);
+  if (!open) return wrap;
+
+  const tests = state.metivtaTests && Array.isArray(state.metivtaTests.columns) ? state.metivtaTests : { columns: [{ id: 't-first', title: '' }], scores: {} };
+  const rows = [
+    ...state.students.map(st => ({ id: st.id, isExtra: false })),
+    ...state.metivtaExtra.map(st => ({ id: st.id, isExtra: true }))
+  ].map(r => ({
+    key: metivtaRowKey(r.id, r.isExtra),
+    family: metivtaFamilyName(r.id, r.isExtra),
+    first: metivtaFirstName(r.id, r.isExtra),
+    clsLabel: metivtaClassLabel(r.id, r.isExtra)
+  })).filter(r => !archivedKeys.has(r.key));
+
+  const W = {
+    family: textColumnWidth(rows.map(r => r.family), 'משפחה', 4),
+    first: textColumnWidth(rows.map(r => r.first), 'פרטי', 4),
+    cls: 34, test: 84
+  };
+  const table = document.createElement('table');
+  table.className = 'archive-table tests-table';
+  table.style.width = 'max(100%, ' + (W.family + W.first + W.cls + W.test * tests.columns.length) + 'px)';
+
+  const thead = document.createElement('thead');
+  const trh = document.createElement('tr');
+  [['משפחה', W.family], ['פרטי', W.first], ['כיתה', W.cls]].forEach(([label, width]) => {
+    const th = document.createElement('th');
+    th.textContent = label;
+    th.style.width = width + 'px';
+    trh.appendChild(th);
+  });
+  // Each test column: its title (click to change it or delete the test).
+  const guarded = (fn) => () => { if (!testsOpen()){ renderMetivtaView(); return; } setTestsOpen(true); fn(); };
+  tests.columns.forEach((col, i) => {
+    const th = document.createElement('th');
+    th.style.width = W.test + 'px';
+    th.style.cursor = 'pointer';
+    th.style.whiteSpace = 'normal';
+    th.title = 'שינוי פרטי המבחן';
+    th.textContent = col.title || ('מבחן ' + (i + 1));
+    if (!col.title) th.style.color = 'var(--ink-soft)';
+    th.addEventListener('click', guarded(() => showTestDetailsModal(col,
+      (title) => commitOp({ kind: 'testTitle', colId: col.id, value: title }),
+      () => commitOp({ kind: 'testDelete', colId: col.id }))));
+    trh.appendChild(th);
+  });
+  thead.appendChild(trh);
+  table.appendChild(thead);
+
+  const tbody = document.createElement('tbody');
+  rows.forEach(r => {
+    const tr = document.createElement('tr');
+    [r.family, r.first, r.clsLabel].forEach(text => {
+      const td = document.createElement('td');
+      td.textContent = text;
+      tr.appendChild(td);
+    });
+    tests.columns.forEach(col => {
+      const td = document.createElement('td');
+      const score = (tests.scores[col.id] || {})[r.key];
+      td.textContent = score === undefined ? '' : String(score);
+      td.style.cursor = 'pointer';
+      td.addEventListener('click', guarded(() => {
+        const next = prompt('ציון ' + r.family + ' ' + r.first + ':', score === undefined ? '' : String(score));
+        if (next === null) return;
+        const value = scoreFromText(next);
+        if ((score === undefined ? '' : score) === value) return;
+        commitOp({ kind: 'testScore', colId: col.id, rowKey: r.key, value });
+      }));
+      tr.appendChild(td);
+    });
+    tbody.appendChild(tr);
+  });
+  table.appendChild(tbody);
+  stickLeadingColumns(table, [W.family, W.first, W.cls]);
+
+  const scrollWrap = document.createElement('div');
+  scrollWrap.className = 'table-scroll';
+  scrollWrap.appendChild(table);
+  wrap.appendChild(scrollWrap);
+  return wrap;
 }
 
 // Rows keep one line: text that doesn't fit its cell is made a little smaller
@@ -5609,7 +5792,8 @@ function archiveLockMinutesLeft(){
   return left > 0 ? Math.ceil(left / 60000) : 0;
 }
 
-function showArchiveCodePrompt(onSuccess){
+function showArchiveCodePrompt(onSuccess, accessCode){
+  accessCode = accessCode || ARCHIVE_ACCESS_CODE;
   // No dimming and no title: just the small number pad, at the bottom left
   // of the screen. A click anywhere else closes it.
   const overlay = document.createElement('div');
@@ -5663,8 +5847,8 @@ function showArchiveCodePrompt(onSuccess){
   function press(digit){
     entered += digit;
     // The digits keep their places while a code is being typed.
-    if (entered.length < ARCHIVE_ACCESS_CODE.length) return;
-    if (entered === ARCHIVE_ACCESS_CODE){
+    if (entered.length < accessCode.length) return;
+    if (entered === accessCode){
       writeArchiveLock({ tries: 0, until: 0 });
       overlay.remove();
       onSuccess();
@@ -5683,6 +5867,22 @@ function showArchiveCodePrompt(onSuccess){
   document.body.appendChild(overlay);
   shuffleKeys();
   showLockState();
+}
+
+// The tests table of the Metivta page opens only with the admin code (the one
+// of admin.html). Once open it stays open for a while after the last use.
+const ADMIN_ACCESS_CODE = '2374';
+const TESTS_OPEN_KEY = 'metivtaTestsOpenUntil';
+const TESTS_OPEN_SECONDS = 600;
+let testsOpenMemory = 0;
+function testsOpen(){
+  let until = testsOpenMemory;
+  try{ until = Math.max(until, parseInt(localStorage.getItem(TESTS_OPEN_KEY), 10) || 0); } catch(e){}
+  return Date.now() < until;
+}
+function setTestsOpen(open){
+  testsOpenMemory = open ? Date.now() + TESTS_OPEN_SECONDS * 1000 : 0;
+  try{ localStorage.setItem(TESTS_OPEN_KEY, String(testsOpenMemory)); } catch(e){}
 }
 
 function requireArchiveEditAccess(callback){
