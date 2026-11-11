@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npx --yes firebase-tools@13 functions:secrets:set *)",
+      "Bash(npx --yes firebase-tools@13 deploy *)"
+    ]
+  }
+}

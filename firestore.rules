@@ -1,0 +1,52 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // A browser where the admin code was entered in admin.html: the server
+    // function unlockDevice marks its (anonymous) Firebase user as admin.
+    function isAdmin() {
+      return request.auth != null && request.auth.token.admin == true;
+    }
+
+    // The class board (index.html), the archive and הנוסע המתמיד stay open to
+    // the site as before: the pages gate editing with their own codes.
+    match /classroom_points/{mainId} {
+      allow read, write: if true;
+
+      match /archiveWeeks/{weekKey} {
+        allow read, write: if true;
+      }
+      // Written by the board in the same transaction as the change it logs.
+      match /editLog/{day} {
+        allow read, write: if true;
+      }
+      match /meta/dailyArchive {
+        allow read, write: if true;
+      }
+
+      // Private: phones, SMS and e-mail settings, messages, the PDF queue.
+      match /meta/{docId} {
+        allow read, write: if isAdmin();
+      }
+      match /scheduledSms/{id} {
+        allow read, write: if isAdmin();
+      }
+      match /sentSms/{id} {
+        allow read, write: if isAdmin();
+      }
+      match /pdfOutbox/{id} {
+        allow read, write: if isAdmin();
+      }
+
+      // The parents' form (up.html) only adds; reading is for the admin page.
+      match /parentUpdateLog/{id} {
+        allow create: if true;
+        allow read, update, delete: if isAdmin();
+      }
+      match /parentRequests/{id} {
+        allow create: if true;
+        allow read, update, delete: if isAdmin();
+      }
+    }
+  }
+}

@@ -1,0 +1,4 @@
+functions/node_modules/
+functions/package-lock.json
+functions/.secret.local
+*-debug.log

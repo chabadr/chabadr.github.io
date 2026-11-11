@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>התשובות נשלחו</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Rubik:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --paper:#F6F3EA;
+    --ink:#22304A;
+    --ink-soft:#4B5C79;
+    --green:#2E7D4F;
+    --green-bg:#E3F3E9;
+    --radius:10px;
+  }
+  * { box-sizing: border-box; }
+  html, body{
+    margin: 0; padding: 0;
+    background: var(--paper);
+    color: var(--ink);
+    font-family: 'Rubik', sans-serif;
+  }
+  .wrap{
+    max-width: 480px;
+    margin: 0 auto;
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px 16px;
+    text-align: center;
+  }
+  .box{
+    background: var(--green-bg);
+    color: var(--green);
+    border-radius: var(--radius);
+    padding: 28px 20px;
+    font-size: 18px;
+    font-weight: 600;
+    line-height: 1.6;
+  }
+  .checkmark{
+    font-size: 40px;
+    margin-bottom: 10px;
+  }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="box">
+      <div class="checkmark">✓</div>
+      <span id="sentText">התשובות נשלחו בהצלחה, תודה!</span>
+    </div>
+  </div>
+<script>
+  // An update of an old week waits for the teacher's approval.
+  if (new URLSearchParams(location.search).get('pending')){
+    document.getElementById('sentText').textContent = 'העדכון נשלח לאישור המורה, ויתעדכן לאחר שיאושר. תודה!';
+  }
+</script>
+</body>
+</html>
