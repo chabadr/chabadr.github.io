@@ -466,7 +466,7 @@ function editLogDocRef(day){
   return doc(firestoreDb, FIRESTORE_COLLECTION, STORAGE_KEY, 'editLog', day);
 }
 
-function commitOp(op){
+function commitOp(op, opts){
   op.id = newOpId();
   op.t = Date.now();
   if (DAY_OP_KINDS.has(op.kind)) op.day = activityDayStr();
@@ -475,8 +475,36 @@ function commitOp(op){
   try{ const log = buildEditLog(op); if (log) op.log = log; } catch(e){}
   pendingOps.push(op);
   persistPendingOps();
-  rebuildViewAndRender();
+  if (opts && opts.paintFirst) rebuildViewAndRenderAfterPaint(opts.focus);
+  else rebuildViewAndRender();
   scheduleSync(0);
+}
+
+// For a click in one of the archive tables: the data is updated at once, and
+// the screen is drawn again only after the browser has shown the click itself
+// (the cell that was pressed, a window that closed) - first the table that was
+// clicked ('history' = the class archive, 'weekly' = הנוסע המתמיד), then the
+// rest. A full redraw that happens meanwhile cancels what is still waiting.
+let renderWaiting = null;
+function afterPaint(fn){
+  requestAnimationFrame(() => setTimeout(fn, 0));
+}
+function rebuildViewAndRenderAfterPaint(focus){
+  rebuildView();
+  const json = viewSignature();
+  refreshSaveBanner();
+  if (json === lastViewJson) return;
+  lastViewJson = json;
+  const mine = renderWaiting = { focus };
+  afterPaint(() => {
+    if (renderWaiting !== mine) return;
+    if (focus === 'history' && todayHistoryContainerEl && todayHistoryContainerEl.offsetParent !== null) renderTodayHistoryIfChanged(todayHistoryContainerEl);
+    else if (focus === 'weekly' && document.getElementById('frequentArchiveView').style.display !== 'none') renderFrequentFlyerIfChanged();
+    afterPaint(() => {
+      if (renderWaiting !== mine) return;
+      renderAll();
+    });
+  });
 }
 
 function cloneSnap(snap){
@@ -593,6 +621,7 @@ function restoreRowAnchor(a){
 }
 
 function renderAll(){
+  renderWaiting = null;
   // Redrawing empties the tables for a moment, which would scroll the page
   // back to the top - keep it (and any scrolled table) where it was.
   const keep = captureScrollPositions();
@@ -2033,9 +2062,15 @@ function screenSig(){
 function archiveTablesSig(){
   return stateSigs.archive.length + '|' + stateSigs.misc.length + '|' + screenSig() + '|' + stateSigs.misc + stateSigs.archive;
 }
+// הנוסע המתמיד shows one week: it is drawn from that week, the list of weeks
+// in its menu and the settings - a change in another week or in the class
+// archive's days does not touch it.
 let lastFrequentFlyerSig = null;
 function frequentFlyerSig(){
-  return selectedWeeklyKey + '|' + archiveTablesSig();
+  const weeklyEntries = getDisplayArchive().filter(e => e.type === 'weekly');
+  const selected = weeklyEntries.find(e => e.weekKey === selectedWeeklyKey) || weeklyEntries[0];
+  return selectedWeeklyKey + '|' + screenSig() + '|' + stateSigs.misc + '|'
+    + JSON.stringify(weeklyEntries.map(e => [e.weekKey, e.weekStart, weeklyEntryLabel(e)])) + '|' + JSON.stringify(selected || null);
 }
 
 // After a change of the data: the weekly table is drawn again only if what it
@@ -3240,7 +3275,7 @@ function showDayUpdatePicker(td, entry, s, field){
   }
   missing.forEach(day => addOption(day.label, () => showModal(
     'לעדכן ' + fieldLabel + ' של ' + name + ' ליום ' + day.label + '?\nיתווספו ' + points + (points === 1 ? ' נקודה.' : ' נקודות.'),
-    { confirmText: 'עדכון', onConfirm: () => commitOp({ kind: 'weekCell', weekKey: entry.weekKey, sid: s.id, field, target: day.key, value: points }) }
+    { confirmText: 'עדכון', onConfirm: () => commitOp({ kind: 'weekCell', weekKey: entry.weekKey, sid: s.id, field, target: day.key, value: points }, { paintFirst: true, focus: 'weekly' }) }
   )));
   if (done.length){
     const line = document.createElement('div');
@@ -3249,7 +3284,7 @@ function showDayUpdatePicker(td, entry, s, field){
     addTitle('לביטול:');
     done.forEach(day => addOption(day.label, () => showModal(
       'לבטל ' + fieldLabel + ' של ' + name + ' ביום ' + day.label + '?\nיורדו ' + day.points + (day.points === 1 ? ' נקודה.' : ' נקודות.'),
-      { confirmText: 'ביטול היום', cancelText: 'השארה', onConfirm: () => commitOp({ kind: 'weekCell', weekKey: entry.weekKey, sid: s.id, field, target: day.key, value: field === 'metivtaVal' ? -1 : 0 }) }
+      { confirmText: 'ביטול היום', cancelText: 'השארה', onConfirm: () => commitOp({ kind: 'weekCell', weekKey: entry.weekKey, sid: s.id, field, target: day.key, value: field === 'metivtaVal' ? -1 : 0 }, { paintFirst: true, focus: 'weekly' }) }
     )));
   }
   list.addEventListener('click', (e) => e.stopPropagation());
@@ -4380,7 +4415,7 @@ function renderWeeklyEntryInto(entry, container, allWeeklyEntries, opts){
         td.style.cursor = 'pointer';
         td.addEventListener('click', () => {
           requireArchiveEditAccess(() => {
-            commitOp({ kind: 'weekCell', weekKey: entry.weekKey, sid: s.id, field, target: null, value: !s[field] });
+            commitOp({ kind: 'weekCell', weekKey: entry.weekKey, sid: s.id, field, target: null, value: !s[field] }, { paintFirst: true, focus: 'weekly' });
           });
         });
       } else if (kind === 'weekly-number'){
@@ -4398,11 +4433,11 @@ function renderWeeklyEntryInto(entry, container, allWeeklyEntries, opts){
           requireArchiveEditAccess(() => {
             if (values.length === 2){
               // Only 0 or one value (מבצעים: 6): a click puts it, another click clears it.
-              commitOp({ kind: 'weekCell', weekKey: entry.weekKey, sid: s.id, field, target: null, value: (val > 0 ? 0 : values[1]) / ratio });
+              commitOp({ kind: 'weekCell', weekKey: entry.weekKey, sid: s.id, field, target: null, value: (val > 0 ? 0 : values[1]) / ratio }, { paintFirst: true, focus: 'weekly' });
               return;
             }
             showWeeklyValuePicker(td, values, val, (points) => {
-              commitOp({ kind: 'weekCell', weekKey: entry.weekKey, sid: s.id, field, target: null, value: points / ratio });
+              commitOp({ kind: 'weekCell', weekKey: entry.weekKey, sid: s.id, field, target: null, value: points / ratio }, { paintFirst: true, focus: 'weekly' });
             });
           });
         });
@@ -4865,8 +4900,16 @@ function renderTodayHistoryTableNow(container){
       if (activeKey === 'c3' && (val < 0 || (cats.c9 || 0) < 0)) td.classList.add('disturb'); // a prayer minus: red
       if (activeKey === 'total') { tr.appendChild(td); return; }
       td.style.cursor = 'pointer';
-      const editCell = (field, value) => requireArchiveEditAccess(() => {
-        commitOp({ kind: 'archiveCell', target: dayKey, group: 'main', sid: student.id, field, value });
+      // The pressed cell shows its new value at once (shownNow, when it is
+      // known here); the table is drawn again right after and has the last word.
+      const showNow = (text) => {
+        const node = [...td.childNodes].find(n => n.nodeType === 3);
+        if (node) node.nodeValue = text; else td.insertBefore(document.createTextNode(text), td.firstChild);
+      };
+      const HISTORY_CLICK = { paintFirst: true, focus: 'history' };
+      const editCell = (field, value, shownNow) => requireArchiveEditAccess(() => {
+        if (shownNow !== undefined) showNow(shownNow);
+        commitOp({ kind: 'archiveCell', target: dayKey, group: 'main', sid: student.id, field, value }, HISTORY_CLICK);
       });
       // A click puts the cell's fixed value there, another click takes it
       // out. The minus and the purchases are added one at a time, with a
@@ -4875,7 +4918,8 @@ function renderTodayHistoryTableNow(container){
       let undo = null;
       if (ARCHIVE_WEEKLY_KEYS[activeKey]){
         onClick = () => requireArchiveEditAccess(() => {
-          commitOp({ kind: 'weekCell', src: 'archive', weekKey: weekOf(entry), sid: student.id, field: ARCHIVE_WEEKLY_KEYS[activeKey], target: dayKey, value: val > 0 ? 0 : 2 });
+          showNow(val > 0 ? '' : '✓');
+          commitOp({ kind: 'weekCell', src: 'archive', weekKey: weekOf(entry), sid: student.id, field: ARCHIVE_WEEKLY_KEYS[activeKey], target: dayKey, value: val > 0 ? 0 : 2 }, HISTORY_CLICK);
         });
       } else if (activeKey === 'minus'){
         onClick = () => editCell('minusTotal', (s.minusTotal || 0) - 1);
@@ -4884,7 +4928,10 @@ function renderTodayHistoryTableNow(container){
         onClick = () => editCell('purchases', (s.purchases || 0) + 1);
         if ((s.purchases || 0) > 0) undo = () => editCell('purchases', s.purchases - 1);
       } else {
-        onClick = () => editCell('cat:' + activeKey, nextCategoryValue(activeKey, cats[activeKey]));
+        onClick = () => {
+          const next = nextCategoryValue(activeKey, cats[activeKey]);
+          editCell('cat:' + activeKey, next, String(next || ''));
+        };
       }
       td.addEventListener('click', onClick);
       if (activeKey === 'c3'){
