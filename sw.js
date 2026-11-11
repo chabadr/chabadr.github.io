@@ -3,9 +3,9 @@
 // the network when possible - so a new version always arrives - and kept in
 // a cache that is used only when the network can't be reached. The data
 // itself is cached by Firestore (see initializeFirestore in index.html).
-const CACHE = 'class-site-v1';
+const CACHE = 'class-site-v2';
 const CORE = [
-  './', 'index.html', 'admin.html', 'z1.html', 'page-nav.js', 'save-banner.js', 'firebase-config.js',
+  './', 'index.html', 'admin.html', 'styles.css', 'app.js', 'admin.css', 'admin.js', 'z1.html', 'page-nav.js', 'save-banner.js', 'firebase-config.js',
   'manifest.webmanifest', 'manifest-z1.webmanifest', 'icons/icon-192.png', 'icons/icon-512.png',
   'https://www.gstatic.com/firebasejs/10.13.0/firebase-app.js',
   'https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js'
