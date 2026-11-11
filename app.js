@@ -475,8 +475,7 @@ function commitOp(op){
   try{ const log = buildEditLog(op); if (log) op.log = log; } catch(e){}
   pendingOps.push(op);
   persistPendingOps();
-  deferWeeklyRender = DAY_OP_KINDS.has(op.kind);
-  try{ rebuildViewAndRender(); } finally { deferWeeklyRender = false; }
+  rebuildViewAndRender();
   scheduleSync(0);
 }
 
@@ -490,12 +489,61 @@ function rebuildView(){
     pendingOps = pendingOps.filter(o => !applied.has(o.id));
     persistPendingOps();
   }
-  const snap = cloneSnap(serverSnap);
+  // The archive (every past day and week) is by far the largest part. While
+  // the waiting changes are all of today's board it is not copied again for
+  // every click: the copy made the last time is used as it is.
+  const refs = archiveRefs();
+  const reuse = archiveCopy && sameRefs(archiveCopy.refs, refs) && opsLeaveArchiveAlone(pendingOps);
+  const snap = reuse
+    ? { main: cloneSnap(serverSnap.main), dailyDays: archiveCopy.dailyDays, weeks: archiveCopy.weeks }
+    : cloneSnap(serverSnap);
   snap.main = normalizeMain(snap.main);
-  applyOpsToSnapshot(snap, pendingOps);
+  const touched = applyOpsToSnapshot(snap, pendingOps);
+  const untouched = !touched.daily && touched.weeks.size === 0;
   const view = snap.main;
   view.archive = [...snap.dailyDays, ...Object.values(snap.weeks)];
   state = view;
+  const archiveSig = (reuse && untouched) ? archiveCopy.sig : JSON.stringify(view.archive);
+  stateSigs = makeStateSigs(view, archiveSig);
+  // Kept for the next time only if no waiting change is inside it.
+  archiveCopy = untouched ? { refs, dailyDays: snap.dailyDays, weeks: snap.weeks, sig: archiveSig } : null;
+}
+
+// The copy of the server's archive that the view was last made from (see
+// rebuildView), and what it was copied from - to know when the server's copy
+// was replaced (a week or the days list is always replaced whole, never
+// changed in place).
+let archiveCopy = null;
+function archiveRefs(){
+  return [serverSnap.dailyDays, serverSnap.weeks, ...Object.values(serverSnap.weeks)];
+}
+function sameRefs(a, b){
+  return a.length === b.length && a.every((x, i) => x === b[i]);
+}
+// True when none of these changes can reach the archive: changes of today's
+// board made on the day that is live now, and changes of settings / names.
+const ARCHIVE_OP_KINDS = new Set(['weekCell', 'archiveCell', 'addMetivtaDay']);
+function opsLeaveArchiveAlone(ops){
+  const live = serverSnap.main.lastActivityDate;
+  return ops.every(op => DAY_OP_KINDS.has(op.kind) ? (!!live && op.day === live) : !ARCHIVE_OP_KINDS.has(op.kind));
+}
+
+// The view in three parts, each as text, made once after every change:
+// the archive (days and weeks), today's live values, and the rest (settings,
+// names). A table is drawn again only when the parts it shows changed.
+// (The lists of applied operations and of edit times are bookkeeping that
+// nothing on the screen shows, so they are in none of the parts.)
+let stateSigs = { archive: '', live: '', misc: '' };
+function makeStateSigs(view, archiveSig){
+  const rest = {};
+  Object.keys(view).forEach(k => {
+    if (k !== 'archive' && k !== 'students' && k !== 'metivtaExtra' && k !== 'recentOpIds' && k !== 'editTimes') rest[k] = view[k];
+  });
+  return {
+    archive: archiveSig,
+    live: JSON.stringify([view.students, view.metivtaExtra]),
+    misc: JSON.stringify(rest)
+  };
 }
 
 // Redraws only when what is shown actually changed, so a sync that merely
@@ -504,7 +552,7 @@ function rebuildView(){
 // applied operations changes when a save is confirmed, but nothing shows it,
 // so it is left out - otherwise every confirmed save redrew everything.
 function viewSignature(){
-  return JSON.stringify(state, (key, value) => key === 'recentOpIds' ? undefined : value);
+  return stateSigs.live + stateSigs.misc + stateSigs.archive;
 }
 
 function rebuildViewAndRender(){
@@ -544,10 +592,6 @@ function restoreRowAnchor(a){
   if (Math.abs(delta) > 1) window.scrollBy(0, delta);
 }
 
-let deferWeeklyRender = false;
-let weeklyRenderTimer = null;
-const WEEKLY_RENDER_DELAY_MS = 350;
-
 function renderAll(){
   // Redrawing empties the tables for a moment, which would scroll the page
   // back to the top - keep it (and any scrolled table) where it was.
@@ -555,21 +599,8 @@ function renderAll(){
   const anchor = captureRowAnchor();
   const held = holdHeights();
   try{
-    render();
-    if (document.getElementById('frequentArchiveView').style.display !== 'none'){
-      // After a click on today's board the weekly table (the heaviest part to
-      // draw) is redrawn a moment later, so the board answers at once and a
-      // quick series of clicks redraws it only once.
-      if (deferWeeklyRender){
-        clearTimeout(weeklyRenderTimer);
-        weeklyRenderTimer = setTimeout(() => {
-          if (state && document.getElementById('frequentArchiveView').style.display !== 'none') renderFrequentFlyerView();
-        }, WEEKLY_RENDER_DELAY_MS);
-      } else {
-        clearTimeout(weeklyRenderTimer);
-        renderFrequentFlyerView();
-      }
-    }
+    render(true);
+    if (document.getElementById('frequentArchiveView').style.display !== 'none') renderFrequentFlyerIfChanged();
     if (document.getElementById('metivtaView').style.display !== 'none') renderMetivtaView();
     if (document.getElementById('z1View').style.display !== 'none') renderZ1View();
     restoreScrollPositions(keep);
@@ -1992,11 +2023,36 @@ function renderFrequentFlyerView(){
   keepScroll(() => renderFrequentFlyerViewNow());
 }
 
+// Everything in the data and the screen that the weekly table is drawn from.
+// (What is chosen in the table itself - week, sort, view - redraws it directly.)
+function screenSig(){
+  return window.innerWidth + 'x' + window.innerHeight + '|' + todayStr();
+}
+// The archive tables are drawn from the archive and the settings (not from
+// today's live values).
+function archiveTablesSig(){
+  return stateSigs.archive.length + '|' + stateSigs.misc.length + '|' + screenSig() + '|' + stateSigs.misc + stateSigs.archive;
+}
+let lastFrequentFlyerSig = null;
+function frequentFlyerSig(){
+  return selectedWeeklyKey + '|' + archiveTablesSig();
+}
+
+// After a change of the data: the weekly table is drawn again only if what it
+// shows changed. A click on today's board does not change it (today is not in
+// the table yet), and drawing it is the slowest thing on the page.
+function renderFrequentFlyerIfChanged(){
+  const el = document.getElementById('frequentArchiveView');
+  if (el.firstChild && lastFrequentFlyerSig !== null && lastFrequentFlyerSig === frequentFlyerSig()) return;
+  renderFrequentFlyerView();
+}
+
 function renderFrequentFlyerViewNow(){
   const el = document.getElementById('frequentArchiveView');
   el.innerHTML = '';
 
   const weeklyEntries = getDisplayArchive().filter(e => e.type === 'weekly');
+  lastFrequentFlyerSig = null;
   if (weeklyEntries.length === 0) return;
 
   if (!selectedWeeklyKey || !weeklyEntries.find(e => e.weekKey === selectedWeeklyKey)){
@@ -2005,6 +2061,7 @@ function renderFrequentFlyerViewNow(){
   const selectedEntry = weeklyEntries.find(e => e.weekKey === selectedWeeklyKey) || weeklyEntries[0];
 
   renderWeeklyEntryInto(selectedEntry, el, weeklyEntries);
+  lastFrequentFlyerSig = frequentFlyerSig();
   lookupMissingParshaNames(weeklyEntries);
 }
 
@@ -4683,11 +4740,25 @@ function renderTodayHistoryTable(container){
   keepScroll(() => renderTodayHistoryTableNow(container));
 }
 
+function todayHistoryDays(){
+  return getDisplayArchive().filter(e => e.type !== 'weekly' && !e.isLive && !(e.metivtaAddedDay && !dayHasClassData(e)));
+}
+let lastTodayHistorySig = null;
+
+// After a change of the data: the archive table is drawn again only if the
+// archived days changed (a click on today's board does not change them).
+function renderTodayHistoryIfChanged(container){
+  if (container === todayHistoryContainerEl && container.firstChild && lastTodayHistorySig !== null
+      && lastTodayHistorySig === archiveTablesSig()) return;
+  renderTodayHistoryTable(container);
+}
+
 function renderTodayHistoryTableNow(container){
   todayHistoryContainerEl = container;
   container.innerHTML = '';
 
-  const days = getDisplayArchive().filter(e => e.type !== 'weekly' && !e.isLive && !(e.metivtaAddedDay && !dayHasClassData(e)));
+  const days = todayHistoryDays();
+  lastTodayHistorySig = archiveTablesSig();
 
   const allOptions = [
     { key: 'total', label: 'סה"כ' },
@@ -4920,7 +4991,7 @@ document.addEventListener('pointerdown', () => {
   }, BOARD_RESORT_IDLE_MS);
 }, true);
 
-function render(){
+function render(afterDataChange){
   if (!state) return;
   const boardsEl = document.getElementById('boards');
   boardsEl.innerHTML = '';
@@ -4943,7 +5014,10 @@ function render(){
   boardsEl.appendChild(col2);
 
   const todayEl = document.getElementById('todaySummary');
-  renderTodayHistoryTable(todayEl);
+  // After a change of the data the archive table is drawn only if it changed;
+  // otherwise (a column opened, the screen saver...) always.
+  if (afterDataChange === true) renderTodayHistoryIfChanged(todayEl);
+  else renderTodayHistoryTable(todayEl);
 
   fitAllTextCells();
 }
