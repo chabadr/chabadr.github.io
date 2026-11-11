@@ -97,6 +97,33 @@ exports.unlockDevice = onCall({
   return { admin: true };
 });
 
+// The class board's code pad: tells which level (if any) a typed code opens -
+// "admin" (the admin code) - so the admin code is never in the public site code. Wrong tries from everywhere are counted;
+// 30 of them lock the check for 10 minutes (a right code resets the count).
+exports.verifyCode = onCall({
+  region: 'us-central1',
+  maxInstances: 3,
+  secrets: [ADMIN_CODE]
+}, async (request) => {
+  const code = String((request.data || {}).code || '').slice(0, 12);
+  const db = admin.firestore();
+  const guardRef = db.collection(FIRESTORE_COLLECTION).doc(STORAGE_KEY).collection('meta').doc('codeGuard');
+  return db.runTransaction(async (tx) => {
+    const snap = await tx.get(guardRef);
+    const g = snap.exists ? snap.data() : {};
+    const now = Date.now();
+    if (g.lockedUntil && g.lockedUntil > now) throw new HttpsError('resource-exhausted', 'locked');
+    const level = code === ADMIN_CODE.value() ? 'admin' : null;
+    if (level){
+      if (g.fails) tx.set(guardRef, { fails: 0, lockedUntil: 0 });
+      return { level };
+    }
+    const fails = (g.fails || 0) + 1;
+    tx.set(guardRef, { fails: fails >= 30 ? 0 : fails, lockedUntil: fails >= 30 ? now + 10 * 60 * 1000 : 0 });
+    return { level: null };
+  });
+});
+
 // Sends one SMS right now for the admin page. The SMS account details stay
 // here on the server (they used to be in a public file). The caller must send
 // the admin code.

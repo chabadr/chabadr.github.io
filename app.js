@@ -2390,7 +2390,7 @@ function buildMetivtaTestsSection(archivedKeys){
   titleSpan.title = open ? 'סגירה' : 'פתיחה בקוד ניהול';
   titleSpan.addEventListener('click', () => {
     if (testsOpen()){ setTestsOpen(false); renderMetivtaView(); return; }
-    showArchiveCodePrompt(() => { setTestsOpen(true); renderMetivtaView(); }, ADMIN_ACCESS_CODE);
+    showArchiveCodePrompt(() => { setTestsOpen(true); renderMetivtaView(); }, 'admin');
   });
   headerGroup.appendChild(titleSpan);
   dateEl.appendChild(headerGroup);
@@ -5223,7 +5223,8 @@ async function initApp(){
 
 // Editing the archive is opened with a code entered on a very small number
 // pad, whose digits change places each time the code has to be entered.
-// Editing the archive: 135 or the admin code.
+// Editing the archive: 135 (works without internet) or the admin code. The admin
+// code is not in this file - the server checks it (verifyCode).
 const ARCHIVE_ACCESS_CODE = '135';
 // Once opened it stays open this long after the last use - also across a
 // reload and between the site's pages (it is kept in the browser).
@@ -5284,9 +5285,18 @@ function archiveLockMinutesLeft(){
   return left > 0 ? Math.ceil(left / 60000) : 0;
 }
 
-function showArchiveCodePrompt(onSuccess, accessCode){
-  const validCodes = accessCode ? [accessCode] : [ARCHIVE_ACCESS_CODE, ADMIN_ACCESS_CODE];
-  const maxLength = Math.max(...validCodes.map(c => c.length));
+// Asks the server whether a typed code is the admin code.
+// Throws when the server can't be reached (or the check is locked).
+async function verifyAdminCode(code){
+  const { getFunctions, httpsCallable } = await import("https://www.gstatic.com/firebasejs/10.13.0/firebase-functions.js");
+  const res = await httpsCallable(getFunctions(firebaseApp, 'us-central1'), 'verifyCode')({ code });
+  return !!(res.data && res.data.level === 'admin');
+}
+
+// requiredLevel 'admin': only the admin code opens it; otherwise 135 or the
+// admin code do.
+function showArchiveCodePrompt(onSuccess, requiredLevel){
+  const maxLength = 4; // the longest code; nothing on the pad shows the length
   // No dimming and no title: just the small number pad, at the bottom left
   // of the screen. A click anywhere else closes it.
   const overlay = document.createElement('div');
@@ -5337,16 +5347,7 @@ function showArchiveCodePrompt(onSuccess, accessCode){
     keypad.style.display = '';
     return false;
   }
-  function press(digit){
-    entered += digit;
-    // The digits keep their places while a code is being typed.
-    if (!validCodes.includes(entered) && entered.length < maxLength) return;
-    if (validCodes.includes(entered)){
-      writeArchiveLock({ tries: 0, until: 0 });
-      overlay.remove();
-      onSuccess();
-      return;
-    }
+  function wrongCode(){
     entered = '';
     // A wrong code: the frame blinks red (no text), the digits move.
     box.classList.add('wrong');
@@ -5354,6 +5355,38 @@ function showArchiveCodePrompt(onSuccess, accessCode){
     // A wrong code: the code must be entered again, so the digits change places.
     if (archiveWrongTry()) showLockState();
     else shuffleKeys();
+  }
+  async function press(digit){
+    if (entered.length >= maxLength) return;
+    entered += digit;
+    // The digits keep their places while a code is being typed. 135 is checked
+    // here (so it works without internet); a 4-digit code is asked from the server.
+    if (entered === ARCHIVE_ACCESS_CODE && requiredLevel !== 'admin'){
+      writeArchiveLock({ tries: 0, until: 0 });
+      overlay.remove();
+      onSuccess();
+      return;
+    }
+    if (entered.length < maxLength) return;
+    const asked = entered;
+    let isAdmin = false;
+    try{
+      isAdmin = await verifyAdminCode(asked);
+    } catch(e){
+      entered = '';
+      lockMsg.textContent = e && e.code === 'functions/resource-exhausted' ? 'נעול זמנית. נסה שוב בעוד כמה דקות.' : 'אין חיבור לשרת.';
+      lockMsg.style.display = '';
+      setTimeout(() => { if (!archiveLockMinutesLeft()) lockMsg.style.display = 'none'; }, 2500);
+      shuffleKeys();
+      return;
+    }
+    if (isAdmin){
+      writeArchiveLock({ tries: 0, until: 0 });
+      overlay.remove();
+      onSuccess();
+      return;
+    }
+    wrongCode();
   }
 
   overlay.appendChild(box);
@@ -5364,7 +5397,6 @@ function showArchiveCodePrompt(onSuccess, accessCode){
 
 // The tests table of the Metivta page opens only with the admin code (the one
 // of admin.html). Once open it stays open for a while after the last use.
-const ADMIN_ACCESS_CODE = '2374';
 const TESTS_OPEN_KEY = 'metivtaTestsOpenUntil';
 const TESTS_OPEN_SECONDS = 600;
 let testsOpenMemory = 0;
