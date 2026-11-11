@@ -475,7 +475,8 @@ function commitOp(op){
   try{ const log = buildEditLog(op); if (log) op.log = log; } catch(e){}
   pendingOps.push(op);
   persistPendingOps();
-  rebuildViewAndRender();
+  deferWeeklyRender = DAY_OP_KINDS.has(op.kind);
+  try{ rebuildViewAndRender(); } finally { deferWeeklyRender = false; }
   scheduleSync(0);
 }
 
@@ -499,9 +500,16 @@ function rebuildView(){
 
 // Redraws only when what is shown actually changed, so a sync that merely
 // confirms what is already on screen doesn't close an open dropdown.
+// What decides whether the screen must be drawn again. The list of recently
+// applied operations changes when a save is confirmed, but nothing shows it,
+// so it is left out - otherwise every confirmed save redrew everything.
+function viewSignature(){
+  return JSON.stringify(state, (key, value) => key === 'recentOpIds' ? undefined : value);
+}
+
 function rebuildViewAndRender(){
   rebuildView();
-  const json = JSON.stringify(state);
+  const json = viewSignature();
   refreshSaveBanner();
   if (json === lastViewJson) return;
   lastViewJson = json;
@@ -536,6 +544,10 @@ function restoreRowAnchor(a){
   if (Math.abs(delta) > 1) window.scrollBy(0, delta);
 }
 
+let deferWeeklyRender = false;
+let weeklyRenderTimer = null;
+const WEEKLY_RENDER_DELAY_MS = 350;
+
 function renderAll(){
   // Redrawing empties the tables for a moment, which would scroll the page
   // back to the top - keep it (and any scrolled table) where it was.
@@ -544,7 +556,20 @@ function renderAll(){
   const held = holdHeights();
   try{
     render();
-    if (document.getElementById('frequentArchiveView').style.display !== 'none') renderFrequentFlyerView();
+    if (document.getElementById('frequentArchiveView').style.display !== 'none'){
+      // After a click on today's board the weekly table (the heaviest part to
+      // draw) is redrawn a moment later, so the board answers at once and a
+      // quick series of clicks redraws it only once.
+      if (deferWeeklyRender){
+        clearTimeout(weeklyRenderTimer);
+        weeklyRenderTimer = setTimeout(() => {
+          if (state && document.getElementById('frequentArchiveView').style.display !== 'none') renderFrequentFlyerView();
+        }, WEEKLY_RENDER_DELAY_MS);
+      } else {
+        clearTimeout(weeklyRenderTimer);
+        renderFrequentFlyerView();
+      }
+    }
     if (document.getElementById('metivtaView').style.display !== 'none') renderMetivtaView();
     if (document.getElementById('z1View').style.display !== 'none') renderZ1View();
     restoreScrollPositions(keep);
@@ -4923,6 +4948,10 @@ function render(){
   fitAllTextCells();
 }
 
+// The last size found for each group of text (see fitGroup), so the next fit
+// can start from it.
+const lastFitSizes = {};
+
 function fitAllTextCells(){
   // The names have a size of their own: as large as the name cell allows,
   // the whole name inside it. The numbers share another size.
@@ -4951,7 +4980,7 @@ function fitAllTextCells(){
   });
 
   requestAnimationFrame(() => {
-    function fitGroup(items, startSize, ownBox){
+    function fitGroup(items, startSize, ownBox, cacheKey){
       function fitsAll(size){
         // ownBox (the names): the whole name inside its own box, no wider
         // and no taller than the box.
@@ -4966,26 +4995,40 @@ function fitAllTextCells(){
         items.forEach(({ el }) => { el.style.fontSize = size + 'px'; });
       }
 
-      let size = startSize;
+      // The largest whole size (8 to startSize) at which everything fits. A
+      // smaller size always fits if a larger one does, so it is found by
+      // halving (each try makes the browser measure the page again), and when
+      // the size is the same as the last time two tries confirm it.
       const minSize = 8;
-      applySize(size);
-      let guard = 0;
-      while (!fitsAll(size) && size > minSize && guard < 150){
-        size -= 1;
-        applySize(size);
-        guard++;
+      const fits = (size) => { applySize(size); return fitsAll(size); };
+      let lo = minSize, hi = startSize + 1; // lo fits (or is the smallest); hi does not
+      const last = cacheKey ? lastFitSizes[cacheKey] : null;
+      if (last && last > minSize && last <= startSize){
+        if (fits(last)){
+          lo = last;
+          if (last === startSize || !fits(last + 1)){ applySize(last); return; }
+          lo = last + 1;
+        } else {
+          hi = last;
+        }
       }
+      while (hi - lo > 1){
+        const mid = Math.floor((lo + hi) / 2);
+        if (fits(mid)) lo = mid; else hi = mid;
+      }
+      applySize(lo);
+      if (cacheKey) lastFitSizes[cacheKey] = lo;
     }
 
-    fitGroup(bodyItems, 90);
-    fitGroup(nameItems, 90, true);
+    fitGroup(bodyItems, 90, false, 'body');
+    fitGroup(nameItems, 90, true, 'names');
     // The text in the cells is as large as the names (the smaller of the two
     // sizes, so that everything still fits in its cell).
     if (bodyItems.length && nameItems.length){
       const common = Math.min(parseFloat(bodyItems[0].el.style.fontSize) || 90, parseFloat(nameItems[0].el.style.fontSize) || 90);
       bodyItems.concat(nameItems).forEach(({ el }) => { el.style.fontSize = common + 'px'; });
     }
-    headerGroups.forEach((items, key) => fitGroup(items, key === 'board' ? 35 : 40));
+    headerGroups.forEach((items, key) => fitGroup(items, key === 'board' ? 35 : 40, false, key === 'board' ? 'boardHeaders' : null));
   });
 }
 
@@ -5189,7 +5232,7 @@ async function initApp(){
     });
     setStatus('טוען…');
     await loadStateUntilConnected();
-    lastViewJson = JSON.stringify(state);
+    lastViewJson = viewSignature();
     const pdfJobParams = new URLSearchParams(location.search);
     if (pdfJobParams.get('sendpdf')){
       selectedWeeklyKey = pdfJobParams.get('sendpdf').split(',')[0];
