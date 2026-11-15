@@ -1304,7 +1304,8 @@ function adjustMinus(studentId, delta){
 function appendMinusCellEvents(td, student){
   td.style.position = 'relative';
   td.addEventListener('click', () => adjustMinus(student.id, -1));
-  if ((student.minusTotal || 0) < 0){
+  // The cell also shows the minuses of the prayer, so the + is there for them too.
+  if ((student.minusTotal || 0) < 0 || (student.cats.c9 || 0) < 0){
     const undo = document.createElement('button');
     undo.type = 'button';
     undo.className = 'status-plus-btn';
@@ -1312,7 +1313,8 @@ function appendMinusCellEvents(td, student){
     undo.title = 'ביטול מינוס';
     undo.addEventListener('click', (e) => {
       e.stopPropagation();
-      adjustMinus(student.id, 1);
+      if ((student.minusTotal || 0) < 0) adjustMinus(student.id, 1);
+      else setPrayerCat(student.id, 'c9', Math.min(0, (student.cats.c9 || 0) + 1));
     });
     td.appendChild(undo);
   }
@@ -5004,6 +5006,7 @@ function renderTodayHistoryTableNow(container){
       } else if (activeKey === 'minus'){
         onClick = () => editCell('minusTotal', (s.minusTotal || 0) - 1);
         if ((s.minusTotal || 0) < 0) undo = () => editCell('minusTotal', Math.min(0, (s.minusTotal || 0) + 1));
+        else if ((cats.c9 || 0) < 0) undo = () => editCell('cat:c9', Math.min(0, (cats.c9 || 0) + 1));
       } else if (activeKey === 'shop'){
         onClick = () => editCell('purchases', (s.purchases || 0) + 1);
         if ((s.purchases || 0) > 0) undo = () => editCell('purchases', s.purchases - 1);
