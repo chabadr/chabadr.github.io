@@ -647,6 +647,19 @@
     color: var(--danger);
   }
   table.archive-table td.disturb{ background: #F6D5D5; color: var(--danger); }
+  /* The prayer column: the green (prayed) and the red (a minus) are strong. */
+  .point-cell.prayer-cell.active{ background: #1FA24B; }
+  .point-cell.prayer-cell.active .point-val{ color: #fff; }
+  .point-cell.prayer-cell.disturb{ background: #D62828; }
+  .point-cell.prayer-cell.disturb .point-val{ color: #fff; }
+  table.archive-table td.prayer-on{ background: #1FA24B; color: #fff; font-weight: 700; }
+  table.archive-table td.disturb{ background: #D62828; color: #fff; font-weight: 700; }
+  .prayer-plus-btn{
+    position: absolute; right: 2px; bottom: 2px; width: 22px; height: 22px; padding: 0;
+    border: 1px solid var(--green); border-radius: 50%; background: #fff; color: var(--green);
+    font-size: 16px; line-height: 18px; cursor: pointer; opacity: .85;
+  }
+  .prayer-plus-btn.maxed{ opacity: .25; cursor: default; }
   .point-cell:active .point-val{
     transform: scale(0.9);
   }

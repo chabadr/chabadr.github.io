@@ -1159,30 +1159,43 @@ function highlightWinner(studentId){
 
 // The value a click on a point cell leads to. A cell is on (the category's
 // value) or off (0). (A prayer minus is not a state of the cell: it is counted
-// apart, by the small minus button - see prayerMinusButton.)
+// apart, by the small minus button - see prayerButtons.)
 function nextCategoryValue(catKey, current){
   const category = CATEGORIES.find(c => c.key === catKey);
   return current ? 0 : category.value;
 }
 
-// The small minus button of a תפילה cell: the first press adds a minus; once
-// there is one, a press opens a window to take it back or add another.
-// `setMinus(newValue)` stores the new count (0 or below).
-function prayerMinusButton(current, setMinus){
-  const btn = document.createElement('button');
-  btn.type = 'button';
-  btn.className = 'prayer-minus-btn';
-  btn.textContent = '−';
-  btn.title = 'מינוס בתפילה';
-  btn.addEventListener('click', (e) => {
+// The most a תפילה cell can reach: the cell (2) plus the minuses.
+const PRAYER_CELL_MAX = 2;
+
+// The two small buttons of a תפילה cell: minus (bottom left) adds a minus,
+// plus (bottom right) takes one back - and, with no minus to take back, raises
+// the cell by one - but never above PRAYER_CELL_MAX in all.
+// `setCat(key, value)` stores a value of the cell ('c3') or of the minuses ('c9').
+function prayerButtons(c3, c9, setCat){
+  const total = (c3 || 0) + (c9 || 0);
+  const minusBtn = document.createElement('button');
+  minusBtn.type = 'button';
+  minusBtn.className = 'prayer-minus-btn';
+  minusBtn.textContent = '−';
+  minusBtn.title = 'מינוס בתפילה';
+  minusBtn.addEventListener('click', (e) => {
     e.stopPropagation();
-    if (!current){ setMinus(-1); return; }
-    showChoiceModal('מינוס בתפילה: ' + current, [
-      { label: 'ביטול מינוס', onPick: () => setMinus(Math.min(0, current + 1)) },
-      { label: 'עוד מינוס', onPick: () => setMinus(current - 1) }
-    ]);
+    setCat('c9', (c9 || 0) - 1);
   });
-  return btn;
+  const plusBtn = document.createElement('button');
+  plusBtn.type = 'button';
+  plusBtn.className = 'prayer-plus-btn';
+  plusBtn.textContent = '+';
+  plusBtn.title = 'העלאה בתפילה';
+  plusBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (total >= PRAYER_CELL_MAX) return;
+    if ((c9 || 0) < 0) setCat('c9', Math.min(0, c9 + 1));
+    else setCat('c3', Math.min(PRAYER_CELL_MAX, (c3 || 0) + 1));
+  });
+  if (total >= PRAYER_CELL_MAX) plusBtn.classList.add('maxed');
+  return [minusBtn, plusBtn];
 }
 
 // A window of buttons; a press outside it closes it.
@@ -1210,8 +1223,8 @@ function showChoiceModal(message, choices){
   document.body.appendChild(overlay);
 }
 
-function setPrayerMinus(studentId, value){
-  commitOp({ kind: 'cat', group: 'main', sid: studentId, key: 'c9', value });
+function setPrayerCat(studentId, key, value){
+  commitOp({ kind: 'cat', group: 'main', sid: studentId, key, value });
 }
 
 function toggleCell(studentId, catKey){
@@ -1884,13 +1897,13 @@ function buildBoard(title, students){
           if (s.group.includes('c5')) sum += (student.c5Total || 0);
           const activeHasPoints = (student.cats[activeKey] || 0) > 0;
           const activeDisturbed = (student.cats[activeKey] || 0) < 0 || (activeKey === 'c3' && (student.cats.c9 || 0) < 0);
-          td.className = (td.className ? td.className + ' ' : '') + 'point-cell col-hide-narrow' + (activeHasPoints ? ' active' : '') + (activeDisturbed ? ' disturb' : '');
+          td.className = (td.className ? td.className + ' ' : '') + 'point-cell col-hide-narrow' + (activeHasPoints ? ' active' : '') + (activeDisturbed ? ' disturb' : '') + (activeKey === 'c3' ? ' prayer-cell' : '');
           const val = document.createElement('span');
           val.className = 'point-val';
           val.textContent = sum !== 0 ? sum : '';
           td.appendChild(val);
           td.addEventListener('click', () => toggleCell(student.id, activeKey));
-          if (activeKey === 'c3'){ td.style.position = 'relative'; td.appendChild(prayerMinusButton(student.cats.c9 || 0, v => setPrayerMinus(student.id, v))); }
+          if (activeKey === 'c3'){ td.style.position = 'relative'; prayerButtons(student.cats.c3, student.cats.c9, (k, v) => setPrayerCat(student.id, k, v)).forEach(b => td.appendChild(b)); }
         }
       } else if (s.kind === 'individual'){
         if (isFrequentToggleKey(s.key)){
@@ -1903,13 +1916,13 @@ function buildBoard(title, students){
           td.addEventListener('click', () => toggleFrequent(student.id, s.key));
         } else {
           const roundActive = (student.cats[s.key] || 0) > 0;
-          td.className = (td.className ? td.className + ' ' : '') + 'point-cell' + (roundActive ? ' active' : '') + (((student.cats[s.key] || 0) < 0 || (s.key === 'c3' && (student.cats.c9 || 0) < 0)) ? ' disturb' : '');
+          td.className = (td.className ? td.className + ' ' : '') + 'point-cell' + (roundActive ? ' active' : '') + (((student.cats[s.key] || 0) < 0 || (s.key === 'c3' && (student.cats.c9 || 0) < 0)) ? ' disturb' : '') + (s.key === 'c3' ? ' prayer-cell' : '');
           const val = document.createElement('span');
           val.className = 'point-val';
           val.textContent = student.cats[s.key] ? student.cats[s.key] : '';
           td.appendChild(val);
           td.addEventListener('click', () => toggleCell(student.id, s.key));
-          if (s.key === 'c3'){ td.style.position = 'relative'; td.appendChild(prayerMinusButton(student.cats.c9 || 0, v => setPrayerMinus(student.id, v))); }
+          if (s.key === 'c3'){ td.style.position = 'relative'; prayerButtons(student.cats.c3, student.cats.c9, (k, v) => setPrayerCat(student.id, k, v)).forEach(b => td.appendChild(b)); }
         }
       } else if (s.kind === 'minusOnly'){
         const minusShown = (student.minusTotal || 0) + (student.cats.c9 || 0);
@@ -4898,6 +4911,7 @@ function renderTodayHistoryTableNow(container){
       // only in הנוסע המתמיד).
       td.textContent = ARCHIVE_WEEKLY_KEYS[activeKey] ? (val > 0 ? '✓' : '') : (val || '');
       if (activeKey === 'c3' && (val < 0 || (cats.c9 || 0) < 0)) td.classList.add('disturb'); // a prayer minus: red
+      else if (activeKey === 'c3' && val > 0) td.classList.add('prayer-on'); // prayed: green
       if (activeKey === 'total') { tr.appendChild(td); return; }
       td.style.cursor = 'pointer';
       // The pressed cell shows its new value at once (shownNow, when it is
@@ -4936,7 +4950,7 @@ function renderTodayHistoryTableNow(container){
       td.addEventListener('click', onClick);
       if (activeKey === 'c3'){
         td.style.position = 'relative';
-        td.appendChild(prayerMinusButton(cats.c9 || 0, v => editCell('cat:c9', v)));
+        prayerButtons(cats.c3, cats.c9, (k, v) => editCell('cat:' + k, v)).forEach(b => td.appendChild(b));
       }
       if (undo){
         td.style.position = 'relative';
