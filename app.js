@@ -3268,17 +3268,75 @@ function showDayUpdatePicker(td, entry, s, field){
     t.textContent = text;
     list.appendChild(t);
   };
-  const addOption = (label, onClick) => {
+  // A box at the top: several days can be marked and updated (or cancelled)
+  // together. Off, a press on a day acts on that day alone, as before.
+  let multi = false;
+  const selected = { missing: new Set(), done: new Set() };
+  const actionRows = [];
+  const optionEls = [];
+  const refreshActions = () => actionRows.forEach(r => r.refresh());
+  const multiLabel = document.createElement('label');
+  multiLabel.className = 'ff-multi-toggle';
+  const multiBox = document.createElement('input');
+  multiBox.type = 'checkbox';
+  multiLabel.appendChild(multiBox);
+  multiLabel.appendChild(document.createTextNode(' כמה ימים יחד'));
+  multiBox.addEventListener('change', () => {
+    multi = multiBox.checked;
+    selected.missing.clear();
+    selected.done.clear();
+    optionEls.forEach(o => o.classList.remove('ff-picked'));
+    list.classList.toggle('ff-multi', multi);
+    refreshActions();
+  });
+  list.appendChild(multiLabel);
+
+  const addOption = (label, onClick, group, day) => {
     const opt = document.createElement('div');
     opt.className = 'merged-dropdown-option';
     opt.textContent = label;
     opt.addEventListener('click', (e) => {
       e.stopPropagation();
+      if (multi){
+        const set = selected[group];
+        if (set.has(day)){ set.delete(day); opt.classList.remove('ff-picked'); }
+        else { set.add(day); opt.classList.add('ff-picked'); }
+        refreshActions();
+        return;
+      }
       list.remove();
       onClick();
     });
+    optionEls.push(opt);
     list.appendChild(opt);
   };
+  // The button under a group of days (shown only while days are marked).
+  const addActionRow = (group, days, text, run) => {
+    const row = document.createElement('div');
+    row.className = 'ff-picker-act';
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'modal-btn modal-btn-confirm';
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const chosen = days.filter(d => selected[group].has(d));
+      if (!chosen.length) return;
+      list.remove();
+      run(chosen);
+    });
+    row.appendChild(btn);
+    row.refresh = () => {
+      const n = selected[group].size;
+      row.style.display = multi && n ? '' : 'none';
+      btn.textContent = text + ' (' + n + ')';
+    };
+    row.refresh();
+    actionRows.push(row);
+    list.appendChild(row);
+  };
+  const daysLabel = (days) => days.map(d => d.label).join(', ');
+  const sumPoints = (days) => days.reduce((t, d) => t + (d.points || 0), 0);
+  const weekFocus = { paintFirst: true, focus: 'weekly' };
   addTitle('לעדכון:');
   if (!missing.length){
     const none = document.createElement('div');
@@ -3288,8 +3346,12 @@ function showDayUpdatePicker(td, entry, s, field){
   }
   missing.forEach(day => addOption(day.label, () => showModal(
     'לעדכן ' + fieldLabel + ' של ' + name + ' ליום ' + day.label + '?\nיתווספו ' + points + (points === 1 ? ' נקודה.' : ' נקודות.'),
-    { confirmText: 'עדכון', onConfirm: () => commitOp({ kind: 'weekCell', weekKey: entry.weekKey, sid: s.id, field, target: day.key, value: points }, { paintFirst: true, focus: 'weekly' }) }
-  )));
+    { confirmText: 'עדכון', onConfirm: () => commitOp({ kind: 'weekCell', weekKey: entry.weekKey, sid: s.id, field, target: day.key, value: points }, weekFocus) }
+  ), 'missing', day));
+  if (missing.length) addActionRow('missing', missing, 'עדכון הימים שנבחרו', (days) => showModal(
+    'לעדכן ' + fieldLabel + ' של ' + name + ' לימים: ' + daysLabel(days) + '?\nיתווספו ' + (points * days.length) + ' נקודות.',
+    { confirmText: 'עדכון', onConfirm: () => days.forEach(day => commitOp({ kind: 'weekCell', weekKey: entry.weekKey, sid: s.id, field, target: day.key, value: points }, weekFocus)) }
+  ));
   if (done.length){
     const line = document.createElement('div');
     line.className = 'ff-picker-line';
@@ -3297,8 +3359,12 @@ function showDayUpdatePicker(td, entry, s, field){
     addTitle('לביטול:');
     done.forEach(day => addOption(day.label, () => showModal(
       'לבטל ' + fieldLabel + ' של ' + name + ' ביום ' + day.label + '?\nיורדו ' + day.points + (day.points === 1 ? ' נקודה.' : ' נקודות.'),
-      { confirmText: 'ביטול היום', cancelText: 'השארה', onConfirm: () => commitOp({ kind: 'weekCell', weekKey: entry.weekKey, sid: s.id, field, target: day.key, value: field === 'metivtaVal' ? -1 : 0 }, { paintFirst: true, focus: 'weekly' }) }
-    )));
+      { confirmText: 'ביטול היום', cancelText: 'השארה', onConfirm: () => commitOp({ kind: 'weekCell', weekKey: entry.weekKey, sid: s.id, field, target: day.key, value: field === 'metivtaVal' ? -1 : 0 }, weekFocus) }
+    ), 'done', day));
+    addActionRow('done', done, 'ביטול הימים שנבחרו', (days) => showModal(
+      'לבטל ' + fieldLabel + ' של ' + name + ' בימים: ' + daysLabel(days) + '?\nיורדו ' + sumPoints(days) + ' נקודות.',
+      { confirmText: 'ביטול הימים', cancelText: 'השארה', onConfirm: () => days.forEach(day => commitOp({ kind: 'weekCell', weekKey: entry.weekKey, sid: s.id, field, target: day.key, value: field === 'metivtaVal' ? -1 : 0 }, weekFocus)) }
+    ));
   }
   list.addEventListener('click', (e) => e.stopPropagation());
   document.body.appendChild(list);
