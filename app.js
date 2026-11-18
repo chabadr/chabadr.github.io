@@ -4163,6 +4163,7 @@ function renderZ1ViewNow(){
     empty.textContent = 'הנוסע המתמיד ז1 · אין עדיין נתונים';
     header.appendChild(empty);
     el.appendChild(header);
+    el.appendChild(buildKioskInstallLinks());
     return;
   }
   if (!z1SelectedWeekKey || !weeks.find(w => w.weekKey === z1SelectedWeekKey)) z1SelectedWeekKey = weeks[0].weekKey;
@@ -4233,6 +4234,25 @@ function renderZ1ViewNow(){
   scrollWrap.appendChild(table);
   header.appendChild(scrollWrap);
   el.appendChild(header);
+  el.appendChild(buildKioskInstallLinks());
+}
+
+// Small links under the table: the files that set up (and remove) the
+// restricted "כיתה" user of a Windows computer (see the kiosk folder).
+function buildKioskInstallLinks(){
+  const box = document.createElement('div');
+  box.className = 'kiosk-links';
+  const label = document.createTextNode('מחשב הכיתה (Windows): ');
+  box.appendChild(label);
+  [['kiosk/install-class-kiosk.bat', 'התקנת משתמש כיתה'], ['kiosk/uninstall-class-kiosk.bat', 'הסרה']].forEach(([href, text], i) => {
+    if (i) box.appendChild(document.createTextNode(' · '));
+    const a = document.createElement('a');
+    a.href = href;
+    a.download = '';
+    a.textContent = text;
+    box.appendChild(a);
+  });
+  return box;
 }
 
 function showZ1(){

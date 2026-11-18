@@ -798,3 +798,6 @@
     background: #fff; color: var(--ink); cursor: pointer;
   }
   .mini-keypad button:active{ background: var(--gold-bg); }
+
+  .kiosk-links{ margin: 18px 4px 6px; font-size: 12px; color: var(--ink-soft); text-align: center; }
+  .kiosk-links a{ color: var(--ink-soft); }
