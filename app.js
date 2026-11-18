@@ -4241,7 +4241,7 @@ function renderZ1ViewNow(){
 // Windows computer - the files are in the kiosk folder.
 const KIOSK_BASE = 'https://chabadr.github.io/kiosk/';
 function kioskCommand(file){
-  return 'powershell -NoProfile -ExecutionPolicy Bypass -Command "$w=New-Object Net.WebClient;$w.Encoding=[Text.Encoding]::UTF8;iex $w.DownloadString(\'' + KIOSK_BASE + file + '\')"';
+  return '$w=New-Object Net.WebClient;$w.Encoding=[Text.Encoding]::UTF8;iex $w.DownloadString(\'' + KIOSK_BASE + file + '\')';
 }
 function buildKioskInstallLinks(){
   const box = document.createElement('details');
