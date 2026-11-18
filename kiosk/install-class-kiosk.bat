@@ -91,8 +91,14 @@ try {
   }
 
   # a regular user, never an administrator
-  Get-LocalGroup -SID 'S-1-5-32-545' | Add-LocalGroupMember -Member $UserName -ErrorAction SilentlyContinue
-  Get-LocalGroup -SID 'S-1-5-32-544' | Remove-LocalGroupMember -Member $UserName -ErrorAction SilentlyContinue
+  $usersGroup = Get-LocalGroup -SID 'S-1-5-32-545'
+  $adminsGroup = Get-LocalGroup -SID 'S-1-5-32-544'
+  if (-not (Get-LocalGroupMember -Group $usersGroup -ErrorAction SilentlyContinue | Where-Object { $_.Name -like "*\$UserName" })) {
+    Add-LocalGroupMember -Group $usersGroup -Member $UserName
+  }
+  if (Get-LocalGroupMember -Group $adminsGroup -ErrorAction SilentlyContinue | Where-Object { $_.Name -like "*\$UserName" }) {
+    Remove-LocalGroupMember -Group $adminsGroup -Member $UserName
+  }
 
   # the user's profile folder (made now, so the restrictions are there before the first sign-in)
   Add-Type -TypeDefinition @'
@@ -169,5 +175,5 @@ public static class ClassKioskUserEnv {
   if ($notes.Count) { $done += "`n`n" + ($notes -join "`n") }
   Show-Box $done 'OK' 'Information' | Out-Null
 } catch {
-  Show-Box ("ההתקנה נכשלה:`n" + $_.Exception.Message) 'OK' 'Error' | Out-Null
+  Show-Box ("ההתקנה נכשלה:`n" + $_.Exception.Message + "`n`nבשורה: " + $_.InvocationInfo.Line.Trim()) 'OK' 'Error' | Out-Null
 }
