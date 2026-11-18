@@ -3,7 +3,9 @@ rem Removes the class kiosk user (and its files). Double-click it. It asks for a
 chcp 65001 >nul
 net session >nul 2>&1
 if %errorlevel% neq 0 (
-  powershell -NoProfile -Command "Start-Process -FilePath '%~f0' -Verb RunAs"
+  rem The administrator account may not be able to open the Downloads folder of this user: run a copy from a shared folder.
+  copy /y "%~f0" "%PUBLIC%\uninstall-class-kiosk.bat" >nul 2>&1
+  powershell -NoProfile -Command "Start-Process -FilePath '%PUBLIC%\uninstall-class-kiosk.bat' -Verb RunAs"
   exit /b
 )
 powershell -NoProfile -ExecutionPolicy Bypass -Command "$t=[IO.File]::ReadAllText('%~f0',[Text.Encoding]::UTF8); $i=$t.LastIndexOf('#PS'+'-START'); iex $t.Substring($i)"

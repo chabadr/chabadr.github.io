@@ -4,7 +4,9 @@ rem The PowerShell part (below the marker line) is read from this same file.
 chcp 65001 >nul
 net session >nul 2>&1
 if %errorlevel% neq 0 (
-  powershell -NoProfile -Command "Start-Process -FilePath '%~f0' -Verb RunAs"
+  rem The administrator account may not be able to open the Downloads folder of this user: run a copy from a shared folder.
+  copy /y "%~f0" "%PUBLIC%\install-class-kiosk.bat" >nul 2>&1
+  powershell -NoProfile -Command "Start-Process -FilePath '%PUBLIC%\install-class-kiosk.bat' -Verb RunAs"
   exit /b
 )
 powershell -NoProfile -ExecutionPolicy Bypass -Command "$t=[IO.File]::ReadAllText('%~f0',[Text.Encoding]::UTF8); $i=$t.LastIndexOf('#PS'+'-START'); iex $t.Substring($i)"
