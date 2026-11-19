@@ -21,13 +21,12 @@ Add-Type -AssemblyName System.Drawing
 # ---------------------------------------------------------------- settings
 $UserName = 'כיתה'
 
-# The only web pages the kiosk user can open (Edge). Everything else is blocked.
-# (A start of an address is enough: https://docs.google.com means every page there.)
+# The only web sites the kiosk user can open (Edge). Everything else is blocked.
+# (A site name covers all its pages and sub-sites: mashov.info = web.mashov.info too.)
 $AllowedPages = @(
-  'https://chabadr.github.io/z1.html',
-  'https://chabadr.github.io/index.html?view=z1',
-  'https://docs.google.com',
-  'https://accounts.google.com'      # needed to sign in to Google; delete this line for public sheets
+  'chabadr.github.io',   # the whole site of כיתה ז
+  'mashov.info',         # משוב - teachers
+  'pshita.im'
 )
 $HomePage = 'https://chabadr.github.io/z1.html'
 
@@ -77,7 +76,7 @@ function New-Shortcut($file, $target, $arguments) {
 
 try {
   $listText = ($AllowedPages | ForEach-Object { '  ' + $_ }) -join "`n"
-  $ask = "ייווצר משתמש מקומי בשם ""$UserName"" (משתמש רגיל, לא מנהל), שיוכל להפעיל רק:`n  • אקסל`n  • דפדפן Edge, עם גישה רק לדפים האלה:`n$listText`n`nלהמשיך?"
+  $ask = "ייווצר משתמש מקומי בשם ""$UserName"" (משתמש רגיל, לא מנהל), שיוכל להפעיל רק:`n  • אקסל`n  • דפדפן Edge, עם גישה רק לאתרים האלה:`n$listText`n`nלהמשיך?"
   if ((Show-Box $ask 'YesNo' 'Question') -ne 'Yes') { return }
 
   $existing = Get-LocalUser -Name $UserName -ErrorAction SilentlyContinue
@@ -166,8 +165,11 @@ public static class ClassKioskUserEnv {
   $notes = @()
   if ($excel) { New-Shortcut (Join-Path $desktop 'Excel.lnk') $excel $null } else { $notes += 'Excel לא נמצא במחשב (לא נוצר קיצור).' }
   if ($edgeExe) {
+    Remove-Item -LiteralPath (Join-Path $desktop 'Google Docs.lnk') -Force -ErrorAction SilentlyContinue
+    New-Shortcut (Join-Path $desktop 'כיתה ז.lnk') $edgeExe 'https://chabadr.github.io/'
     New-Shortcut (Join-Path $desktop 'הנוסע המתמיד ז1.lnk') $edgeExe $HomePage
-    New-Shortcut (Join-Path $desktop 'Google Docs.lnk') $edgeExe 'https://docs.google.com/'
+    New-Shortcut (Join-Path $desktop 'משוב מורים.lnk') $edgeExe 'https://web.mashov.info/teachers/login'
+    New-Shortcut (Join-Path $desktop 'pshita.lnk') $edgeExe 'https://pshita.im/'
     New-Shortcut (Join-Path $startup 'הנוסע המתמיד ז1.lnk') $edgeExe $HomePage
   } else { $notes += 'Edge לא נמצא במחשב (לא נוצרו קיצורים).' }
 
