@@ -22,13 +22,15 @@ Add-Type -AssemblyName System.Drawing
 $UserName = 'כיתה'
 
 # The only web sites the kiosk user can open (Edge). Everything else is blocked.
-# (A site name covers all its pages and sub-sites: mashov.info = web.mashov.info too.)
+# (A site name covers all its pages and sub-sites: live.com = onedrive.live.com too.)
 $AllowedPages = @(
-  'chabadr.github.io',   # the whole site of כיתה ז
-  'mashov.info',         # משוב - teachers
-  'pshita.im'
+  'docs.google.com',
+  'accounts.google.com',      # sign in to Google
+  # Excel in OneDrive (Excel for the web) and the Microsoft sign-in
+  'onedrive.live.com', '1drv.ms', 'live.com', 'office.com', 'office365.com',
+  'sharepoint.com', 'microsoftonline.com', 'microsoft.com'
 )
-$HomePage = 'https://chabadr.github.io/z1.html'
+$HomePage = 'https://docs.google.com/'
 
 # The only programs the kiosk user can start from the desktop / Start menu.
 $AllowedPrograms = @('EXCEL.EXE', 'msedge.exe', 'explorer.exe')
@@ -165,15 +167,17 @@ public static class ClassKioskUserEnv {
   $notes = @()
   if ($excel) { New-Shortcut (Join-Path $desktop 'Excel.lnk') $excel $null } else { $notes += 'Excel לא נמצא במחשב (לא נוצר קיצור).' }
   if ($edgeExe) {
-    Remove-Item -LiteralPath (Join-Path $desktop 'Google Docs.lnk') -Force -ErrorAction SilentlyContinue
-    New-Shortcut (Join-Path $desktop 'כיתה ז.lnk') $edgeExe 'https://chabadr.github.io/'
-    New-Shortcut (Join-Path $desktop 'הנוסע המתמיד ז1.lnk') $edgeExe $HomePage
-    New-Shortcut (Join-Path $desktop 'משוב מורים.lnk') $edgeExe 'https://web.mashov.info/teachers/login'
-    New-Shortcut (Join-Path $desktop 'pshita.lnk') $edgeExe 'https://pshita.im/'
-    New-Shortcut (Join-Path $startup 'הנוסע המתמיד ז1.lnk') $edgeExe $HomePage
+    # shortcuts of earlier versions are removed
+    foreach ($old in 'כיתה ז.lnk', 'הנוסע המתמיד ז1.lnk', 'משוב מורים.lnk', 'pshita.lnk') {
+      Remove-Item -LiteralPath (Join-Path $desktop $old) -Force -ErrorAction SilentlyContinue
+      Remove-Item -LiteralPath (Join-Path $startup $old) -Force -ErrorAction SilentlyContinue
+    }
+    New-Shortcut (Join-Path $desktop 'Google Docs.lnk') $edgeExe 'https://docs.google.com/'
+    New-Shortcut (Join-Path $desktop 'Excel ב-OneDrive.lnk') $edgeExe 'https://onedrive.live.com/'
+    New-Shortcut (Join-Path $startup 'Google Docs.lnk') $edgeExe $HomePage
   } else { $notes += 'Edge לא נמצא במחשב (לא נוצרו קיצורים).' }
 
-  $done = "הסתיים. המשתמש ""$UserName"" מוכן.`n`nכדי לבדוק: התנתקו, והתחברו אליו.`nלהסרה: הפעילו את קובץ ההסרה (uninstall-class-kiosk.bat)."
+  $done = "הסתיים. המשתמש ""$UserName"" מוכן.`n`nכדי לבדוק: התנתקו, והתחברו אליו."
   if ($notes.Count) { $done += "`n`n" + ($notes -join "`n") }
   Show-Box $done 'OK' 'Information' | Out-Null
 } catch {

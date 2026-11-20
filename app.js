@@ -4270,23 +4270,18 @@ function buildKioskInstallLinks(){
     box.appendChild(row);
   };
 
-  addText('המשתמש "כיתה" יוכל להפעיל רק אקסל ו-Edge, ולפתוח רק את האתרים: כל אתר כיתה ז, משוב (mashov.info) ו-pshita.im.');
+  addText('המשתמש "כיתה" יוכל להפעיל רק אקסל ו-Edge, ולפתוח רק את האתרים: Google Docs ו-Excel ב-OneDrive.');
   addText('1. לוחצים על התחל ומקלידים powershell.');
   addText('2. קליק ימני על Windows PowerShell ← "הפעל כמנהל" ← מאשרים.');
   addText('3. מדביקים את השורה הבאה ולוחצים Enter (בחלון שנפתח בוחרים סיסמה למשתמש):');
   addCommand('install-class-kiosk.ps1');
-  addText('להסרת המשתמש - אותו דבר עם השורה הבאה:');
-  addCommand('uninstall-class-kiosk.ps1');
   const alt = document.createElement('div');
   alt.appendChild(document.createTextNode('בלי PowerShell, אפשר להוריד קובץ להפעלה בלחיצה כפולה: '));
-  [['kiosk/install-class-kiosk.bat', 'התקנה'], ['kiosk/uninstall-class-kiosk.bat', 'הסרה']].forEach(([href, text], i) => {
-    if (i) alt.appendChild(document.createTextNode(' · '));
-    const a = document.createElement('a');
-    a.href = href;
-    a.download = '';
-    a.textContent = text;
-    alt.appendChild(a);
-  });
+  const link = document.createElement('a');
+  link.href = 'kiosk/install-class-kiosk.bat';
+  link.download = '';
+  link.textContent = 'התקנה';
+  alt.appendChild(link);
   box.appendChild(alt);
   return box;
 }
