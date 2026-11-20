@@ -11,6 +11,7 @@ const https = require('https');
 const nodemailer = require('nodemailer');
 const { sendQueuedBatch, MAX_AGE_MS } = require('./pdf-mail');
 const { computeDailyResetUpdate, isLiveDayDueForArchive, getWeekKey } = require('./daily-reset');
+const { buildRecurringMessages, isRecurringDue, israelParts } = require('./recurring-sms');
 
 admin.initializeApp();
 
@@ -180,6 +181,66 @@ exports.sendScheduledSms = onSchedule({
       await docSnap.ref.update({ status: 'failed', error: String(e && e.message || e) });
       logger.error('scheduled SMS threw', { id: docSnap.id, phone: data.phone, error: String(e && e.message || e) });
     }
+  }
+});
+
+// Every 15 minutes: the recurring messages of admin.html ("שליחה קבועה") whose
+// day and hour have come are sent - each recipient's message is worked out
+// again from the data of now - and written to the sent messages (sentSms).
+// The allowed times (no sending on Shabbat) are checked in recurring-sms.js.
+exports.sendRecurringSms = onSchedule({
+  schedule: '*/15 * * * *',
+  timeZone: 'Asia/Jerusalem',
+  region: 'us-central1',
+  secrets: [SMS4FREE_KEY, SMS4FREE_USER, SMS4FREE_PASS]
+}, async () => {
+  const db = admin.firestore();
+  const mainRef = db.collection(FIRESTORE_COLLECTION).doc(STORAGE_KEY);
+  const snap = await mainRef.collection('recurringSms').where('active', '==', true).get();
+  if (snap.empty) return;
+  const now = new Date();
+  const due = snap.docs.filter((d) => isRecurringDue(d.data(), now));
+  if (!due.length) return;
+
+  const [mainSnap, dailySnap, phonesSnap] = await Promise.all([
+    mainRef.get(), mainRef.collection('meta').doc('dailyArchive').get(), mainRef.collection('meta').doc('metivtaPhones').get()
+  ]);
+  if (!mainSnap.exists) return;
+  const mainData = mainSnap.data();
+  const dailyDays = dailySnap.exists && Array.isArray(dailySnap.data().days) ? dailySnap.data().days : [];
+  const phonesData = phonesSnap.exists ? phonesSnap.data() : {};
+  const dateKey = israelParts(now).dateKey;
+  const key = SMS4FREE_KEY.value(), user = SMS4FREE_USER.value(), pass = SMS4FREE_PASS.value();
+
+  for (const docSnap of due){
+    // Marked as sent today before sending, so it never goes out twice.
+    const claimed = await db.runTransaction(async (tx) => {
+      const s = await tx.get(docSnap.ref);
+      if (!s.exists || !isRecurringDue(s.data(), now)) return false;
+      tx.update(docSnap.ref, { lastRunKey: dateKey, lastRunAt: now.toISOString() });
+      return true;
+    });
+    if (!claimed) continue;
+    const rec = docSnap.data();
+    const messages = buildRecurringMessages(rec, mainData, dailyDays, phonesData, now);
+    const batchId = 'r-' + docSnap.id + '-' + dateKey;
+    let sent = 0, failed = 0;
+    for (const m of messages){
+      let status = 'sent', error = null;
+      try{
+        const code = await sendSms(key, user, pass, rec.sender, m.phone, m.msg);
+        if (isNaN(code) || code <= 0){ status = 'failed'; error = SMS4FREE_ERROR_MESSAGES[String(code)] || ('קוד שגיאה: ' + code); }
+      } catch(e){
+        status = 'failed'; error = String((e && e.message) || e);
+      }
+      if (status === 'sent') sent++; else failed++;
+      await mainRef.collection('sentSms').add({
+        phone: m.phone, label: m.label, msg: m.msg, sender: rec.sender, status, batchId,
+        via: 'קבוע', sentAt: new Date().toISOString(), ...(error ? { error } : {})
+      });
+    }
+    await docSnap.ref.update({ lastResult: { sent, failed, at: new Date().toISOString() } });
+    logger.info('recurring SMS ' + docSnap.id + ': sent ' + sent + ', failed ' + failed);
   }
 });
 

@@ -980,6 +980,21 @@ function isInSendWindow(d){
   return (hour >= 19 && hour < 22) || (hour === 22 && minute === 0);
 }
 
+// Recurring messages ("שליחה קבועה") may go out Sunday-Thursday at any hour,
+// Friday until 14:00 and Saturday from 19:00 (Israel time). Keep in sync with
+// isInRecurringWindow in functions/recurring-sms.js.
+const RECURRING_DAY_NAMES = ['ראשון', 'שני', 'שלישי', 'רביעי', 'חמישי', 'שישי', 'מוצאי שבת'];
+function isInRecurringWindow(weekday, hour){
+  if (weekday >= 0 && weekday <= 4) return true;
+  if (weekday === 5) return hour < 14;
+  if (weekday === 6) return hour >= 19;
+  return false;
+}
+function israelDateKey(d){
+  const parts = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Jerusalem', year: 'numeric', month: '2-digit', day: '2-digit' }).format(d);
+  return parts;
+}
+
 // The next 19:00 on a Saturday or Sunday that is still ahead (in this
 // browser's clock, which is Israel time for everyone using the site), or a
 // couple of minutes from now while a window is open.
@@ -1309,6 +1324,113 @@ async function renderSmsTab(container){
       pendingBody.appendChild(table);
     }
 
+    // --- Recurring messages card (shown only when there are) ---
+    const recurringCard = document.createElement('div');
+    recurringCard.className = 'card';
+    recurringCard.style.display = 'none';
+    const recurringTitle = document.createElement('div');
+    recurringTitle.className = 'section-title';
+    recurringTitle.textContent = 'הודעות קבועות (כל שבוע)';
+    const recurringInfo = document.createElement('button');
+    recurringInfo.type = 'button';
+    recurringInfo.className = 'info-btn';
+    recurringInfo.textContent = '!';
+    recurringInfo.title = 'הסבר';
+    recurringTitle.appendChild(recurringInfo);
+    recurringCard.appendChild(recurringTitle);
+    const recurringHint = document.createElement('div');
+    recurringHint.className = 'hint info-text';
+    recurringHint.textContent = 'כל שבוע ביום ובשעה שנבחרו השרת שולח את ההודעה לנמענים שנבחרו, גם אם העמוד הזה סגור (עד רבע שעה אחרי השעה). הנתונים בהודעה (נוכחות, איחור, ציון...) מחושבים מחדש בכל שליחה. אפשר לשלוח ראשון-חמישי בכל שעה, שישי עד 14:00 ומוצאי שבת מ-19:00.';
+    recurringInfo.addEventListener('click', () => {
+      recurringHint.classList.toggle('open');
+      recurringInfo.classList.toggle('open', recurringHint.classList.contains('open'));
+    });
+    recurringCard.appendChild(recurringHint);
+    const recurringBody = document.createElement('div');
+    recurringCard.appendChild(recurringBody);
+    const recurringCollection = collection(db, FIRESTORE_COLLECTION, STORAGE_KEY, 'recurringSms');
+
+    async function renderRecurringList(){
+      const snap = await getDocs(recurringCollection);
+      const list = [];
+      snap.forEach(d => list.push({ id: d.id, ...d.data() }));
+      list.sort((a, b) => (a.weekday - b.weekday) || String(a.time).localeCompare(String(b.time)));
+      recurringBody.innerHTML = '';
+      recurringCard.style.display = list.length ? '' : 'none';
+      if (!list.length) return;
+      const table = document.createElement('table');
+      table.className = 'log-table';
+      const thead = document.createElement('thead');
+      const trh = document.createElement('tr');
+      ['מתי', 'נמענים', 'הודעה', 'נשלח לאחרונה', ''].forEach(label => {
+        const th = document.createElement('th');
+        th.textContent = label;
+        trh.appendChild(th);
+      });
+      thead.appendChild(trh);
+      table.appendChild(thead);
+      const tbody = document.createElement('tbody');
+      list.forEach(r => {
+        const tr = document.createElement('tr');
+        if (!r.active) tr.style.opacity = '0.5';
+        const whenTd = document.createElement('td');
+        whenTd.textContent = 'כל ' + (RECURRING_DAY_NAMES[r.weekday] || '?') + ' ' + (r.time || '') + (r.active ? '' : ' (מושהה)');
+        tr.appendChild(whenTd);
+        const toTd = document.createElement('td');
+        toTd.textContent = String((r.recipients || []).length);
+        tr.appendChild(toTd);
+        const msgTd = document.createElement('td');
+        const t = String(r.template || '');
+        msgTd.textContent = t.length > 60 ? t.slice(0, 60) + '…' : t;
+        tr.appendChild(msgTd);
+        const lastTd = document.createElement('td');
+        lastTd.textContent = r.lastResult
+          ? new Date(r.lastResult.at).toLocaleString('he-IL') + ' · נשלחו ' + r.lastResult.sent + (r.lastResult.failed ? ', נכשלו ' + r.lastResult.failed : '')
+          : '—';
+        tr.appendChild(lastTd);
+        const actTd = document.createElement('td');
+        const pauseBtn = document.createElement('button');
+        pauseBtn.type = 'button';
+        pauseBtn.className = 'btn-secondary';
+        pauseBtn.textContent = r.active ? 'השהה' : 'הפעל';
+        pauseBtn.addEventListener('click', async () => {
+          pauseBtn.disabled = true;
+          // Turned on again on its own day after its hour: not sent again that day.
+          const update = { active: !r.active };
+          if (!r.active) update.lastRunKey = recurringAlreadyPassedToday(r.weekday, r.time) ? israelDateKey(new Date()) : (r.lastRunKey || '');
+          await setDoc(doc(db, FIRESTORE_COLLECTION, STORAGE_KEY, 'recurringSms', r.id), update, { merge: true });
+          await renderRecurringList();
+        });
+        actTd.appendChild(pauseBtn);
+        const delBtn = document.createElement('button');
+        delBtn.type = 'button';
+        delBtn.className = 'btn-secondary';
+        delBtn.textContent = 'מחק';
+        delBtn.style.marginInlineStart = '6px';
+        delBtn.addEventListener('click', async () => {
+          if (!confirm('למחוק את ההודעה הקבועה הזו? היא לא תישלח יותר.')) return;
+          delBtn.disabled = true;
+          await deleteDoc(doc(db, FIRESTORE_COLLECTION, STORAGE_KEY, 'recurringSms', r.id));
+          await renderRecurringList();
+        });
+        actTd.appendChild(delBtn);
+        tr.appendChild(actTd);
+        tbody.appendChild(tr);
+      });
+      table.appendChild(tbody);
+      recurringBody.appendChild(table);
+    }
+
+    // Is today (Israel time) that weekday, with that hour already past?
+    function recurringAlreadyPassedToday(weekday, time){
+      const parts = new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Jerusalem', weekday: 'short', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).formatToParts(new Date());
+      const get = (t) => (parts.find(p => p.type === t) || {}).value;
+      const today = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].indexOf(get('weekday'));
+      const nowMin = parseInt(get('hour'), 10) * 60 + parseInt(get('minute'), 10);
+      const [h, m] = String(time).split(':').map(n => parseInt(n, 10));
+      return today === weekday && h * 60 + m <= nowMin;
+    }
+
     // --- Recipients card ---
     const recipientsCard = document.createElement('div');
     recipientsCard.className = 'card';
@@ -1534,6 +1656,11 @@ async function renderSmsTab(container){
     scheduleBtn.type = 'button';
     scheduleBtn.textContent = 'תזמן שליחה';
     sendAction.appendChild(scheduleBtn);
+    const recurringBtn = document.createElement('button');
+    recurringBtn.className = 'btn-secondary';
+    recurringBtn.type = 'button';
+    recurringBtn.textContent = 'שליחה קבועה כל שבוע';
+    sendAction.appendChild(recurringBtn);
     sendCard.appendChild(sendAction);
 
     const toLocalInputValue = (d) => new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
@@ -1698,6 +1825,96 @@ async function renderSmsTab(container){
       ok.addEventListener('click', () => { const v = input.value; overlay.remove(); scheduleMessages(v); });
     });
 
+    // A recurring message: the template (not the edited previews), the chosen
+    // recipients, the summary range and the test - sent every week on that day
+    // and hour, with the numbers worked out again each time (on the server).
+    recurringBtn.addEventListener('click', () => {
+      const overlay = document.createElement('div');
+      overlay.className = 'sched-overlay';
+      const box = document.createElement('div');
+      box.className = 'sched-box';
+      const title = document.createElement('div');
+      title.className = 'section-title';
+      title.textContent = 'שליחה קבועה כל שבוע';
+      box.appendChild(title);
+      const daySel = document.createElement('select');
+      daySel.className = 'day-count-select';
+      RECURRING_DAY_NAMES.forEach((name, i) => {
+        const o = document.createElement('option');
+        o.value = String(i);
+        o.textContent = 'כל יום ' + name;
+        daySel.appendChild(o);
+      });
+      box.appendChild(daySel);
+      const timeInput = document.createElement('input');
+      timeInput.type = 'time';
+      timeInput.value = '19:00';
+      timeInput.style.marginInlineStart = '8px';
+      box.appendChild(timeInput);
+      const note = document.createElement('div');
+      note.className = 'hint';
+      note.textContent = 'ראשון-חמישי בכל שעה, שישי עד 14:00, מוצאי שבת מ-19:00. הנתונים יחושבו מחדש בכל שליחה; עריכה ידנית בתצוגה המקדימה לא נשמרת בהודעה הקבועה.';
+      box.appendChild(note);
+      const row = document.createElement('div');
+      row.className = 'action-bar';
+      const ok = document.createElement('button');
+      ok.className = 'btn-primary';
+      ok.type = 'button';
+      ok.textContent = 'אישור';
+      const cancel = document.createElement('button');
+      cancel.className = 'btn-secondary';
+      cancel.type = 'button';
+      cancel.textContent = 'ביטול';
+      row.appendChild(ok);
+      row.appendChild(cancel);
+      box.appendChild(row);
+      overlay.appendChild(box);
+      document.body.appendChild(overlay);
+      cancel.addEventListener('click', () => overlay.remove());
+      overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+      ok.addEventListener('click', async () => {
+        const weekday = parseInt(daySel.value, 10);
+        const time = timeInput.value;
+        if (!/^\d{2}:\d{2}$/.test(time)){ alert('יש לבחור שעה.'); return; }
+        if (!isInRecurringWindow(weekday, parseInt(time.slice(0, 2), 10))){
+          alert('אפשר לשלוח ראשון-חמישי בכל שעה, שישי עד 14:00 ומוצאי שבת מ-19:00.');
+          return;
+        }
+        overlay.remove();
+        await saveRecurring(weekday, time);
+      });
+    });
+
+    async function saveRecurring(weekday, time){
+      const sender = senderForApi();
+      if (!sender){ alert('יש להזין שם/מספר שולח לפני השמירה.'); return; }
+      const selected = getSelectedRecipients();
+      if (!selected.length){ alert('לא נבחרו נמענים.'); return; }
+      const template = templateTextarea.value;
+      if (!template.trim()){ alert('ההודעה ריקה.'); return; }
+      if (!confirm('כל יום ' + RECURRING_DAY_NAMES[weekday] + ' בשעה ' + time + ' יישלחו ' + selected.length + ' הודעות SMS, עם הנתונים של אותו יום. לשמור?')) return;
+      recurringBtn.disabled = true;
+      try{
+        await addDoc(recurringCollection, {
+          template,
+          recipients: selected.map(r => ({ studentKey: r.student.key, role: r.role })),
+          sender,
+          dayCount: dayCountSelect.value,
+          testId: testSelect.value || '',
+          weekday, time,
+          active: true,
+          // Saved on that very day after its hour: the first sending is next week.
+          lastRunKey: recurringAlreadyPassedToday(weekday, time) ? israelDateKey(new Date()) : '',
+          createdAt: new Date().toISOString()
+        });
+        summaryBar.textContent = 'נשמרה הודעה קבועה: כל ' + RECURRING_DAY_NAMES[weekday] + ' בשעה ' + time + ' (' + selected.length + ' נמענים).';
+        await renderRecurringList();
+      } catch(e){
+        alert('שגיאה בשמירה: ' + (e && e.message ? e.message : String(e)));
+      }
+      recurringBtn.disabled = false;
+    }
+
     async function scheduleMessages(whenVal){
       const sender = senderForApi();
       if (!sender){
@@ -1755,6 +1972,7 @@ async function renderSmsTab(container){
     // Last on the page, as dropdowns: the scheduled messages (only when there
     // are), then the parents' updates, then the sent messages.
     container.appendChild(pendingCard);
+    container.appendChild(recurringCard);
     await appendPdfCard(container);
     const parentsDd = buildDropdown('הנוסע המתמיד – ארכיון', false);
     parentsDd.box.className = 'edits-day edits-group card-dropdown';
@@ -1838,6 +2056,7 @@ async function renderSmsTab(container){
     }
 
     await renderPendingList();
+    await renderRecurringList();
     await renderSentArchive();
 
   } catch(e){

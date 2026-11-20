@@ -34,6 +34,9 @@ service cloud.firestore {
       match /sentSms/{id} {
         allow read, write: if isAdmin();
       }
+      match /recurringSms/{id} {
+        allow read, write: if isAdmin();
+      }
       match /pdfOutbox/{id} {
         allow read, write: if isAdmin();
       }
