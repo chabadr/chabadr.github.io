@@ -773,6 +773,52 @@ async function appendPdfCard(container){
 }
 
 // ---------- Tab: משתנים (phones + parent links) ----------
+// The commands that set up the restricted "כיתה" user of the Windows computer in
+// the classroom (files in the kiosk folder of the site) and that change its
+// password. Run in an administrator PowerShell.
+const KIOSK_BASE_URL = 'https://chabadr.github.io/kiosk/';
+function kioskCommandFor(file){
+  return "$w=New-Object Net.WebClient;$w.Encoding=[Text.Encoding]::UTF8;iex $w.DownloadString('" + KIOSK_BASE_URL + file + "')";
+}
+function buildKioskCard(){
+  const card = document.createElement('div');
+  card.className = 'card';
+  const title = document.createElement('div');
+  title.className = 'section-title';
+  title.textContent = 'משתמש קיוסק במחשב הכיתה (Windows)';
+  card.appendChild(title);
+  const hint = document.createElement('div');
+  hint.className = 'hint';
+  hint.textContent = 'המשתמש "כיתה" יכול להפעיל רק אקסל ו-Edge, ולפתוח רק את Google Docs ו-Excel ב-OneDrive. להפעלה: בחלון PowerShell שנפתח כמנהל (התחל ← מקלידים powershell ← קליק ימני ← "הפעל כמנהל") מדביקים את השורה ולוחצים Enter.';
+  card.appendChild(hint);
+  const addCommand = (label, file) => {
+    const lab = document.createElement('div');
+    lab.className = 'kiosk-cmd-label';
+    lab.textContent = label;
+    card.appendChild(lab);
+    const row = document.createElement('div');
+    row.className = 'kiosk-cmd-row';
+    const code = document.createElement('code');
+    code.dir = 'ltr';
+    code.textContent = kioskCommandFor(file);
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'btn-secondary';
+    btn.textContent = 'העתק';
+    btn.addEventListener('click', async () => {
+      try{ await navigator.clipboard.writeText(code.textContent); btn.textContent = 'הועתק ✓'; }
+      catch(e){ const r = document.createRange(); r.selectNodeContents(code); const sel = getSelection(); sel.removeAllRanges(); sel.addRange(r); btn.textContent = 'סומן - העתק ידנית'; }
+      setTimeout(() => { btn.textContent = 'העתק'; }, 2500);
+    });
+    row.appendChild(code);
+    row.appendChild(btn);
+    card.appendChild(row);
+  };
+  addCommand('התקנה או עדכון של ההגבלות:', 'install-class-kiosk.ps1');
+  addCommand('שינוי הסיסמה של המשתמש:', 'change-class-kiosk-password.ps1');
+  return card;
+}
+
 async function renderPhonesTab(container){
   const status = document.createElement('div');
   status.className = 'loading';
@@ -811,6 +857,7 @@ async function renderPhonesTab(container){
     table.className = 'phones-table';
     scrollWrap.appendChild(table);
     container.appendChild(scrollWrap);
+    container.appendChild(buildKioskCard());
 
     const sort = { key: null, dir: 1 };
     const pendingSaves = new Map();

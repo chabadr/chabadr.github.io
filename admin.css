@@ -342,3 +342,7 @@
     padding: 20px 0;
   }
   .err{ color: var(--danger); }
+  .kiosk-cmd-label{ margin: 10px 0 4px; font-size: 13px; font-weight: 700; }
+  .kiosk-cmd-row{ display: flex; gap: 8px; align-items: flex-start; }
+  .kiosk-cmd-row code{ flex: 1; direction: ltr; text-align: left; background: #fff; border: 1px solid #ddd; border-radius: 6px; padding: 6px 8px; font-size: 12px; word-break: break-all; user-select: all; }
+  .kiosk-cmd-row button{ flex: none; padding: 6px 10px; }
