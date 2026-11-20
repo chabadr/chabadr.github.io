@@ -4275,6 +4275,8 @@ function buildKioskInstallLinks(){
   addText('2. קליק ימני על Windows PowerShell ← "הפעל כמנהל" ← מאשרים.');
   addText('3. מדביקים את השורה הבאה ולוחצים Enter (בחלון שנפתח בוחרים סיסמה למשתמש):');
   addCommand('install-class-kiosk.ps1');
+  addText('לשינוי הסיסמה של המשתמש - אותו דבר (מנהל) עם השורה הבאה:');
+  addCommand('change-class-kiosk-password.ps1');
   const alt = document.createElement('div');
   alt.appendChild(document.createTextNode('בלי PowerShell, אפשר להוריד קובץ להפעלה בלחיצה כפולה: '));
   const link = document.createElement('a');
