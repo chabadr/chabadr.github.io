@@ -4391,7 +4391,11 @@ function renderWeeklyEntryInto(entry, container, allWeeklyEntries, opts){
   table.style.tableLayout = 'fixed';
   table.style.width = wide ? '100%' : 'max-content';
 
-  const isCurrentWeek = !opts.showAllColumns && entry.weekKey === getWeekKey(new Date(activityDayStr() + 'T12:00:00'));
+  // The current week is shown without the columns filled in once a week (and
+  // without the %) from Sunday to Thursday; from Friday (Friday included) it is
+  // shown whole, like the weeks before it.
+  const activityDay = new Date(activityDayStr() + 'T12:00:00');
+  const isCurrentWeek = !opts.showAllColumns && entry.weekKey === getWeekKey(activityDay) && activityDay.getDay() < FRIDAY_INDEX;
   const fieldDefs = [
     { field: 'percent', label: '%', kind: 'percent' },
     { field: 'bonus', label: 'בונוס', kind: 'daily' },
@@ -4403,8 +4407,8 @@ function renderWeeklyEntryInto(entry, container, allWeeklyEntries, opts){
     ...WEEKLY_CLASS_FIELD_DEFS,
     ...WEEKLY_PARENT_FIELD_DEFS
   ].filter(f => {
-    // The current week: the columns filled in once a week are not shown yet, and
-    // neither is the % (the rows are still ordered by it).
+    // The current week, until Friday: the columns filled in once a week are not
+    // shown yet, and neither is the % (the rows are still ordered by it).
     if (isCurrentWeek && f.kind === 'percent') return false;
     return !(isCurrentWeek && (WEEKLY_CLASS_FIELD_DEFS.some(w => w.field === f.field) || WEEKLY_PARENT_FIELD_DEFS.some(w => w.field === f.field)));
   });
