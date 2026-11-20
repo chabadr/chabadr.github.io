@@ -798,3 +798,11 @@
     background: #fff; color: var(--ink); cursor: pointer;
   }
   .mini-keypad button:active{ background: var(--gold-bg); }
+
+  .kiosk-links{ margin: 18px 4px 6px; font-size: 13px; color: var(--ink-soft); }
+  .kiosk-links summary{ cursor: pointer; text-align: center; font-size: 12px; }
+  .kiosk-links > div{ margin: 6px 0; }
+  .kiosk-links a{ color: var(--ink-soft); }
+  .kiosk-cmd-row{ display: flex; gap: 8px; align-items: flex-start; }
+  .kiosk-cmd-row code{ flex: 1; direction: ltr; text-align: left; background: #fff; border: 1px solid var(--line, #ddd); border-radius: 6px; padding: 6px 8px; font-size: 12px; word-break: break-all; user-select: all; }
+  .kiosk-cmd-row button{ flex: none; padding: 6px 10px; border: 1px solid var(--ink-soft); border-radius: 6px; background: #fff; cursor: pointer; }

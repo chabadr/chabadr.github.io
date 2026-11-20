@@ -4163,6 +4163,7 @@ function renderZ1ViewNow(){
     empty.textContent = 'הנוסע המתמיד ז1 · אין עדיין נתונים';
     header.appendChild(empty);
     el.appendChild(header);
+    el.appendChild(buildKioskInstallLinks());
     return;
   }
   if (!z1SelectedWeekKey || !weeks.find(w => w.weekKey === z1SelectedWeekKey)) z1SelectedWeekKey = weeks[0].weekKey;
@@ -4233,8 +4234,59 @@ function renderZ1ViewNow(){
   scrollWrap.appendChild(table);
   header.appendChild(scrollWrap);
   el.appendChild(header);
+  el.appendChild(buildKioskInstallLinks());
 }
 
+// Under the table: how to set up (and remove) the restricted "כיתה" user of a
+// Windows computer - the files are in the kiosk folder.
+const KIOSK_BASE = 'https://chabadr.github.io/kiosk/';
+function kioskCommand(file){
+  return '$w=New-Object Net.WebClient;$w.Encoding=[Text.Encoding]::UTF8;iex $w.DownloadString(\'' + KIOSK_BASE + file + '\')';
+}
+function buildKioskInstallLinks(){
+  const box = document.createElement('details');
+  box.className = 'kiosk-links';
+  const sum = document.createElement('summary');
+  sum.textContent = 'מחשב הכיתה (Windows): התקנת משתמש "כיתה"';
+  box.appendChild(sum);
+
+  const addText = (text) => { const d = document.createElement('div'); d.textContent = text; box.appendChild(d); };
+  const addCommand = (file) => {
+    const row = document.createElement('div');
+    row.className = 'kiosk-cmd-row';
+    const code = document.createElement('code');
+    code.dir = 'ltr';
+    code.textContent = kioskCommand(file);
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.textContent = 'העתק';
+    btn.addEventListener('click', async () => {
+      try{ await navigator.clipboard.writeText(code.textContent); btn.textContent = 'הועתק ✓'; }
+      catch(e){ const r = document.createRange(); r.selectNodeContents(code); const sel = getSelection(); sel.removeAllRanges(); sel.addRange(r); btn.textContent = 'סומן - העתק ידנית'; }
+      setTimeout(() => { btn.textContent = 'העתק'; }, 2500);
+    });
+    row.appendChild(code);
+    row.appendChild(btn);
+    box.appendChild(row);
+  };
+
+  addText('המשתמש "כיתה" יוכל להפעיל רק אקסל ו-Edge, ולפתוח רק את האתרים: Google Docs ו-Excel ב-OneDrive.');
+  addText('1. לוחצים על התחל ומקלידים powershell.');
+  addText('2. קליק ימני על Windows PowerShell ← "הפעל כמנהל" ← מאשרים.');
+  addText('3. מדביקים את השורה הבאה ולוחצים Enter (בחלון שנפתח בוחרים סיסמה למשתמש):');
+  addCommand('install-class-kiosk.ps1');
+  addText('לשינוי הסיסמה של המשתמש - אותו דבר (מנהל) עם השורה הבאה:');
+  addCommand('change-class-kiosk-password.ps1');
+  const alt = document.createElement('div');
+  alt.appendChild(document.createTextNode('בלי PowerShell, אפשר להוריד קובץ להפעלה בלחיצה כפולה: '));
+  const link = document.createElement('a');
+  link.href = 'kiosk/install-class-kiosk.bat';
+  link.download = '';
+  link.textContent = 'התקנה';
+  alt.appendChild(link);
+  box.appendChild(alt);
+  return box;
+}
 
 function showZ1(){
   ['boards', 'todaySummary', 'frequentArchiveView', 'metivtaView'].forEach(id => { document.getElementById(id).style.display = 'none'; });
