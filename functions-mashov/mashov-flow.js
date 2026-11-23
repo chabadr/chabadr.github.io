@@ -96,53 +96,77 @@ async function fillLesson(page, step){
   await page.getByText(SETTINGS.lateColumn).first().waitFor({ timeout: 30000 });
 }
 
-async function columnIndex(page, text){
-  const headers = page.getByRole('columnheader');
-  const n = await headers.count();
-  for (let i = 0; i < n; i++){
-    if ((await headers.nth(i).innerText()).includes(text)) return i;
-  }
-  return -1;
+// The events table (a grid): the names are in one block of rows and the
+// checkboxes in another, row by row in the same order (and with the same
+// row-index). The columns are found by their header (חיסור יומי / איחור בוקר).
+async function readGrid(page){
+  return page.evaluate(({ late, absent }) => {
+    const hasHebrew = (t) => /[\u05d0-\u05ea]/.test(t);
+    const grid = document.querySelector('[role="grid"]');
+    if (!grid) return { error: 'no grid' };
+    const groups = [...grid.querySelectorAll('[role="rowgroup"]')];
+    let nameRows = null, boxRows = null, header = null;
+    for (const g of groups){
+      const rows = [...g.querySelectorAll('[role="row"]')];
+      if (!rows.length) continue;
+      if (rows.some(r => r.querySelector('[role="columnheader"]'))){
+        if (rows.some(r => r.innerText.includes(late) && r.innerText.includes(absent))) header = rows.find(r => r.innerText.includes(late));
+        continue;
+      }
+      if (rows.every(r => r.querySelector('input[type="checkbox"], [role="checkbox"]'))) boxRows = rows;
+      else if (rows.some(r => hasHebrew(r.innerText))) nameRows = rows;
+    }
+    if (!nameRows || !boxRows || !header) return { error: 'grid parts not found' };
+    const heads = [...header.querySelectorAll('[role="columnheader"]')];
+    const lateCol = heads.findIndex(h => h.innerText.includes(late));
+    const absentCol = heads.findIndex(h => h.innerText.includes(absent));
+    const lateId = heads[lateCol] && heads[lateCol].getAttribute('col-id');
+    const absentId = heads[absentCol] && heads[absentCol].getAttribute('col-id');
+    const byIndex = (r, i) => r.getAttribute('row-index') || String(i);
+    const boxByKey = new Map(boxRows.map((r, i) => [byIndex(r, i), r]));
+    // A unique mark on each checkbox cell, so it can be clicked from outside.
+    const out = [];
+    nameRows.forEach((r, i) => {
+      const key = byIndex(r, i);
+      const br = boxByKey.get(key) || boxRows[i];
+      if (!br) return;
+      const cells = [...br.querySelectorAll('[role="gridcell"]')];
+      const cellOf = (id, col) => (id && br.querySelector('[col-id="' + id + '"]')) || cells[col];
+      const lc = cellOf(lateId, lateCol), ac = cellOf(absentId, absentCol);
+      if (lc) lc.setAttribute('data-mashov-cell', 'late-' + i);
+      if (ac) ac.setAttribute('data-mashov-cell', 'absent-' + i);
+      out.push({ i, name: r.innerText.trim(), late: lc ? lc.innerText.trim() : null, absent: ac ? ac.innerText.trim() : null });
+    });
+    return { rows: out };
+  }, { late: SETTINGS.lateColumn, absent: SETTINGS.absentColumn });
 }
 
 async function markEvents(page, statuses, step){
   step('סימון איחורים וחיסורים');
-  const lateIdx = await columnIndex(page, SETTINGS.lateColumn);
-  const absentIdx = await columnIndex(page, SETTINGS.absentColumn);
-  const search = page.getByRole('textbox', { name: 'חיפוש' }).or(page.getByPlaceholder('חיפוש')).first();
+  await page.waitForTimeout(1500);
+  const grid = await readGrid(page);
+  if (grid.error) throw new Error('טבלת האירועים במשוב לא זוהתה (' + grid.error + ') - לא סומן כלום.');
   const report = [];
   let problems = 0;
   for (const s of statuses){
     if (s.status === 'ontime'){ report.push({ name: s.family, status: 'בזמן', action: '—' }); continue; }
     const label = s.status === 'late' ? 'איחור' : 'חיסור';
     if (!s.family){ problems++; report.push({ name: '(תלמיד ' + s.id + ')', status: label, action: 'אין שם משפחה באתר - לא סומן' }); continue; }
-    await search.fill(searchTermOf(s.family));
-    await page.waitForTimeout(500);
-    const rows = page.getByRole('row').filter({ has: page.getByRole('checkbox') });
-    const matches = [];
-    const count = await rows.count();
-    for (let i = 0; i < count; i++){
-      const text = norm(await rows.nth(i).innerText());
-      if (text.startsWith(norm(s.family) + ' ')) matches.push(rows.nth(i));
-    }
+    const matches = grid.rows.filter(r => norm(r.name).startsWith(norm(s.family) + ' ') || norm(r.name) === norm(s.family));
     if (matches.length !== 1){
       problems++;
       report.push({ name: s.family, status: label, action: matches.length ? 'נמצאו כמה תלמידים בשם הזה - לא סומן' : 'לא נמצא במשוב - לא סומן' });
       continue;
     }
     const row = matches[0];
-    const idx = s.status === 'late' ? lateIdx : absentIdx;
-    let cell = idx >= 0 ? row.getByRole('cell').nth(idx) : null;
-    if (cell && !(await cell.count())) cell = null;
-    const box = cell ? cell.getByRole('checkbox') : row.getByRole('checkbox').nth(s.status === 'late' ? 0 : 1);
-    const cellText = cell ? norm(await cell.innerText()) : '';
-    const name = norm(await row.getByRole('cell').first().innerText().catch(() => s.family)) || s.family;
-    if (/\d/.test(cellText)){ report.push({ name, status: label, action: 'כבר רשום במשוב - לא סומן שוב' }); continue; }
+    const kind = s.status === 'late' ? 'late' : 'absent';
+    const cellText = row[kind];
+    if (cellText === null){ problems++; report.push({ name: row.name, status: label, action: 'לא נמצאה התיבה - לא סומן' }); continue; }
+    if (/\d/.test(cellText)){ report.push({ name: row.name, status: label, action: 'כבר רשום במשוב - לא סומן שוב' }); continue; }
+    const box = page.locator('[data-mashov-cell="' + kind + '-' + row.i + '"]').getByRole('checkbox').first();
     if (!(await box.isChecked())) await box.check();
-    report.push({ name, status: label, action: 'סומן' });
+    report.push({ name: row.name, status: label, action: 'סומן' });
   }
-  await search.fill('');
-  await page.waitForTimeout(500);
   return { report, problems };
 }
 
