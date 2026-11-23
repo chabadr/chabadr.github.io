@@ -5145,7 +5145,7 @@ function buildToolbar(){
   mashovBtn.type = 'button';
   mashovBtn.className = 'mashov-fill-btn';
   mashovBtn.textContent = 'מילוי נוכחות במשוב';
-  mashovBtn.title = 'ממלא ושומר במשוב את נוכחות התפילה של היום לפי הלוח (איחור / חיסור).';
+  mashovBtn.title = 'ממלא ושומר במשוב את הנוכחות היומית לפי הלוח (איחור / חיסור).';
   mashovBtn.addEventListener('click', () => showMashovQuestion());
   toolbar.appendChild(mashovBtn);
 
@@ -5217,7 +5217,7 @@ function showMashovQuestion(){
   const unmarked = state.students.filter(studentHasNoMark);
   const { overlay, box } = mashovOverlay();
   const close = () => { overlay.remove(); mashovAskOpen = false; };
-  mashovMessage(box, 'עדכון משוב - נוכחות תפילה');
+  mashovMessage(box, 'עדכון משוב - נוכחות יומית');
   const boxes = [];
   if (unmarked.length){
     // The students with no mark today: a table of name and "הגיע" (a box to tick
@@ -5257,11 +5257,7 @@ function showMashovQuestion(){
       close();
       runMashovFill({ arrivedIds });
     }],
-    ['אחר כך', 'modal-btn-cancel', () => { mashovSnoozeUntil = Date.now() + MASHOV_REASK_MS; close(); }],
-    ['כבר עודכן ידנית', 'modal-btn-cancel', async () => {
-      close();
-      try{ await callMashovFill({ manualDone: true }); mashovDoneDay = activityDayStr(); } catch(e){}
-    }]
+    ['אחר כך', 'modal-btn-cancel', () => { mashovSnoozeUntil = Date.now() + MASHOV_REASK_MS; close(); }]
   ]);
 }
 
@@ -5277,9 +5273,8 @@ async function runMashovFill(data){
   box.innerHTML = '';
   if (d && d.saved){
     mashovDoneDay = activityDayStr();
-    const lines = (d.report || []).map(r => r.name + ' - ' + r.status);
-    mashovMessage(box, 'משוב עודכן בהצלחה ✓' + (lines.length ? '\n\n' + lines.join('\n') : '\n\nכולם הגיעו בזמן - לא סומן כלום.'));
-    mashovButtons(box, [['סגירה', 'modal-btn-confirm', () => { overlay.remove(); mashovAskOpen = false; }]]);
+    mashovMessage(box, 'משוב עודכן');
+    mashovButtons(box, [['אישור', 'modal-btn-confirm', () => { overlay.remove(); mashovAskOpen = false; }]]);
   } else {
     const lines = d ? (d.report || []).filter(r => r.action && r.action !== 'סומן').map(r => r.name + ' - ' + r.action) : [];
     mashovMessage(box, 'משוב לא עודכן: ' + (error || (d && d.message) || 'שגיאה לא ידועה') + (lines.length ? '\n\n' + lines.join('\n') : ''));
