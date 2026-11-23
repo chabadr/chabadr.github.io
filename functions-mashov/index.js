@@ -7,10 +7,10 @@
 //
 // Step 1 - mashovLoginTest: only signs in and checks that the teachers' main
 // screen opens (nothing is marked, nothing is saved). The result is written to
-// classroom_points/classroom-points-v1/meta/mashovTest. Started by hand, by a
-// message to the Pub/Sub topic "mashov-test".
+// classroom_points/classroom-points-v1/meta/mashovTest. Started by hand
+// (Cloud Scheduler "run" in me-west1); its own schedule is once a year.
 
-const { onMessagePublished } = require('firebase-functions/v2/pubsub');
+const { onSchedule } = require('firebase-functions/v2/scheduler');
 const { defineSecret } = require('firebase-functions/params');
 const { logger } = require('firebase-functions');
 const admin = require('firebase-admin');
@@ -50,10 +50,10 @@ async function login(page, user, pass, step){
   await page.getByRole('button', { name: 'הזנת נתוני שיעור' }).waitFor({ timeout: 60000 });
 }
 
-exports.mashovLoginTest = onMessagePublished({
-  topic: 'mashov-test',
+exports.mashovLoginTest = onSchedule({
+  schedule: '0 3 1 1 *',
+  timeZone: 'Asia/Jerusalem',
   region: 'me-west1',
-  retry: false,
   memory: '2GiB',
   timeoutSeconds: 300,
   maxInstances: 1,
