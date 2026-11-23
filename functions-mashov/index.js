@@ -2,12 +2,15 @@
 // Kept as its own codebase (firebase.json) because the browser is big: the
 // other functions don't carry it.
 //
+// It runs in Google's Tel Aviv region (me-west1), so Mashov sees a sign-in
+// from Israel.
+//
 // Step 1 - mashovLoginTest: only signs in and checks that the teachers' main
 // screen opens (nothing is marked, nothing is saved). The result is written to
-// classroom_points/classroom-points-v1/meta/mashovTest. Started by hand
-// (Cloud Scheduler "run"), its schedule is once a year.
+// classroom_points/classroom-points-v1/meta/mashovTest. Started by hand, by a
+// message to the Pub/Sub topic "mashov-test".
 
-const { onSchedule } = require('firebase-functions/v2/scheduler');
+const { onMessagePublished } = require('firebase-functions/v2/pubsub');
 const { defineSecret } = require('firebase-functions/params');
 const { logger } = require('firebase-functions');
 const admin = require('firebase-admin');
@@ -47,10 +50,10 @@ async function login(page, user, pass, step){
   await page.getByRole('button', { name: 'הזנת נתוני שיעור' }).waitFor({ timeout: 60000 });
 }
 
-exports.mashovLoginTest = onSchedule({
-  schedule: '0 3 1 1 *',
-  timeZone: 'Asia/Jerusalem',
-  region: 'us-central1',
+exports.mashovLoginTest = onMessagePublished({
+  topic: 'mashov-test',
+  region: 'me-west1',
+  retry: false,
   memory: '2GiB',
   timeoutSeconds: 300,
   maxInstances: 1,
