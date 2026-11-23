@@ -2,3 +2,5 @@ functions/node_modules/
 functions/package-lock.json
 functions/.secret.local
 *-debug.log
+functions-mashov/node_modules/
+functions-mashov/package-lock.json
