@@ -70,6 +70,10 @@
     gap:14px;
   }
 
+  .mashov-fill-btn{
+    font-size: 13px; padding: 6px 12px; border-radius: 8px; border: 1px solid var(--line);
+    background: #fff; color: var(--ink); text-decoration: none; white-space: nowrap;
+  }
   .status{
     font-size: 13px;
     color: var(--ink-soft);

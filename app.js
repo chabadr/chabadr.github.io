@@ -5139,6 +5139,16 @@ function buildToolbar(){
   status.id = 'statusEl';
   toolbar.appendChild(status);
 
+  // Starts the Mashov attendance filler on this computer (installed with
+  // mashov/install-mashov.ps1, which registers the mashov-fill: link). On a
+  // computer without it, the browser says it has no app for the link.
+  const mashovLink = document.createElement('a');
+  mashovLink.className = 'mashov-fill-btn';
+  mashovLink.href = 'mashov-fill:start';
+  mashovLink.textContent = 'מילוי נוכחות במשוב';
+  mashovLink.title = 'פותח את משוב וממלא את נוכחות התפילה של היום (רק במחשב שהותקן בו). השמירה במשוב - ידנית.';
+  toolbar.appendChild(mashovLink);
+
   return toolbar;
 }
 

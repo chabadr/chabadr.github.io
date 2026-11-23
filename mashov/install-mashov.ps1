@@ -30,5 +30,12 @@ function Add-Shortcut($name, $nodeArgs, $keepOpen) {
 }
 Add-Shortcut 'משוב - מילוי נוכחות' '' $false
 Add-Shortcut 'משוב - החלפת סיסמה' '--login' $true
+# The mashov-fill: link (the "מילוי נוכחות במשוב" button of the class board) starts the filler.
+# Nothing from the link is passed on: it can only start the filling (which never saves).
+$key = 'HKCU:\Software\Classes\mashov-fill'
+New-Item -Path "$key\shell\open\command" -Force | Out-Null
+Set-ItemProperty -Path $key -Name '(default)' -Value 'URL:Mashov attendance'
+New-ItemProperty -Path $key -Name 'URL Protocol' -Value '' -PropertyType String -Force | Out-Null
+Set-ItemProperty -Path "$key\shell\open\command" -Name '(default)' -Value ("`"$env:ComSpec`" /c cd /d `"$dir`" && set NODE_OPTIONS=--use-system-ca && node mashov-update.mjs")
 Write-Host ''
-Write-Host 'Done. Two shortcuts were added to the desktop.'
+Write-Host 'Done. Two shortcuts were added to the desktop, and the button of the class board works on this computer.'
