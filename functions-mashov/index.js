@@ -47,7 +47,14 @@ async function login(page, user, pass, step){
   await page.getByRole('textbox', { name: 'סיסמה (משו"ב)' }).fill(pass);
   await page.getByRole('button', { name: 'כניסה', exact: true }).click();
   step('wait for the main screen');
-  await page.getByRole('button', { name: 'הזנת נתוני שיעור' }).waitFor({ timeout: 60000 });
+  await page.waitForURL(/\/teachers\/main\//, { timeout: 60000 });
+  await dismissCookies(page);
+}
+
+// The cookies window of a new browser: only the needed cookies.
+async function dismissCookies(page){
+  const btn = page.getByRole('button', { name: 'עוגיות חיוניות בלבד' });
+  try{ await btn.waitFor({ timeout: 8000 }); await btn.click(); } catch(e){}
 }
 
 exports.mashovLoginTest = onSchedule({
@@ -59,26 +66,50 @@ exports.mashovLoginTest = onSchedule({
   maxInstances: 1,
   secrets: [MASHOV_USER, MASHOV_PASS]
 }, async () => {
+  // Looks only: signs in, opens today's תפילה lesson and its behaviour events
+  // screen - nothing is typed, marked or saved. A picture and the structure of
+  // every screen are kept, to build the filling on the real screens.
   const ref = admin.firestore().collection('classroom_points').doc('classroom-points-v1').collection('meta').doc('mashovTest');
   let current = 'start', browser = null, page = null;
   const step = (s) => { current = s; logger.info('mashov test: ' + s); };
-  const result = { at: new Date().toISOString(), ok: false, step: '', message: '', url: '', shot: '' };
+  const result = { at: new Date().toISOString(), ok: false, step: '', message: '', screens: [] };
+  const keep = async (name) => {
+    if (!page) return;
+    const scr = { name, url: page.url(), shot: '', aria: '' };
+    try{ scr.shot = (await page.screenshot({ type: 'jpeg', quality: 45 })).toString('base64'); } catch(e){}
+    try{ scr.aria = (await page.locator('body').ariaSnapshot()).slice(0, 120000); } catch(e){ scr.aria = 'aria failed: ' + e.message; }
+    result.screens.push(scr);
+  };
   try{
     browser = await launchBrowser();
     page = await browser.newPage({ locale: 'he-IL', viewport: { width: 1280, height: 900 } });
     page.setDefaultTimeout(30000);
     await login(page, MASHOV_USER.value(), MASHOV_PASS.value(), step);
+    await page.waitForTimeout(2500);
+    await keep('dashboard');
+    step('open today\'s lesson from "המערכת להיום"');
+    const item = page.getByText(/תפילה\s*ז2/).last();
+    await item.click();
+    await page.waitForTimeout(4000);
+    await keep('after clicking today\'s תפילה');
+    step('open the behaviour events screen (no typing)');
+    const ev = page.getByRole('button', { name: /הזנת ארועי התנהגות/ });
+    if (await ev.count()){
+      await ev.locator('visible=true').first().click();
+      await page.waitForTimeout(4000);
+      await keep('behaviour events screen');
+    }
     result.ok = true;
-    result.message = 'signed in - the main screen of Mashov opened';
+    result.message = 'looked at the screens - nothing typed or saved';
   } catch(e){
     result.message = String((e && e.message) || e).slice(0, 1500);
+    await keep('at the error');
   }
   result.step = current;
-  if (page){
-    result.url = page.url();
-    try{ result.shot = (await page.screenshot({ type: 'jpeg', quality: 50 })).toString('base64'); } catch(e){}
-  }
   if (browser) await browser.close().catch(() => {});
+  // A document holds up to 1MB: the pictures are left out if too big.
+  let json = JSON.stringify(result);
+  if (json.length > 900000) result.screens.forEach(s => { s.shot = ''; });
   await ref.set(result);
-  logger.info('mashov test result: ' + JSON.stringify({ ok: result.ok, step: result.step, message: result.message, url: result.url }));
+  logger.info('mashov test result: ' + JSON.stringify({ ok: result.ok, step: result.step, message: result.message, screens: result.screens.map(s => s.name + ' ' + s.url) }));
 });
