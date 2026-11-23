@@ -363,3 +363,34 @@ exports.weeklyBackup = onSchedule({
   }
   logger.info('weekly backup saved: ' + stamp);
 });
+
+// Sunday-Friday at 10:30 Israel time: if the class board was used today but
+// Mashov was not updated yet (meta/mashovStatus) - e.g. the class computer was
+// closed at 10:00 - a reminder e-mail goes to the address of the PDF e-mails
+// (meta/pdfSettings, set in the admin page).
+exports.mashovReminder = onSchedule({
+  schedule: '30 10 * * 0-5',
+  timeZone: 'Asia/Jerusalem',
+  region: 'us-central1',
+  secrets: [SMTP_USER, SMTP_PASS]
+}, async () => {
+  const db = admin.firestore();
+  const mainRef = db.collection(FIRESTORE_COLLECTION).doc(STORAGE_KEY);
+  const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Jerusalem', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
+  const [mainSnap, statusSnap, settingsSnap] = await Promise.all([
+    mainRef.get(), mainRef.collection('meta').doc('mashovStatus').get(), mainRef.collection('meta').doc('pdfSettings').get()
+  ]);
+  if (!mainSnap.exists || mainSnap.data().lastActivityDate !== today){ logger.info('mashov reminder: board not used today'); return; }
+  if (statusSnap.exists && statusSnap.data().date === today){ logger.info('mashov reminder: already updated'); return; }
+  const email = settingsSnap.exists ? (settingsSnap.data().email || '') : '';
+  if (!email){ logger.error('mashov reminder: no e-mail address in meta/pdfSettings'); return; }
+  const user = SMTP_USER.value();
+  const transporter = nodemailer.createTransport({ host: 'smtp.gmail.com', port: 465, secure: true, auth: { user, pass: SMTP_PASS.value() } });
+  await transporter.sendMail({
+    from: user,
+    to: email,
+    subject: 'תזכורת: לעדכן את המשוב (נוכחות תפילה)',
+    text: 'משוב עוד לא עודכן היום.\n\nאפשר לעדכן מהלוח של הכיתה בכפתור "מילוי נוכחות במשוב":\nhttps://chabadr.github.io/\n\nאם מחשב הכיתה ייפתח היום, הוא ישאל ויעדכן לבד.'
+  });
+  logger.info('mashov reminder sent');
+});

@@ -5146,39 +5146,159 @@ function buildToolbar(){
   mashovBtn.className = 'mashov-fill-btn';
   mashovBtn.textContent = 'מילוי נוכחות במשוב';
   mashovBtn.title = 'ממלא ושומר במשוב את נוכחות התפילה של היום לפי הלוח (איחור / חיסור).';
-  mashovBtn.addEventListener('click', () => startMashovFill(mashovBtn));
+  mashovBtn.addEventListener('click', () => showMashovQuestion());
   toolbar.appendChild(mashovBtn);
 
   return toolbar;
 }
 
+// ---- Mashov (משו"ב): today's prayer attendance, filled and saved on the server ----
+// The rule (as on the server, functions-mashov/mashov-flow.js): marked at 8:10
+// or 8:45 - on time; another mark today - late; no mark - absent. Before the
+// update, the students with no mark are shown: whoever is marked "לא הגיע" is
+// absent, the rest came (late).
 let mashovFillRunning = false;
-function startMashovFill(btn){
-  if (mashovFillRunning) return;
-  showModal('למלא ולשמור במשוב את נוכחות התפילה של היום לפי הלוח?\n(מי שסומן ב-8:10 או ב-8:45 - בזמן; סימון אחר - איחור; בלי סימון - חיסור)', {
-    confirmText: 'מילוי ושמירה',
-    onConfirm: async () => {
-      mashovFillRunning = true;
-      const label = btn.textContent;
-      btn.disabled = true;
-      btn.textContent = 'ממלא במשוב… (עד דקה)';
-      let text;
-      try{
-        const { getFunctions, httpsCallable } = await import("https://www.gstatic.com/firebasejs/10.13.0/firebase-functions.js");
-        const res = await httpsCallable(getFunctions(firebaseApp, 'me-west1'), 'mashovFill', { timeout: 300000 })({});
-        const d = res.data || {};
-        const lines = (d.report || []).map(r => r.name + ' - ' + r.status + ': ' + r.action);
-        text = (d.message || '') + (lines.length ? '\n\n' + lines.join('\n') : '\n\nכולם הגיעו בזמן - לא סומן כלום.');
-      } catch(e){
-        text = 'המילוי במשוב נכשל: ' + ((e && e.message) || e);
-      }
-      mashovFillRunning = false;
-      btn.disabled = false;
-      btn.textContent = label;
-      showModal(text, { showCancel: false, confirmText: 'סגירה' });
-    }
-  });
+let mashovAskOpen = false;
+let mashovSnoozeUntil = 0;
+let mashovDoneDay = '';
+
+function studentHasNoMark(st){
+  const c = st.cats || {};
+  if ((c.c1 || 0) > 0 || (c.c7 || 0) > 0) return false;
+  const other = Object.keys(c).some(k => k !== 'c1' && k !== 'c7' && (c[k] || 0) !== 0)
+    || (st.minusTotal || 0) !== 0 || (st.purchases || 0) > 0
+    || !!(st.frequent && ((st.frequent.mikvaot || 0) > 0 || (st.frequent.rambam || 0) > 0));
+  return !other;
 }
+
+function mashovOverlay(){
+  document.querySelectorAll('.mashov-overlay').forEach(el => el.remove());
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay mashov-overlay';
+  const box = document.createElement('div');
+  box.className = 'modal-box';
+  overlay.appendChild(box);
+  document.body.appendChild(overlay);
+  return { overlay, box };
+}
+function mashovButtons(box, buttons){
+  const row = document.createElement('div');
+  row.className = 'modal-btns';
+  buttons.forEach(([text, cls, onClick]) => {
+    const b = document.createElement('button');
+    b.className = 'modal-btn ' + cls;
+    b.textContent = text;
+    b.addEventListener('click', onClick);
+    row.appendChild(b);
+  });
+  box.appendChild(row);
+}
+function mashovMessage(box, text){
+  const msg = document.createElement('div');
+  msg.className = 'modal-msg';
+  msg.textContent = text;
+  box.appendChild(msg);
+  return msg;
+}
+
+async function callMashovFill(data){
+  const { getFunctions, httpsCallable } = await import("https://www.gstatic.com/firebasejs/10.13.0/firebase-functions.js");
+  const res = await httpsCallable(getFunctions(firebaseApp, 'me-west1'), 'mashovFill', { timeout: 300000 })(data);
+  return res.data || {};
+}
+
+// The question: who of the students with no mark today did not come.
+function showMashovQuestion(){
+  if (!state || mashovFillRunning) return;
+  mashovAskOpen = true;
+  const unmarked = state.students.filter(studentHasNoMark);
+  const { overlay, box } = mashovOverlay();
+  const close = () => { overlay.remove(); mashovAskOpen = false; };
+  mashovMessage(box, 'עדכון משוב - נוכחות תפילה');
+  const boxes = [];
+  if (unmarked.length){
+    mashovMessage(box, 'לתלמידים האלה אין שום סימון היום בלוח. סמנו מי לא הגיע (מי שלא יסומן - הגיע באיחור):');
+    const list = document.createElement('div');
+    list.className = 'mashov-ask-list';
+    unmarked.forEach(st => {
+      const label = document.createElement('label');
+      const cb = document.createElement('input');
+      cb.type = 'checkbox';
+      cb.dataset.id = String(st.id);
+      boxes.push(cb);
+      label.appendChild(cb);
+      label.appendChild(document.createTextNode(' ' + metivtaFullName(st.id, false) + ' - לא הגיע'));
+      list.appendChild(label);
+    });
+    box.appendChild(list);
+  } else {
+    mashovMessage(box, 'כל התלמידים מסומנים היום בלוח.');
+  }
+  mashovButtons(box, [
+    ['עדכון משוב', 'modal-btn-confirm', () => {
+      const arrivedIds = boxes.filter(cb => !cb.checked).map(cb => parseInt(cb.dataset.id, 10));
+      close();
+      runMashovFill({ arrivedIds });
+    }],
+    ['אחר כך', 'modal-btn-cancel', () => { mashovSnoozeUntil = Date.now() + 15 * 60000; close(); }],
+    ['כבר עודכן ידנית', 'modal-btn-cancel', async () => {
+      close();
+      try{ await callMashovFill({ manualDone: true }); mashovDoneDay = activityDayStr(); } catch(e){}
+    }]
+  ]);
+}
+
+async function runMashovFill(data){
+  mashovFillRunning = true;
+  const { overlay, box } = mashovOverlay();
+  mashovMessage(box, 'מעדכן את משוב… (עד דקה)');
+  let d = null, error = '';
+  try{ d = await callMashovFill(data); }
+  catch(e){ error = (e && e.message) || String(e); }
+  mashovFillRunning = false;
+  box.innerHTML = '';
+  if (d && d.saved){
+    mashovDoneDay = activityDayStr();
+    const lines = (d.report || []).map(r => r.name + ' - ' + r.status);
+    mashovMessage(box, 'משוב עודכן בהצלחה ✓' + (lines.length ? '\n\n' + lines.join('\n') : '\n\nכולם הגיעו בזמן - לא סומן כלום.'));
+    mashovButtons(box, [['סגירה', 'modal-btn-confirm', () => overlay.remove()]]);
+  } else {
+    const lines = d ? (d.report || []).filter(r => r.action && r.action !== 'סומן').map(r => r.name + ' - ' + r.action) : [];
+    mashovMessage(box, 'משוב לא עודכן: ' + (error || (d && d.message) || 'שגיאה לא ידועה') + (lines.length ? '\n\n' + lines.join('\n') : ''));
+    mashovButtons(box, [
+      ['נסה שוב', 'modal-btn-confirm', () => { overlay.remove(); runMashovFill(data); }],
+      ['סגירה', 'modal-btn-cancel', () => { overlay.remove(); mashovSnoozeUntil = Date.now() + 15 * 60000; }]
+    ]);
+  }
+}
+
+// The class computer (marked once by opening the site with ?classpc=1, and
+// unmarked with ?classpc=0): from 10:00, Sunday-Friday, when the board was used
+// today and Mashov was not updated yet (meta/mashovStatus), it asks - also when
+// it is opened later in the day.
+const CLASS_PC_KEY = 'isClassComputer';
+const MASHOV_ASK_HOUR = 10;
+(function(){
+  const v = new URLSearchParams(location.search).get('classpc');
+  if (v === '1' || v === '0'){ try{ localStorage.setItem(CLASS_PC_KEY, v); } catch(e){} }
+})();
+function isClassComputer(){
+  try{ return localStorage.getItem(CLASS_PC_KEY) === '1'; } catch(e){ return false; }
+}
+async function checkMashovQuestion(){
+  if (!isClassComputer() || !state || !firestoreDb || mashovAskOpen || mashovFillRunning) return;
+  const now = new Date();
+  if (now.getDay() === 6 || now.getHours() < MASHOV_ASK_HOUR || Date.now() < mashovSnoozeUntil) return;
+  const today = activityDayStr();
+  if (state.lastActivityDate !== today || mashovDoneDay === today) return;
+  try{
+    const s = await getDoc(doc(firestoreDb, FIRESTORE_COLLECTION, STORAGE_KEY, 'meta', 'mashovStatus'));
+    if (s.exists() && s.data().date === today){ mashovDoneDay = today; return; }
+  } catch(e){ return; }
+  if (!mashovAskOpen && !mashovFillRunning) showMashovQuestion();
+}
+setInterval(checkMashovQuestion, 60000);
+setTimeout(checkMashovQuestion, 20000);
 
 function computeSortScore(student){
   const attendanceSum = MERGE_GROUPS[0].reduce((sum, k) => sum + (student.cats[k] || 0), 0);

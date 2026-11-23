@@ -28,7 +28,10 @@ function israelToday(d = new Date()){
 //   marked at 8:10 (c1) or 8:45 (c7)     -> on time (nothing is marked)
 //   any other mark today                 -> איחור בוקר
 //   no mark at all                       -> חיסור יומי
-function boardStatuses(main, today){
+// arrivedIds: students with no mark on the board that the class computer's
+// question at 10:00 said did come (so: איחור בוקר and not חיסור).
+function boardStatuses(main, today, arrivedIds){
+  const arrived = new Set((arrivedIds || []).map(Number));
   if (main.lastActivityDate !== today.iso) throw new Error('הלוח של הכיתה עוד לא מולא היום (' + today.dmy + ') - לא סומן כלום.');
   const names = main.metivtaNames || {};
   const out = [];
@@ -39,7 +42,7 @@ function boardStatuses(main, today){
     const otherMark = Object.keys(c).some(k => k !== 'c1' && k !== 'c7' && (c[k] || 0) !== 0)
       || (st.minusTotal || 0) !== 0 || (st.purchases || 0) > 0
       || !!(st.frequent && ((st.frequent.mikvaot || 0) > 0 || (st.frequent.rambam || 0) > 0));
-    const status = onTime ? 'ontime' : otherMark ? 'late' : 'absent';
+    const status = onTime ? 'ontime' : (otherMark || arrived.has(st.id)) ? 'late' : 'absent';
     if (status !== 'absent') present++;
     const n = names[st.id];
     out.push({ id: st.id, family: NAME_IN_MASHOV[st.id] || (n && typeof n === 'object' ? n.family : '') || '', status });

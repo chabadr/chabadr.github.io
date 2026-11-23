@@ -70,6 +70,8 @@
     gap:14px;
   }
 
+  .mashov-ask-list{ display: flex; flex-direction: column; gap: 8px; margin: 0 0 16px; max-height: 50vh; overflow-y: auto; font-size: 17px; }
+  .mashov-ask-list input{ width: 20px; height: 20px; vertical-align: middle; }
   .mashov-fill-btn{
     font-size: 13px; padding: 6px 12px; border-radius: 8px; border: 1px solid var(--line);
     background: #fff; color: var(--ink); text-decoration: none; white-space: nowrap;

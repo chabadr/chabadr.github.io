@@ -27,10 +27,17 @@ async function launchBrowser(){
   return pw.launch({ executablePath: await chromium.executablePath(), args: chromium.args, headless: true });
 }
 
+// meta/mashovStatus (readable by the site): the day Mashov was last updated,
+// so the class computer knows not to ask again and the reminder e-mail is not sent.
+async function setMashovStatus(today, how){
+  await admin.firestore().collection('classroom_points').doc('classroom-points-v1').collection('meta').doc('mashovStatus')
+    .set({ date: today.iso, at: new Date().toISOString(), how });
+}
+
 // One run in Mashov. save=false: everything is filled and marked, but "שמירה"
 // is not pressed (a check). The result (what was marked for whom, pictures of
 // the screens) is written to meta/mashovRun.
-async function runMashov(save){
+async function runMashov(save, arrivedIds){
   const db = admin.firestore();
   const mainRef = db.collection('classroom_points').doc('classroom-points-v1');
   const runRef = mainRef.collection('meta').doc('mashovRun');
@@ -48,7 +55,7 @@ async function runMashov(save){
   try{
     step('קריאת הלוח של הכיתה');
     const mainSnap = await mainRef.get();
-    const statuses = flow.boardStatuses(mainSnap.data() || {}, today);
+    const statuses = flow.boardStatuses(mainSnap.data() || {}, today, arrivedIds);
     browser = await launchBrowser();
     page = await browser.newPage({ locale: 'he-IL', viewport: { width: 1280, height: 1400 } });
     page.setDefaultTimeout(30000);
@@ -61,6 +68,7 @@ async function runMashov(save){
     if (save && !problems){
       await flow.save(page, step);
       result.saved = true;
+      await setMashovStatus(today, 'auto');
       await keep('אחרי השמירה', false);
     }
     result.ok = true;
@@ -99,7 +107,14 @@ exports.mashovFill = onCall({
   timeoutSeconds: 300,
   maxInstances: 1,
   secrets: [MASHOV_USER, MASHOV_PASS]
-}, async () => {
+}, async (request) => {
+  const data = request.data || {};
+  // "Mashov was already updated by hand today": only the status is kept.
+  if (data.manualDone === true){
+    await setMashovStatus(flow.israelToday(), 'manual');
+    return { ok: true, saved: false, message: 'נרשם שמשוב עודכן ידנית היום.' , report: [] };
+  }
+  const arrivedIds = Array.isArray(data.arrivedIds) ? data.arrivedIds.filter(n => Number.isInteger(n) && n > 0 && n < 100).slice(0, 60) : [];
   const db = admin.firestore();
   const lockRef = db.collection('classroom_points').doc('classroom-points-v1').collection('meta').doc('mashovLock');
   const free = await db.runTransaction(async (tx) => {
@@ -110,6 +125,6 @@ exports.mashovFill = onCall({
     return true;
   });
   if (!free) throw new HttpsError('resource-exhausted', 'כבר רץ מילוי, או שהסתיים לפני פחות מ-3 דקות. אפשר לנסות שוב עוד מעט.');
-  const r = await runMashov(true);
+  const r = await runMashov(true, arrivedIds);
   return { ok: r.ok, saved: r.saved, date: r.date, message: r.message, report: r.report.filter(x => x.status !== 'בזמן') };
 });
