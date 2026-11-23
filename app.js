@@ -5161,6 +5161,9 @@ let mashovFillRunning = false;
 let mashovAskOpen = false;
 let mashovSnoozeUntil = 0;
 let mashovDoneDay = '';
+// Until Mashov is updated the question stays up: closed, it comes back after half a minute.
+const MASHOV_REASK_MS = 30 * 1000;
+let mashovStatusCheckedAt = 0;
 
 function studentHasNoMark(st){
   const c = st.cats || {};
@@ -5240,7 +5243,7 @@ function showMashovQuestion(){
       close();
       runMashovFill({ arrivedIds });
     }],
-    ['אחר כך', 'modal-btn-cancel', () => { mashovSnoozeUntil = Date.now() + 15 * 60000; close(); }],
+    ['אחר כך', 'modal-btn-cancel', () => { mashovSnoozeUntil = Date.now() + MASHOV_REASK_MS; close(); }],
     ['כבר עודכן ידנית', 'modal-btn-cancel', async () => {
       close();
       try{ await callMashovFill({ manualDone: true }); mashovDoneDay = activityDayStr(); } catch(e){}
@@ -5250,6 +5253,7 @@ function showMashovQuestion(){
 
 async function runMashovFill(data){
   mashovFillRunning = true;
+  mashovAskOpen = true; // the result stays until it is closed
   const { overlay, box } = mashovOverlay();
   mashovMessage(box, 'מעדכן את משוב… (עד דקה)');
   let d = null, error = '';
@@ -5261,13 +5265,13 @@ async function runMashovFill(data){
     mashovDoneDay = activityDayStr();
     const lines = (d.report || []).map(r => r.name + ' - ' + r.status);
     mashovMessage(box, 'משוב עודכן בהצלחה ✓' + (lines.length ? '\n\n' + lines.join('\n') : '\n\nכולם הגיעו בזמן - לא סומן כלום.'));
-    mashovButtons(box, [['סגירה', 'modal-btn-confirm', () => overlay.remove()]]);
+    mashovButtons(box, [['סגירה', 'modal-btn-confirm', () => { overlay.remove(); mashovAskOpen = false; }]]);
   } else {
     const lines = d ? (d.report || []).filter(r => r.action && r.action !== 'סומן').map(r => r.name + ' - ' + r.action) : [];
     mashovMessage(box, 'משוב לא עודכן: ' + (error || (d && d.message) || 'שגיאה לא ידועה') + (lines.length ? '\n\n' + lines.join('\n') : ''));
     mashovButtons(box, [
       ['נסה שוב', 'modal-btn-confirm', () => { overlay.remove(); runMashovFill(data); }],
-      ['סגירה', 'modal-btn-cancel', () => { overlay.remove(); mashovSnoozeUntil = Date.now() + 15 * 60000; }]
+      ['סגירה', 'modal-btn-cancel', () => { overlay.remove(); mashovAskOpen = false; mashovSnoozeUntil = Date.now() + MASHOV_REASK_MS; }]
     ]);
   }
 }
@@ -5283,7 +5287,9 @@ async function checkMashovQuestion(){
   if (now.getDay() === 6 || now.getHours() < MASHOV_ASK_HOUR) return;
   const today = activityDayStr();
   if (state.lastActivityDate !== today) return;
-  if (mashovDoneDay !== today){
+  // The update status is read at most once a minute (the question itself comes back sooner).
+  if (mashovDoneDay !== today && Date.now() - mashovStatusCheckedAt >= 60000){
+    mashovStatusCheckedAt = Date.now();
     try{
       const s = await getDoc(doc(firestoreDb, FIRESTORE_COLLECTION, STORAGE_KEY, 'meta', 'mashovStatus'));
       if (s.exists() && s.data().date === today) mashovDoneDay = today;
@@ -5296,7 +5302,7 @@ async function checkMashovQuestion(){
   if (mashovAskOpen || Date.now() < mashovSnoozeUntil) return;
   showMashovQuestion();
 }
-setInterval(checkMashovQuestion, 60000);
+setInterval(checkMashovQuestion, 10000);
 setTimeout(checkMashovQuestion, 20000);
 
 function computeSortScore(student){

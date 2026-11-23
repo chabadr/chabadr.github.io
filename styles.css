@@ -70,6 +70,7 @@
     gap:14px;
   }
 
+  .modal-overlay.mashov-overlay{ z-index: 100000; }
   .mashov-ask-list{ display: flex; flex-direction: column; gap: 8px; margin: 0 0 16px; max-height: 50vh; overflow-y: auto; font-size: 17px; }
   .mashov-ask-list input{ width: 20px; height: 20px; vertical-align: middle; }
   .mashov-fill-btn{
