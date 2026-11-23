@@ -157,7 +157,7 @@ function writeReport(title, rows, note){
     + '<table border="1" cellpadding="6" style="border-collapse:collapse">'
     + '<tr><th>תלמיד (משוב)</th><th>מה נמצא באתר</th><th>מה נעשה</th></tr>'
     + rows.map(r => '<tr><td>' + esc(r.name) + '</td><td>' + esc(r.status) + '</td><td>' + esc(r.action) + '</td></tr>').join('')
-    + '</table></body></html>';
+    + '</table>' + (existsSync(join(HERE, 'timetable.png')) && /timetable\.png/.test(note || '') ? '<p><img src="timetable.png" style="max-width:100%;border:1px solid #ccc"></p>' : '') + '</body></html>';
   writeFileSync(REPORT_FILE, html);
   spawn('cmd.exe', ['/c', 'start', '', REPORT_FILE], { detached: true, stdio: 'ignore' }).unref();
 }
@@ -185,20 +185,33 @@ async function openTodaysLesson(page, today){
   const hb = await header.boundingBox();
   if (!hb) throw new Error('Today (' + today.dmy + ') is not in the timetable.');
   const hx = hb.x + hb.width / 2;
-  const cands = page.getByText(SETTINGS.lessonName, { exact: true });
-  const n = await cands.count();
-  for (let i = 0; i < n; i++){
-    const c = cands.nth(i);
-    const b = await c.boundingBox();
-    if (!b) continue;
-    const inColumn = Math.abs((b.x + b.width / 2) - hx) < Math.max(hb.width, b.width) / 2 + 20;
-    if (!inColumn) continue;
-    const cell = c.locator('xpath=ancestor::*[contains(normalize-space(.), "' + SETTINGS.lessonGroup + '")][1]');
-    if (!(await cell.count())) continue;
-    await c.click();
-    return;
+  // The lesson's group number (2278) and its name (תפילה) may be written in one
+  // element or in several - both are tried, by text that contains them. The
+  // timetable may still be filling, so it is looked at again for a while.
+  let seen = [];
+  for (let attempt = 0; attempt < 15; attempt++){
+    seen = [];
+    for (const [text, other] of [[SETTINGS.lessonGroup, SETTINGS.lessonName], [SETTINGS.lessonName, SETTINGS.lessonGroup]]){
+      const cands = page.getByText(text);
+      const n = await cands.count();
+      for (let i = 0; i < n; i++){
+        const c = cands.nth(i);
+        const b = await c.boundingBox();
+        if (!b) continue;
+        const cx = b.x + b.width / 2;
+        seen.push(Math.round(cx) + ':' + (await c.innerText()).replace(/\s+/g, ' ').slice(0, 25));
+        if (Math.abs(cx - hx) > Math.max(hb.width, b.width) / 2 + 20) continue;
+        const cell = c.locator('xpath=ancestor-or-self::*[contains(normalize-space(.), "' + other + '")][1]');
+        if (!(await cell.count())) continue;
+        await c.click();
+        return;
+      }
+    }
+    await page.waitForTimeout(1000);
   }
-  throw new Error('The ' + SETTINGS.lessonName + ' lesson (' + SETTINGS.lessonGroup + ') was not found in today\'s column (' + today.dmy + ').');
+  await page.screenshot({ path: join(HERE, 'timetable.png') }).catch(() => {});
+  throw new Error('The ' + SETTINGS.lessonName + ' lesson (' + SETTINGS.lessonGroup + ') was not found in today\'s column (' + today.dmy + '). '
+    + 'Column of today at x=' + Math.round(hx) + '; found: ' + (seen.join(' | ') || 'nothing') + '. A picture of the screen: timetable.png');
 }
 
 async function fillLesson(page){
