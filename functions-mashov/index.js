@@ -94,7 +94,10 @@ exports.mashovFillTest = onSchedule({
   region: 'me-west1',
   memory: '2GiB',
   timeoutSeconds: 300,
-  maxInstances: 1,
+  // One browser per request; a few instances, so a press while one is still
+  // starting is not refused ("no available instance").
+  maxInstances: 3,
+  concurrency: 1,
   secrets: [MASHOV_USER, MASHOV_PASS]
 }, async () => { await runMashov(false); });
 
@@ -105,7 +108,10 @@ exports.mashovFill = onCall({
   region: 'me-west1',
   memory: '2GiB',
   timeoutSeconds: 300,
-  maxInstances: 1,
+  // One browser per request; a few instances, so a press while one is still
+  // starting is not refused ("no available instance").
+  maxInstances: 3,
+  concurrency: 1,
   secrets: [MASHOV_USER, MASHOV_PASS]
 }, async (request) => {
   const data = request.data || {};
