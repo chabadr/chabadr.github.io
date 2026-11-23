@@ -162,9 +162,10 @@ async function markEvents(page, statuses, step){
     const kind = s.status === 'late' ? 'late' : 'absent';
     const cellText = row[kind];
     if (cellText === null){ problems++; report.push({ name: row.name, status: label, action: 'לא נמצאה התיבה - לא סומן' }); continue; }
-    if (/\d/.test(cellText)){ report.push({ name: row.name, status: label, action: 'כבר רשום במשוב - לא סומן שוב' }); continue; }
     const box = page.locator('[data-mashov-cell="' + kind + '-' + row.i + '"]').getByRole('checkbox').first();
-    if (!(await box.isChecked())) await box.check();
+    // (The small numbers next to a box are earlier events, not this lesson's.)
+    if (await box.isChecked()){ report.push({ name: row.name, status: label, action: 'כבר מסומן' }); continue; }
+    await box.check();
     report.push({ name: row.name, status: label, action: 'סומן' });
   }
   return { report, problems };

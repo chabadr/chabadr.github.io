@@ -9,6 +9,7 @@
 // topic and marks lateness / absence, but does not press "שמירה".
 
 const { onSchedule } = require('firebase-functions/v2/scheduler');
+const { onCall, HttpsError } = require('firebase-functions/v2/https');
 const { defineSecret } = require('firebase-functions/params');
 const { logger } = require('firebase-functions');
 const admin = require('firebase-admin');
@@ -88,3 +89,27 @@ exports.mashovFillTest = onSchedule({
   maxInstances: 1,
   secrets: [MASHOV_USER, MASHOV_PASS]
 }, async () => { await runMashov(false); });
+
+// The "מילוי נוכחות במשוב" button of the class board: fills and saves today's
+// prayer attendance. Not more than once in 3 minutes (a second press while a
+// run is going on is refused).
+exports.mashovFill = onCall({
+  region: 'me-west1',
+  memory: '2GiB',
+  timeoutSeconds: 300,
+  maxInstances: 1,
+  secrets: [MASHOV_USER, MASHOV_PASS]
+}, async () => {
+  const db = admin.firestore();
+  const lockRef = db.collection('classroom_points').doc('classroom-points-v1').collection('meta').doc('mashovLock');
+  const free = await db.runTransaction(async (tx) => {
+    const s = await tx.get(lockRef);
+    const until = s.exists ? (s.data().until || 0) : 0;
+    if (until > Date.now()) return false;
+    tx.set(lockRef, { until: Date.now() + 3 * 60 * 1000 });
+    return true;
+  });
+  if (!free) throw new HttpsError('resource-exhausted', 'כבר רץ מילוי, או שהסתיים לפני פחות מ-3 דקות. אפשר לנסות שוב עוד מעט.');
+  const r = await runMashov(true);
+  return { ok: r.ok, saved: r.saved, date: r.date, message: r.message, report: r.report.filter(x => x.status !== 'בזמן') };
+});

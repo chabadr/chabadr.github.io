@@ -5139,17 +5139,45 @@ function buildToolbar(){
   status.id = 'statusEl';
   toolbar.appendChild(status);
 
-  // Starts the Mashov attendance filler on this computer (installed with
-  // mashov/install-mashov.ps1, which registers the mashov-fill: link). On a
-  // computer without it, the browser says it has no app for the link.
-  const mashovLink = document.createElement('a');
-  mashovLink.className = 'mashov-fill-btn';
-  mashovLink.href = 'mashov-fill:start';
-  mashovLink.textContent = 'מילוי נוכחות במשוב';
-  mashovLink.title = 'פותח את משוב וממלא את נוכחות התפילה של היום (רק במחשב שהותקן בו). השמירה במשוב - ידנית.';
-  toolbar.appendChild(mashovLink);
+  // Fills and saves today's prayer attendance in Mashov - on the server
+  // (functions-mashov), from any device.
+  const mashovBtn = document.createElement('button');
+  mashovBtn.type = 'button';
+  mashovBtn.className = 'mashov-fill-btn';
+  mashovBtn.textContent = 'מילוי נוכחות במשוב';
+  mashovBtn.title = 'ממלא ושומר במשוב את נוכחות התפילה של היום לפי הלוח (איחור / חיסור).';
+  mashovBtn.addEventListener('click', () => startMashovFill(mashovBtn));
+  toolbar.appendChild(mashovBtn);
 
   return toolbar;
+}
+
+let mashovFillRunning = false;
+function startMashovFill(btn){
+  if (mashovFillRunning) return;
+  showModal('למלא ולשמור במשוב את נוכחות התפילה של היום לפי הלוח?\n(מי שסומן ב-8:10 או ב-8:45 - בזמן; סימון אחר - איחור; בלי סימון - חיסור)', {
+    confirmText: 'מילוי ושמירה',
+    onConfirm: async () => {
+      mashovFillRunning = true;
+      const label = btn.textContent;
+      btn.disabled = true;
+      btn.textContent = 'ממלא במשוב… (עד דקה)';
+      let text;
+      try{
+        const { getFunctions, httpsCallable } = await import("https://www.gstatic.com/firebasejs/10.13.0/firebase-functions.js");
+        const res = await httpsCallable(getFunctions(firebaseApp, 'me-west1'), 'mashovFill', { timeout: 300000 })({});
+        const d = res.data || {};
+        const lines = (d.report || []).map(r => r.name + ' - ' + r.status + ': ' + r.action);
+        text = (d.message || '') + (lines.length ? '\n\n' + lines.join('\n') : '\n\nכולם הגיעו בזמן - לא סומן כלום.');
+      } catch(e){
+        text = 'המילוי במשוב נכשל: ' + ((e && e.message) || e);
+      }
+      mashovFillRunning = false;
+      btn.disabled = false;
+      btn.textContent = label;
+      showModal(text, { showCancel: false, confirmText: 'סגירה' });
+    }
+  });
 }
 
 function computeSortScore(student){

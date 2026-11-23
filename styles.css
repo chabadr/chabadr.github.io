@@ -728,6 +728,7 @@
     color: var(--ink);
     margin-bottom: 20px;
     line-height: 1.5;
+    white-space: pre-line;
   }
 
   .modal-btns{
