@@ -5220,26 +5220,40 @@ function showMashovQuestion(){
   mashovMessage(box, 'עדכון משוב - נוכחות תפילה');
   const boxes = [];
   if (unmarked.length){
-    mashovMessage(box, 'לתלמידים האלה אין שום סימון היום בלוח. סמנו מי לא הגיע (מי שלא יסומן - הגיע באיחור):');
-    const list = document.createElement('div');
-    list.className = 'mashov-ask-list';
+    // The students with no mark today: a table of name and "הגיע" (a box to tick
+    // for whoever came - they are marked late; the others absent).
+    mashovMessage(box, 'סמן האם התלמידים הבאים הגיעו?');
+    const wrap = document.createElement('div');
+    wrap.className = 'mashov-ask-list';
+    const table = document.createElement('table');
+    table.className = 'mashov-ask-table';
+    const head = document.createElement('tr');
+    ['שם', 'הגיע'].forEach(t => { const th = document.createElement('th'); th.textContent = t; head.appendChild(th); });
+    table.appendChild(head);
     unmarked.forEach(st => {
-      const label = document.createElement('label');
+      const tr = document.createElement('tr');
+      const nameTd = document.createElement('td');
+      nameTd.textContent = metivtaFullName(st.id, false);
+      const boxTd = document.createElement('td');
       const cb = document.createElement('input');
       cb.type = 'checkbox';
       cb.dataset.id = String(st.id);
       boxes.push(cb);
-      label.appendChild(cb);
-      label.appendChild(document.createTextNode(' ' + metivtaFullName(st.id, false) + ' - לא הגיע'));
-      list.appendChild(label);
+      boxTd.appendChild(cb);
+      tr.appendChild(nameTd);
+      tr.appendChild(boxTd);
+      // A press anywhere on the row ticks the box.
+      tr.addEventListener('click', (e) => { if (e.target !== cb) cb.checked = !cb.checked; });
+      table.appendChild(tr);
     });
-    box.appendChild(list);
+    wrap.appendChild(table);
+    box.appendChild(wrap);
   } else {
     mashovMessage(box, 'כל התלמידים מסומנים היום בלוח.');
   }
   mashovButtons(box, [
     ['עדכון משוב', 'modal-btn-confirm', () => {
-      const arrivedIds = boxes.filter(cb => !cb.checked).map(cb => parseInt(cb.dataset.id, 10));
+      const arrivedIds = boxes.filter(cb => cb.checked).map(cb => parseInt(cb.dataset.id, 10));
       close();
       runMashovFill({ arrivedIds });
     }],
