@@ -5272,30 +5272,29 @@ async function runMashovFill(data){
   }
 }
 
-// The class computer (marked once by opening the site with ?classpc=1, and
-// unmarked with ?classpc=0): from 10:00, Sunday-Friday, when the board was used
-// today and Mashov was not updated yet (meta/mashovStatus), it asks - also when
-// it is opened later in the day.
-const CLASS_PC_KEY = 'isClassComputer';
+// Every device where the site is open: from 10:00, Sunday-Friday, when the
+// board was used today and Mashov was not updated yet (meta/mashovStatus), it
+// asks - also when the site is opened later in the day. When Mashov was
+// updated from another device, a question that is still open here closes.
 const MASHOV_ASK_HOUR = 10;
-(function(){
-  const v = new URLSearchParams(location.search).get('classpc');
-  if (v === '1' || v === '0'){ try{ localStorage.setItem(CLASS_PC_KEY, v); } catch(e){} }
-})();
-function isClassComputer(){
-  try{ return localStorage.getItem(CLASS_PC_KEY) === '1'; } catch(e){ return false; }
-}
 async function checkMashovQuestion(){
-  if (!isClassComputer() || !state || !firestoreDb || mashovAskOpen || mashovFillRunning) return;
+  if (!state || !firestoreDb || mashovFillRunning) return;
   const now = new Date();
-  if (now.getDay() === 6 || now.getHours() < MASHOV_ASK_HOUR || Date.now() < mashovSnoozeUntil) return;
+  if (now.getDay() === 6 || now.getHours() < MASHOV_ASK_HOUR) return;
   const today = activityDayStr();
-  if (state.lastActivityDate !== today || mashovDoneDay === today) return;
-  try{
-    const s = await getDoc(doc(firestoreDb, FIRESTORE_COLLECTION, STORAGE_KEY, 'meta', 'mashovStatus'));
-    if (s.exists() && s.data().date === today){ mashovDoneDay = today; return; }
-  } catch(e){ return; }
-  if (!mashovAskOpen && !mashovFillRunning) showMashovQuestion();
+  if (state.lastActivityDate !== today) return;
+  if (mashovDoneDay !== today){
+    try{
+      const s = await getDoc(doc(firestoreDb, FIRESTORE_COLLECTION, STORAGE_KEY, 'meta', 'mashovStatus'));
+      if (s.exists() && s.data().date === today) mashovDoneDay = today;
+    } catch(e){ return; }
+  }
+  if (mashovDoneDay === today){
+    if (mashovAskOpen){ document.querySelectorAll('.mashov-overlay').forEach(el => el.remove()); mashovAskOpen = false; }
+    return;
+  }
+  if (mashovAskOpen || Date.now() < mashovSnoozeUntil) return;
+  showMashovQuestion();
 }
 setInterval(checkMashovQuestion, 60000);
 setTimeout(checkMashovQuestion, 20000);
