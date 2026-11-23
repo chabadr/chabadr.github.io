@@ -1,0 +1,9 @@
+{
+  "name": "mashov-update",
+  "private": true,
+  "type": "module",
+  "description": "Updates the prayer attendance in Mashov from the class board (see mashov-update.mjs).",
+  "dependencies": {
+    "playwright-core": "1.63.0"
+  }
+}
