@@ -120,6 +120,8 @@ exports.mashovFill = onCall({
     await setMashovStatus(flow.israelToday(), 'manual');
     return { ok: true, saved: false, message: 'נרשם שמשוב עודכן ידנית היום.' , report: [] };
   }
+  // From the question: the students with no mark today who came (arrivedIds -
+  // marked late) and who did not (absentIds - absent, as anyone with no mark).
   const arrivedIds = Array.isArray(data.arrivedIds) ? data.arrivedIds.filter(n => Number.isInteger(n) && n > 0 && n < 100).slice(0, 60) : [];
   const db = admin.firestore();
   const lockRef = db.collection('classroom_points').doc('classroom-points-v1').collection('meta').doc('mashovLock');

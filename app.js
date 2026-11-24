@@ -5139,15 +5139,6 @@ function buildToolbar(){
   status.id = 'statusEl';
   toolbar.appendChild(status);
 
-  // Fills and saves today's prayer attendance in Mashov - on the server
-  // (functions-mashov), from any device.
-  const mashovBtn = document.createElement('button');
-  mashovBtn.type = 'button';
-  mashovBtn.className = 'mashov-fill-btn';
-  mashovBtn.textContent = 'מילוי נוכחות במשוב';
-  mashovBtn.title = 'ממלא ושומר במשוב את הנוכחות היומית לפי הלוח (איחור / חיסור).';
-  mashovBtn.addEventListener('click', () => showMashovQuestion());
-  toolbar.appendChild(mashovBtn);
 
   return toolbar;
 }
@@ -5216,19 +5207,20 @@ function showMashovQuestion(){
   mashovAskOpen = true;
   const unmarked = state.students.filter(studentHasNoMark);
   const { overlay, box } = mashovOverlay();
+  overlay.classList.add('mashov-question');
   const close = () => { overlay.remove(); mashovAskOpen = false; };
   mashovMessage(box, 'עדכון משוב - נוכחות יומית');
   const boxes = [];
   if (unmarked.length){
-    // The students with no mark today: a table of name and "הגיע" (a box to tick
-    // for whoever came - they are marked late; the others absent).
-    mashovMessage(box, 'סמן האם התלמידים הבאים הגיעו?');
+    // The students with no mark today: a table of name and "לא הגיעו" (a box to
+    // tick for whoever did not come - they are marked absent; the others came, late).
+    mashovMessage(box, 'סמן האם התלמידים הבאים לא הגיעו?');
     const wrap = document.createElement('div');
     wrap.className = 'mashov-ask-list';
     const table = document.createElement('table');
     table.className = 'mashov-ask-table';
     const head = document.createElement('tr');
-    ['שם', 'הגיע'].forEach(t => { const th = document.createElement('th'); th.textContent = t; head.appendChild(th); });
+    ['שם', 'לא הגיעו'].forEach(t => { const th = document.createElement('th'); th.textContent = t; head.appendChild(th); });
     table.appendChild(head);
     unmarked.forEach(st => {
       const tr = document.createElement('tr');
@@ -5253,9 +5245,11 @@ function showMashovQuestion(){
   }
   mashovButtons(box, [
     ['עדכון משוב', 'modal-btn-confirm', () => {
-      const arrivedIds = boxes.filter(cb => cb.checked).map(cb => parseInt(cb.dataset.id, 10));
+      // Ticked = did not come (absent); not ticked = came (late).
+      const absentIds = boxes.filter(cb => cb.checked).map(cb => parseInt(cb.dataset.id, 10));
+      const arrivedIds = boxes.filter(cb => !cb.checked).map(cb => parseInt(cb.dataset.id, 10));
       close();
-      runMashovFill({ arrivedIds });
+      runMashovFill({ arrivedIds, absentIds });
     }],
     ['אחר כך', 'modal-btn-cancel', () => { mashovSnoozeUntil = Date.now() + MASHOV_REASK_MS; close(); }]
   ]);
@@ -5305,7 +5299,9 @@ async function checkMashovQuestion(){
     } catch(e){ return; }
   }
   if (mashovDoneDay === today){
-    if (mashovAskOpen){ document.querySelectorAll('.mashov-overlay').forEach(el => el.remove()); mashovAskOpen = false; }
+    // Updated from another device: the question closes (a result window stays until "אישור").
+    const q = document.querySelector('.mashov-question');
+    if (q){ q.remove(); mashovAskOpen = false; }
     return;
   }
   if (mashovAskOpen || Date.now() < mashovSnoozeUntil) return;
