@@ -56,6 +56,40 @@ async function dismissCookies(page){
   try{ await btn.waitFor({ timeout: 8000 }); await btn.click(); } catch(e){}
 }
 
+
+// A saved sign-in of an earlier run (cookies + the browser's storage), so
+// Mashov does not see a new device (and e-mail "a new sign-in") every time.
+// Returns true when the main screen opened without signing in.
+async function reuseSession(page, step){
+  step('בדיקת כניסה שמורה');
+  try{
+    await page.goto('https://web.mashov.info/teachers/main/dashboard', { waitUntil: 'domcontentloaded' });
+    await page.waitForURL(/\/teachers\/(main|login)/, { timeout: 25000 });
+    // Settle: an expired sign-in is sent to the login page a moment after.
+    await page.waitForTimeout(6000);
+    if (!/\/teachers\/main\//.test(page.url())) return false;
+    await page.getByRole('button', { name: 'הזנת נתוני שיעור' }).waitFor({ timeout: 20000 });
+    await dismissCookies(page);
+    return true;
+  } catch(e){ return false; }
+}
+
+// The sign-in to keep: cookies, localStorage (storageState) and sessionStorage.
+async function captureSession(page){
+  const state = await page.context().storageState();
+  let session = '{}';
+  try{ session = await page.evaluate(() => JSON.stringify(Object.fromEntries(Object.entries(sessionStorage)))); } catch(e){}
+  return { state: JSON.stringify(state), session, savedAt: new Date().toISOString() };
+}
+
+// The init script that puts the saved sessionStorage back in a new page.
+function sessionInitScript(session){
+  return (data) => {
+    if (location.hostname !== 'web.mashov.info') return;
+    try{ const o = JSON.parse(data); Object.keys(o).forEach(k => sessionStorage.setItem(k, o[k])); } catch(e){}
+  };
+}
+
 async function login(page, user, pass, step){
   step('כניסה למשוב');
   await page.goto(SETTINGS.loginUrl, { waitUntil: 'domcontentloaded' });
@@ -198,4 +232,4 @@ async function save(page, step){
   await page.waitForTimeout(5000);
 }
 
-module.exports = { SETTINGS, israelToday, boardStatuses, login, openTodaysLesson, fillLesson, markEvents, save };
+module.exports = { SETTINGS, israelToday, boardStatuses, reuseSession, captureSession, sessionInitScript, login, openTodaysLesson, fillLesson, markEvents, save };

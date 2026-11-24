@@ -57,9 +57,28 @@ async function runMashov(save, arrivedIds){
     const mainSnap = await mainRef.get();
     const statuses = flow.boardStatuses(mainSnap.data() || {}, today, arrivedIds);
     browser = await launchBrowser();
-    page = await browser.newPage({ locale: 'he-IL', viewport: { width: 1280, height: 1400 } });
+    const sessionRef = mainRef.collection('meta').doc('mashovSession');
+    const sessionSnap = await sessionRef.get();
+    const saved = sessionSnap.exists ? sessionSnap.data() : null;
+    const ctxOptions = { locale: 'he-IL', viewport: { width: 1280, height: 1400 } };
+    if (saved && saved.state){ try{ ctxOptions.storageState = JSON.parse(saved.state); } catch(e){} }
+    const context = await browser.newContext(ctxOptions);
+    if (saved && saved.session) await context.addInitScript(flow.sessionInitScript(saved.session), saved.session);
+    page = await context.newPage();
     page.setDefaultTimeout(30000);
-    await flow.login(page, MASHOV_USER.value(), MASHOV_PASS.value(), step);
+    // The sign-in of the last run is used again; only when it expired Mashov is signed in to
+    // (and Mashov then e-mails "a new sign-in").
+    result.sessionReused = !!(saved && saved.state) && await flow.reuseSession(page, step);
+    if (!result.sessionReused){
+      if (saved) logger.info('mashov: the saved sign-in expired - signing in');
+      // (The browser of this server can hold only one context: the old sign-in
+      // is cleared in the same one.)
+      await context.clearCookies();
+      try{ await page.evaluate(() => { localStorage.clear(); sessionStorage.clear(); }); } catch(e){}
+      await flow.login(page, MASHOV_USER.value(), MASHOV_PASS.value(), step);
+    }
+    // Kept for the next run (read only by the server: meta/ is closed to the site).
+    try{ await sessionRef.set(await flow.captureSession(page)); } catch(e){ logger.warn('mashov: could not keep the sign-in: ' + e.message); }
     await flow.openTodaysLesson(page, today, step);
     await flow.fillLesson(page, step);
     const { report, problems } = await flow.markEvents(page, statuses, step);
