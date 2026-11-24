@@ -75,13 +75,31 @@ async function login(page, user, pass, step){
 // page must say today's date and the group 2278.
 async function openTodaysLesson(page, today, step){
   step('פתיחת שיעור התפילה של היום');
-  const item = page.getByText(SETTINGS.lessonText).last();
-  try{ await item.waitFor({ timeout: 30000 }); }
-  catch(e){ throw new Error('שיעור תפילה ז2 לא נמצא ב"המערכת להיום" - אולי אין שיעור היום. לא סומן כלום.'); }
-  await item.click();
-  const header = page.getByText('בתאריך:').first();
-  await header.waitFor({ timeout: 30000 });
-  const text = norm(await page.getByRole('tabpanel').first().innerText());
+  // Only inside "המערכת להיום": the "תיעוד פעולות אחרונות" list of the same
+  // screen also says "תפילה ז2" (yesterday's report), and must not be clicked.
+  let found = false;
+  for (let attempt = 0; attempt < 30 && !found; attempt++){
+    found = await page.evaluate((src) => {
+      const re = new RegExp(src);
+      const heads = [...document.querySelectorAll('body *')].filter(e => e.childElementCount === 0 && e.textContent.trim() === 'המערכת להיום');
+      for (const h of heads){
+        let box = h.parentElement;
+        for (let k = 0; k < 6 && box; k++, box = box.parentElement){
+          if (box.textContent.includes('תיעוד פעולות')) break;
+          const items = [...box.querySelectorAll('*')].filter(e => re.test(e.textContent) && ![...e.children].some(c => re.test(c.textContent)));
+          if (items.length){ items[0].setAttribute('data-mashov-today', '1'); return true; }
+        }
+      }
+      return false;
+    }, SETTINGS.lessonText.source);
+    if (!found) await page.waitForTimeout(1000);
+  }
+  if (!found) throw new Error('שיעור תפילה ז2 לא נמצא ב"המערכת להיום" - אולי אין שיעור היום. לא סומן כלום.');
+  await page.locator('[data-mashov-today="1"]').first().click();
+  const panel = page.getByRole('tabpanel', { name: 'נתוני שיעור' });
+  try{ await panel.waitFor({ timeout: 45000 }); }
+  catch(e){ throw new Error('דף השיעור לא נפתח במשוב - לא סומן כלום.'); }
+  const text = norm(await panel.innerText());
   if (!text.includes(today.dmy) || !text.includes(SETTINGS.lessonGroup)){
     throw new Error('השיעור שנפתח אינו שיעור התפילה של היום (' + today.dmy + ') - לא סומן כלום.');
   }
