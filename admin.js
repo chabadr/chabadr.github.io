@@ -789,7 +789,7 @@ function buildKioskCard(){
   card.appendChild(title);
   const hint = document.createElement('div');
   hint.className = 'hint';
-  hint.textContent = 'המשתמש "כיתה" יכול להפעיל רק אקסל ו-Edge, ולפתוח רק את Google Docs ו-Excel ב-OneDrive. להפעלה: בחלון PowerShell שנפתח כמנהל (התחל ← מקלידים powershell ← קליק ימני ← "הפעל כמנהל") מדביקים את השורה ולוחצים Enter.';
+  hint.textContent = 'המשתמש "כיתה" יכול להפעיל רק אקסל ו-Edge, ולפתוח רק את Google (Docs, Gmail, Apps Script), OneDrive, id.rimon.net.il ו-pshita.im. להפעלה: בחלון PowerShell שנפתח כמנהל (התחל ← מקלידים powershell ← קליק ימני ← "הפעל כמנהל") מדביקים את השורה ולוחצים Enter.';
   card.appendChild(hint);
   const addCommand = (label, file) => {
     const lab = document.createElement('div');

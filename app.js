@@ -4270,7 +4270,7 @@ function buildKioskInstallLinks(){
     box.appendChild(row);
   };
 
-  addText('המשתמש "כיתה" יוכל להפעיל רק אקסל ו-Edge, ולפתוח רק את האתרים: Google Docs ו-Excel ב-OneDrive.');
+  addText('המשתמש "כיתה" יוכל להפעיל רק אקסל ו-Edge, ולפתוח רק את: Google (Docs, Gmail, Apps Script), OneDrive, id.rimon.net.il ו-pshita.im.');
   addText('1. לוחצים על התחל ומקלידים powershell.');
   addText('2. קליק ימני על Windows PowerShell ← "הפעל כמנהל" ← מאשרים.');
   addText('3. מדביקים את השורה הבאה ולוחצים Enter (בחלון שנפתח בוחרים סיסמה למשתמש):');

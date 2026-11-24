@@ -22,13 +22,20 @@ Add-Type -AssemblyName System.Drawing
 $UserName = 'כיתה'
 
 # The only web sites the kiosk user can open (Edge). Everything else is blocked.
-# (A site name covers all its pages and sub-sites: live.com = onedrive.live.com too.)
+# (A site name covers all its pages and sub-sites.)
 $AllowedPages = @(
+  '1drv.ms',
+  'accounts.google.co.il',
+  'accounts.google.com',
+  'd.docs.live.net',
   'docs.google.com',
-  'accounts.google.com',      # sign in to Google
-  # Excel in OneDrive (Excel for the web) and the Microsoft sign-in
-  'onedrive.live.com', '1drv.ms', 'live.com', 'office.com', 'office365.com',
-  'sharepoint.com', 'microsoftonline.com', 'microsoft.com'
+  'id.rimon.net.il',
+  'mail.google.com',
+  'myaccount.google.com',
+  'onedrive.live.com',
+  'script.google.com',
+  'workspace.google.com',
+  'pshita.im'
 )
 $HomePage = 'https://docs.google.com/'
 
@@ -158,24 +165,20 @@ public static class ClassKioskUserEnv {
     $ErrorActionPreference = 'Stop'
   }
 
-  # ------------------------------------------------ desktop shortcuts
+  # ------------------------------------------------ shortcuts
+  # No desktop shortcuts: those of earlier versions are removed. Google Docs
+  # (the home page) still opens by itself at sign-in.
   $desktop = Join-Path $profile 'Desktop'
   $startup = Join-Path $profile 'AppData\Roaming\Microsoft\Windows\Start Menu\Programs\Startup'
-  New-Item -ItemType Directory -Force -Path $desktop, $startup | Out-Null
-  $excel = Find-AppPath 'excel.exe'
+  New-Item -ItemType Directory -Force -Path $startup | Out-Null
+  foreach ($old in 'Excel.lnk', 'Google Docs.lnk', 'Excel ב-OneDrive.lnk', 'כיתה ז.lnk', 'הנוסע המתמיד ז1.lnk', 'משוב מורים.lnk', 'pshita.lnk') {
+    Remove-Item -LiteralPath (Join-Path $desktop $old) -Force -ErrorAction SilentlyContinue
+    if ($old -ne 'Google Docs.lnk') { Remove-Item -LiteralPath (Join-Path $startup $old) -Force -ErrorAction SilentlyContinue }
+  }
   $edgeExe = Find-AppPath 'msedge.exe'
   $notes = @()
-  if ($excel) { New-Shortcut (Join-Path $desktop 'Excel.lnk') $excel $null } else { $notes += 'Excel לא נמצא במחשב (לא נוצר קיצור).' }
-  if ($edgeExe) {
-    # shortcuts of earlier versions are removed
-    foreach ($old in 'כיתה ז.lnk', 'הנוסע המתמיד ז1.lnk', 'משוב מורים.lnk', 'pshita.lnk') {
-      Remove-Item -LiteralPath (Join-Path $desktop $old) -Force -ErrorAction SilentlyContinue
-      Remove-Item -LiteralPath (Join-Path $startup $old) -Force -ErrorAction SilentlyContinue
-    }
-    New-Shortcut (Join-Path $desktop 'Google Docs.lnk') $edgeExe 'https://docs.google.com/'
-    New-Shortcut (Join-Path $desktop 'Excel ב-OneDrive.lnk') $edgeExe 'https://onedrive.live.com/'
-    New-Shortcut (Join-Path $startup 'Google Docs.lnk') $edgeExe $HomePage
-  } else { $notes += 'Edge לא נמצא במחשב (לא נוצרו קיצורים).' }
+  if ($edgeExe) { New-Shortcut (Join-Path $startup 'Google Docs.lnk') $edgeExe $HomePage }
+  else { $notes += 'Edge לא נמצא במחשב.' }
 
   $done = "הסתיים. המשתמש ""$UserName"" מוכן.`n`nכדי לבדוק: התנתקו, והתחברו אליו."
   if ($notes.Count) { $done += "`n`n" + ($notes -join "`n") }
