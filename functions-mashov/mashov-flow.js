@@ -51,9 +51,15 @@ function boardStatuses(main, today, arrivedIds){
   return out;
 }
 
+// The cookies window of a new browser ("only the needed cookies"): clicked
+// whenever it shows up and gets in the way, without waiting for it.
+async function handleCookies(page){
+  const btn = page.getByRole('button', { name: 'עוגיות חיוניות בלבד' });
+  try{ await page.addLocatorHandler(btn, async () => { await btn.click().catch(() => {}); }); } catch(e){}
+}
 async function dismissCookies(page){
   const btn = page.getByRole('button', { name: 'עוגיות חיוניות בלבד' });
-  try{ await btn.waitFor({ timeout: 8000 }); await btn.click(); } catch(e){}
+  if (await btn.isVisible().catch(() => false)) await btn.click().catch(() => {});
 }
 
 
@@ -64,13 +70,14 @@ async function reuseSession(page, step){
   step('בדיקת כניסה שמורה');
   try{
     await page.goto('https://web.mashov.info/teachers/main/dashboard', { waitUntil: 'domcontentloaded' });
-    await page.waitForURL(/\/teachers\/(main|login)/, { timeout: 25000 });
-    // Settle: an expired sign-in is sent to the login page a moment after.
-    await page.waitForTimeout(6000);
-    if (!/\/teachers\/main\//.test(page.url())) return false;
-    await page.getByRole('button', { name: 'הזנת נתוני שיעור' }).waitFor({ timeout: 20000 });
-    await dismissCookies(page);
-    return true;
+    const main = page.getByRole('button', { name: 'הזנת נתוני שיעור' });
+    const end = Date.now() + 15000;
+    while (Date.now() < end){
+      if (/\/teachers\/login/.test(page.url())) return false;
+      if (await main.isVisible().catch(() => false)){ await dismissCookies(page); return true; }
+      await page.waitForTimeout(300);
+    }
+    return false;
   } catch(e){ return false; }
 }
 
@@ -198,10 +205,16 @@ async function readGrid(page){
 
 async function markEvents(page, statuses, step){
   step('סימון איחורים וחיסורים');
-  await page.waitForTimeout(1500);
-  const grid = await readGrid(page);
+  // The table may still be filling: read it until it has its rows.
+  let grid = { error: 'not read' };
+  for (let i = 0; i < 20; i++){
+    grid = await readGrid(page);
+    if (!grid.error && grid.rows.length) break;
+    await page.waitForTimeout(500);
+  }
   if (grid.error) throw new Error('טבלת האירועים במשוב לא זוהתה (' + grid.error + ') - לא סומן כלום.');
   const report = [];
+  const todo = []; // [cell mark, report entry]
   let problems = 0;
   for (const s of statuses){
     if (s.status === 'ontime'){ report.push({ name: s.family, status: 'בזמן', action: '—' }); continue; }
@@ -215,13 +228,30 @@ async function markEvents(page, statuses, step){
     }
     const row = matches[0];
     const kind = s.status === 'late' ? 'late' : 'absent';
-    const cellText = row[kind];
-    if (cellText === null){ problems++; report.push({ name: row.name, status: label, action: 'לא נמצאה התיבה - לא סומן' }); continue; }
-    const box = page.locator('[data-mashov-cell="' + kind + '-' + row.i + '"]').getByRole('checkbox').first();
-    // (The small numbers next to a box are earlier events, not this lesson's.)
-    if (await box.isChecked()){ report.push({ name: row.name, status: label, action: 'כבר מסומן' }); continue; }
-    await box.check();
-    report.push({ name: row.name, status: label, action: 'סומן' });
+    if (row[kind] === null){ problems++; report.push({ name: row.name, status: label, action: 'לא נמצאה התיבה - לא סומן' }); continue; }
+    const entry = { name: row.name, status: label, action: '' };
+    report.push(entry);
+    todo.push([kind + '-' + row.i, entry]);
+  }
+  // (The small numbers next to a box are earlier events, not this lesson's.)
+  const results = await page.evaluate((marks) => marks.map(m => {
+    const cell = document.querySelector('[data-mashov-cell="' + m + '"]');
+    const input = cell && cell.querySelector('input[type="checkbox"]');
+    if (!input) return 'missing';
+    if (input.checked) return 'already';
+    input.click();
+    return input.checked ? 'ok' : 'notyet';
+  }), todo.map(t => t[0]));
+  for (let i = 0; i < todo.length; i++){
+    const [mark, entry] = todo[i];
+    let r = results[i];
+    if (r === 'notyet' || r === 'missing'){
+      // The quick way did not take: the usual (slower) click, and a check.
+      const box = page.locator('[data-mashov-cell="' + mark + '"]').getByRole('checkbox').first();
+      try{ if (!(await box.isChecked())) await box.check({ timeout: 5000 }); r = (await box.isChecked()) ? 'ok' : 'fail'; } catch(e){ r = 'fail'; }
+    }
+    if (r === 'fail'){ problems++; entry.action = 'לא הצליח לסמן'; }
+    else entry.action = r === 'already' ? 'כבר מסומן' : 'סומן';
   }
   return { report, problems };
 }
@@ -229,7 +259,8 @@ async function markEvents(page, statuses, step){
 async function save(page, step){
   step('שמירה');
   await page.getByRole('button', { name: 'שמירה', exact: true }).locator('visible=true').first().click();
-  await page.waitForTimeout(5000);
+  await page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {});
+  await page.waitForTimeout(1000);
 }
 
-module.exports = { SETTINGS, israelToday, boardStatuses, reuseSession, captureSession, sessionInitScript, login, openTodaysLesson, fillLesson, markEvents, save };
+module.exports = { SETTINGS, handleCookies, israelToday, boardStatuses, reuseSession, captureSession, sessionInitScript, login, openTodaysLesson, fillLesson, markEvents, save };

@@ -34,6 +34,35 @@ async function setMashovStatus(today, how){
     .set({ date: today.iso, at: new Date().toISOString(), how });
 }
 
+// A page signed in to Mashov: with the sign-in kept from the last run when it
+// still works (no new sign-in - so no "new device" e-mail from Mashov),
+// otherwise (allowLogin) by user name and password. The sign-in is kept again
+// for the next run. Returns { page } or { page: null } when not signed in.
+async function signedInPage(browser, step, { allowLogin, result }){
+  const sessionRef = admin.firestore().collection('classroom_points').doc('classroom-points-v1').collection('meta').doc('mashovSession');
+  const sessionSnap = await sessionRef.get();
+  const saved = sessionSnap.exists ? sessionSnap.data() : null;
+  const ctxOptions = { locale: 'he-IL', viewport: { width: 1280, height: 1400 } };
+  if (saved && saved.state){ try{ ctxOptions.storageState = JSON.parse(saved.state); } catch(e){} }
+  // (The browser of this server can hold only one context.)
+  const context = await browser.newContext(ctxOptions);
+  if (saved && saved.session) await context.addInitScript(flow.sessionInitScript(saved.session), saved.session);
+  const page = await context.newPage();
+  page.setDefaultTimeout(30000);
+  await flow.handleCookies(page);
+  const reused = !!(saved && saved.state) && await flow.reuseSession(page, step);
+  if (result) result.sessionReused = reused;
+  if (!reused){
+    if (saved) logger.info('mashov: the saved sign-in expired' + (saved.savedAt ? ' (kept at ' + saved.savedAt + ')' : ''));
+    if (!allowLogin) return { page: null };
+    await context.clearCookies();
+    try{ await page.evaluate(() => { localStorage.clear(); sessionStorage.clear(); }); } catch(e){}
+    await flow.login(page, MASHOV_USER.value(), MASHOV_PASS.value(), step);
+  }
+  try{ await sessionRef.set(await flow.captureSession(page)); } catch(e){ logger.warn('mashov: could not keep the sign-in: ' + e.message); }
+  return { page };
+}
+
 // One run in Mashov. save=false: everything is filled and marked, but "שמירה"
 // is not pressed (a check). The result (what was marked for whom, pictures of
 // the screens) is written to meta/mashovRun.
@@ -57,33 +86,13 @@ async function runMashov(save, arrivedIds){
     const mainSnap = await mainRef.get();
     const statuses = flow.boardStatuses(mainSnap.data() || {}, today, arrivedIds);
     browser = await launchBrowser();
-    const sessionRef = mainRef.collection('meta').doc('mashovSession');
-    const sessionSnap = await sessionRef.get();
-    const saved = sessionSnap.exists ? sessionSnap.data() : null;
-    const ctxOptions = { locale: 'he-IL', viewport: { width: 1280, height: 1400 } };
-    if (saved && saved.state){ try{ ctxOptions.storageState = JSON.parse(saved.state); } catch(e){} }
-    const context = await browser.newContext(ctxOptions);
-    if (saved && saved.session) await context.addInitScript(flow.sessionInitScript(saved.session), saved.session);
-    page = await context.newPage();
-    page.setDefaultTimeout(30000);
-    // The sign-in of the last run is used again; only when it expired Mashov is signed in to
-    // (and Mashov then e-mails "a new sign-in").
-    result.sessionReused = !!(saved && saved.state) && await flow.reuseSession(page, step);
-    if (!result.sessionReused){
-      if (saved) logger.info('mashov: the saved sign-in expired - signing in');
-      // (The browser of this server can hold only one context: the old sign-in
-      // is cleared in the same one.)
-      await context.clearCookies();
-      try{ await page.evaluate(() => { localStorage.clear(); sessionStorage.clear(); }); } catch(e){}
-      await flow.login(page, MASHOV_USER.value(), MASHOV_PASS.value(), step);
-    }
-    // Kept for the next run (read only by the server: meta/ is closed to the site).
-    try{ await sessionRef.set(await flow.captureSession(page)); } catch(e){ logger.warn('mashov: could not keep the sign-in: ' + e.message); }
+    ({ page } = await signedInPage(browser, step, { allowLogin: true, result }));
     await flow.openTodaysLesson(page, today, step);
     await flow.fillLesson(page, step);
     const { report, problems } = await flow.markEvents(page, statuses, step);
     result.report = report;
-    await keep('אחרי הסימון', true);
+    // (A real update saves first - the picture is taken after, so it doesn't slow the saving.)
+    if (!save || problems) await keep('אחרי הסימון', true);
     if (save && !problems){
       await flow.save(page, step);
       result.saved = true;
@@ -134,6 +143,19 @@ exports.mashovFill = onCall({
   secrets: [MASHOV_USER, MASHOV_PASS]
 }, async (request) => {
   const data = request.data || {};
+  // Sent when the question opens: the server wakes up and signs in now, so the
+  // update itself (after the answer) is quick. Nothing is marked.
+  if (data.warm === true){
+    let browser = null;
+    try{
+      browser = await launchBrowser();
+      await signedInPage(browser, (x) => logger.info('mashov warm: ' + x), { allowLogin: true });
+      return { ok: true, warm: true };
+    } catch(e){
+      logger.warn('mashov warm failed: ' + ((e && e.message) || e));
+      return { ok: false, warm: true };
+    } finally{ if (browser) await browser.close().catch(() => {}); }
+  }
   // "Mashov was already updated by hand today": only the status is kept.
   if (data.manualDone === true){
     await setMashovStatus(flow.israelToday(), 'manual');
@@ -154,4 +176,27 @@ exports.mashovFill = onCall({
   if (!free) throw new HttpsError('resource-exhausted', 'כבר רץ מילוי, או שהסתיים לפני פחות מ-3 דקות. אפשר לנסות שוב עוד מעט.');
   const r = await runMashov(true, arrivedIds);
   return { ok: r.ok, saved: r.saved, date: r.date, message: r.message, report: r.report.filter(x => x.status !== 'בזמן') };
+});
+
+// Every hour: the kept sign-in is used once, so it does not expire between the
+// daily updates (an expired one means a new sign-in - and Mashov's "new device"
+// e-mail). It never signs in by itself: when the kept sign-in expired anyway,
+// the next update signs in.
+exports.mashovKeepAlive = onSchedule({
+  schedule: '20 * * * *',
+  timeZone: 'Asia/Jerusalem',
+  region: 'me-west1',
+  memory: '2GiB',
+  timeoutSeconds: 120,
+  maxInstances: 1,
+  secrets: [MASHOV_USER, MASHOV_PASS]
+}, async () => {
+  let browser = null;
+  try{
+    browser = await launchBrowser();
+    const { page } = await signedInPage(browser, () => {}, { allowLogin: false });
+    logger.info('mashov keep-alive: ' + (page ? 'the sign-in is still good' : 'the sign-in expired'));
+  } catch(e){
+    logger.warn('mashov keep-alive failed: ' + ((e && e.message) || e));
+  } finally{ if (browser) await browser.close().catch(() => {}); }
 });

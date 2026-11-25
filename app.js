@@ -5155,6 +5155,7 @@ let mashovDoneDay = '';
 // Until Mashov is updated the question stays up: closed, it comes back after half a minute.
 const MASHOV_REASK_MS = 30 * 1000;
 let mashovStatusCheckedAt = 0;
+let mashovWarmedAt = 0;
 
 function studentHasNoMark(st){
   const c = st.cats || {};
@@ -5205,6 +5206,12 @@ async function callMashovFill(data){
 function showMashovQuestion(){
   if (!state || mashovFillRunning) return;
   mashovAskOpen = true;
+  // The server starts and signs in to Mashov already now, while the question
+  // is being answered - so the update after it is quick.
+  if (Date.now() - mashovWarmedAt > 20 * 60000){
+    mashovWarmedAt = Date.now();
+    callMashovFill({ warm: true }).catch(() => {});
+  }
   const unmarked = state.students.filter(studentHasNoMark);
   const { overlay, box } = mashovOverlay();
   overlay.classList.add('mashov-question');
