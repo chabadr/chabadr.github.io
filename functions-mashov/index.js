@@ -55,8 +55,8 @@ async function signedInPage(browser, step, { allowLogin, result }){
   if (!reused){
     if (saved) logger.info('mashov: the saved sign-in expired' + (saved.savedAt ? ' (kept at ' + saved.savedAt + ')' : ''));
     if (!allowLogin) return { page: null };
-    await context.clearCookies();
-    try{ await page.evaluate(() => { localStorage.clear(); sessionStorage.clear(); }); } catch(e){}
+    // Nothing is cleared: the "uniquId" cookie is how Mashov knows this is a
+    // device it has seen (a sign-in from a known device sends no e-mail).
     await flow.login(page, MASHOV_USER.value(), MASHOV_PASS.value(), step);
   }
   try{ await sessionRef.set(await flow.captureSession(page)); } catch(e){ logger.warn('mashov: could not keep the sign-in: ' + e.message); }
@@ -176,27 +176,4 @@ exports.mashovFill = onCall({
   if (!free) throw new HttpsError('resource-exhausted', 'כבר רץ מילוי, או שהסתיים לפני פחות מ-3 דקות. אפשר לנסות שוב עוד מעט.');
   const r = await runMashov(true, arrivedIds);
   return { ok: r.ok, saved: r.saved, date: r.date, message: r.message, report: r.report.filter(x => x.status !== 'בזמן') };
-});
-
-// Every hour: the kept sign-in is used once, so it does not expire between the
-// daily updates (an expired one means a new sign-in - and Mashov's "new device"
-// e-mail). It never signs in by itself: when the kept sign-in expired anyway,
-// the next update signs in.
-exports.mashovKeepAlive = onSchedule({
-  schedule: '20 * * * *',
-  timeZone: 'Asia/Jerusalem',
-  region: 'me-west1',
-  memory: '2GiB',
-  timeoutSeconds: 120,
-  maxInstances: 1,
-  secrets: [MASHOV_USER, MASHOV_PASS]
-}, async () => {
-  let browser = null;
-  try{
-    browser = await launchBrowser();
-    const { page } = await signedInPage(browser, () => {}, { allowLogin: false });
-    logger.info('mashov keep-alive: ' + (page ? 'the sign-in is still good' : 'the sign-in expired'));
-  } catch(e){
-    logger.warn('mashov keep-alive failed: ' + ((e && e.message) || e));
-  } finally{ if (browser) await browser.close().catch(() => {}); }
 });
