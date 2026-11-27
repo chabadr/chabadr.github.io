@@ -75,7 +75,10 @@ async function signedInPage(browser, step, { allowLogin, result }){
   const page = await context.newPage();
   page.setDefaultTimeout(30000);
   await flow.handleCookies(page);
-  const reused = !!(saved && saved.state) && await flow.reuseSession(page, step);
+  const pass = MASHOV_PASS.value();
+  page.__mashovPass = pass;
+  await flow.handleLock(page, pass);
+  const reused = !!(saved && saved.state) && await flow.reuseSession(page, step, pass);
   if (result) result.sessionReused = reused;
   if (!reused){
     if (saved) logger.info('mashov: the saved sign-in expired' + (saved.savedAt ? ' (kept at ' + saved.savedAt + ')' : ''));

@@ -76,19 +76,38 @@ async function dismissCookies(page){
 // A saved sign-in of an earlier run (cookies + the browser's storage), so
 // Mashov does not see a new device (and e-mail "a new sign-in") every time.
 // Returns true when the main screen opened without signing in.
-async function reuseSession(page, step){
+async function reuseSession(page, step, pass){
   step('בדיקת כניסה שמורה');
   try{
     await page.goto('https://web.mashov.info/teachers/main/dashboard', { waitUntil: 'domcontentloaded' });
     const main = page.getByRole('button', { name: 'הזנת נתוני שיעור' });
-    const end = Date.now() + 15000;
+    const end = Date.now() + 25000;
     while (Date.now() < end){
       if (/\/teachers\/login/.test(page.url())) return false;
+      // After a while without use Mashov locks the screen ("נא להזדהות מחדש"):
+      // the password opens it again - the same sign-in, not a new one.
+      if (await unlockIfLocked(page, pass)) continue;
       if (await main.isVisible().catch(() => false)){ await dismissCookies(page); return true; }
       await page.waitForTimeout(300);
     }
     return false;
   } catch(e){ return false; }
+}
+
+// The lock window: types the password and waits for it to go. True if it was there.
+async function unlockIfLocked(page, pass){
+  const title = page.getByText('נא להזדהות מחדש');
+  if (!(await title.isVisible().catch(() => false))) return false;
+  await page.getByRole('textbox', { name: 'סיסמה (משו"ב)' }).fill(pass);
+  await page.getByRole('button', { name: 'כניסה', exact: true }).click();
+  await title.waitFor({ state: 'hidden', timeout: 30000 }).catch(() => {});
+  return true;
+}
+
+// The lock window may also come up in the middle of the work: opened whenever it gets in the way.
+async function handleLock(page, pass){
+  const title = page.getByText('נא להזדהות מחדש');
+  try{ await page.addLocatorHandler(title, async () => { await unlockIfLocked(page, pass); }); } catch(e){}
 }
 
 // The sign-in to keep: cookies, localStorage (storageState) and sessionStorage.
@@ -130,6 +149,7 @@ async function openTodaysLesson(page, today, step){
   // screen also says "תפילה ז2" (yesterday's report), and must not be clicked.
   let found = false;
   for (let attempt = 0; attempt < 30 && !found; attempt++){
+    if (page.__mashovPass) await unlockIfLocked(page, page.__mashovPass);
     found = await page.evaluate((src) => {
       const re = new RegExp(src);
       const heads = [...document.querySelectorAll('body *')].filter(e => e.childElementCount === 0 && e.textContent.trim() === 'המערכת להיום');
@@ -317,4 +337,4 @@ async function save(page, step){
   await page.waitForTimeout(1000);
 }
 
-module.exports = { SETTINGS, handleCookies, israelToday, boardStatuses, statusesOf, dayOf, openLessonOnDate, reuseSession, captureSession, sessionInitScript, login, openTodaysLesson, fillLesson, markEvents, save };
+module.exports = { SETTINGS, handleCookies, handleLock, unlockIfLocked, israelToday, boardStatuses, statusesOf, dayOf, openLessonOnDate, reuseSession, captureSession, sessionInitScript, login, openTodaysLesson, fillLesson, markEvents, save };
