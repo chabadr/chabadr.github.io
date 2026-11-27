@@ -5156,6 +5156,7 @@ let mashovDoneDay = '';
 const MASHOV_REASK_MS = 30 * 1000;
 let mashovStatusCheckedAt = 0;
 let mashovWarmedAt = 0;
+let mashovAskDay = ''; // the day the open question is about
 
 function studentHasNoMark(st){
   const c = st.cats || {};
@@ -5206,6 +5207,7 @@ async function callMashovFill(data){
 function showMashovQuestion(){
   if (!state || mashovFillRunning) return;
   mashovAskOpen = true;
+  mashovAskDay = activityDayStr();
   // The server starts and signs in to Mashov already now, while the question
   // is being answered - so the update after it is quick.
   if (Date.now() - mashovWarmedAt > 20 * 60000){
@@ -5293,6 +5295,12 @@ async function runMashovFill(data){
 const MASHOV_ASK_HOUR = 10;
 async function checkMashovQuestion(){
   if (!state || !firestoreDb || mashovFillRunning) return;
+  // A question left open from an earlier day (the screen was on overnight) is
+  // about that day's board - it closes; today's question comes at its time.
+  if (mashovAskOpen && mashovAskDay && mashovAskDay !== activityDayStr()){
+    document.querySelectorAll('.mashov-question').forEach(el => el.remove());
+    mashovAskOpen = false;
+  }
   const now = new Date();
   if (now.getDay() === 6 || now.getHours() < MASHOV_ASK_HOUR) return;
   const today = activityDayStr();
