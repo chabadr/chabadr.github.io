@@ -1,7 +1,7 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-app.js";
 import {
   getFirestore, initializeFirestore, persistentLocalCache, persistentMultipleTabManager,
-  doc, getDoc, getDocs, collection, query, where, onSnapshot, runTransaction,
+  doc, getDoc, getDocFromServer, getDocs, collection, query, where, onSnapshot, runTransaction,
 } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
 import { firebaseConfig, isFirebaseConfigured } from "./firebase-config.js";
 import { mountPageNav } from "./page-nav.js";
@@ -5359,12 +5359,15 @@ async function checkMashovQuestion(){
   if (mashovDoneDay !== today && Date.now() - mashovStatusCheckedAt >= 60000){
     mashovStatusCheckedAt = Date.now();
     try{
-      const s = await getDoc(doc(firestoreDb, FIRESTORE_COLLECTION, STORAGE_KEY, 'meta', 'mashovStatus'));
+      // From the server itself - never an old copy kept in the browser (on a slow
+      // or broken connection that copy could miss days already updated). No answer
+      // from the server: no question this time.
+      const s = await getDocFromServer(doc(firestoreDb, FIRESTORE_COLLECTION, STORAGE_KEY, 'meta', 'mashovStatus'));
       if (s.exists()){
         if (s.data().date === today) mashovDoneDay = today;
         mashovDoneMap = s.data().done || {};
       }
-    } catch(e){ return; }
+    } catch(e){ mashovStatusCheckedAt = 0; return; }
   }
   if (mashovDoneDay === today){
     // Updated from another device: the question closes (a result window stays until "אישור").
