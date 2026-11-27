@@ -3,7 +3,7 @@
 // the network when possible - so a new version always arrives - and kept in
 // a cache that is used only when the network can't be reached. The data
 // itself is cached by Firestore (see initializeFirestore in index.html).
-const CACHE = 'class-site-v2';
+const CACHE = 'class-site-v3';
 const CORE = [
   './', 'index.html', 'admin.html', 'styles.css', 'app.js', 'admin.css', 'admin.js', 'z1.html', 'page-nav.js', 'save-banner.js', 'firebase-config.js',
   'manifest.webmanifest', 'manifest-z1.webmanifest', 'icons/icon-192.png', 'icons/icon-512.png',
@@ -45,7 +45,9 @@ self.addEventListener('fetch', (event) => {
     });
     // A very slow connection counts as none: after a few seconds the cached
     // copy is used (the network answer still refreshes the cache).
-    const slow = new Promise(resolve => setTimeout(resolve, 4000, 'slow'));
+    // (The site's own files wait longer: on a slow connection an old copy of the
+    // page or its code would otherwise keep being used instead of the new one.)
+    const slow = new Promise(resolve => setTimeout(resolve, url.origin === self.location.origin ? 15000 : 4000, 'slow'));
     try{
       const first = await Promise.race([fromNetwork, slow]);
       if (first !== 'slow') return first;
