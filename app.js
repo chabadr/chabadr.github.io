@@ -1,7 +1,7 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-app.js";
 import {
   getFirestore, initializeFirestore, persistentLocalCache, persistentMultipleTabManager,
-  doc, getDoc, getDocFromServer, getDocs, collection, query, where, onSnapshot, runTransaction,
+  doc, getDoc, getDocs, collection, query, where, onSnapshot, runTransaction,
 } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
 import { firebaseConfig, isFirebaseConfigured } from "./firebase-config.js";
 import { mountPageNav } from "./page-nav.js";
@@ -5237,6 +5237,7 @@ const MASHOV_FIRST_DAY = '2026-11-24';
 const MASHOV_MIN_MARKED = 5;
 let mashovDoneMap = {};
 function mashovMissingDays(){
+  if (!mashovDoneMapKnown) return [];
   const today = activityDayStr();
   const seen = new Set();
   const out = [];
@@ -5343,6 +5344,27 @@ async function runMashovFill(data){
 // asks - also when the site is opened later in the day. When Mashov was
 // updated from another device, a question that is still open here closes.
 const MASHOV_ASK_HOUR = 10;
+let mashovStatusFails = 0;
+let mashovDoneMapKnown = false; // read from the server (else earlier days are not asked about)
+
+// meta/mashovStatus straight from the server (Firestore's REST API) - never an
+// old copy kept in the browser. null when there is no answer within 10 seconds.
+async function readMashovStatus(){
+  const url = 'https://firestore.googleapis.com/v1/projects/' + firebaseConfig.projectId
+    + '/databases/(default)/documents/' + FIRESTORE_COLLECTION + '/' + STORAGE_KEY + '/meta/mashovStatus';
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 10000);
+  try{
+    const res = await fetch(url, { signal: ctrl.signal, cache: 'no-store' });
+    if (res.status === 404) return { done: {} };
+    if (!res.ok) return null;
+    const f = (await res.json()).fields || {};
+    const done = {};
+    Object.keys(((f.done || {}).mapValue || {}).fields || {}).forEach(k => { done[k] = true; });
+    return { date: (f.date || {}).stringValue || '', done };
+  } catch(e){ return null; }
+  finally{ clearTimeout(timer); }
+}
 async function checkMashovQuestion(){
   if (!state || !firestoreDb || mashovFillRunning) return;
   // A question left open from an earlier day (the screen was on overnight) is
@@ -5358,16 +5380,18 @@ async function checkMashovQuestion(){
   // The update status is read at most once a minute (the question itself comes back sooner).
   if (mashovDoneDay !== today && Date.now() - mashovStatusCheckedAt >= 60000){
     mashovStatusCheckedAt = Date.now();
-    try{
-      // From the server itself - never an old copy kept in the browser (on a slow
-      // or broken connection that copy could miss days already updated). No answer
-      // from the server: no question this time.
-      const s = await getDocFromServer(doc(firestoreDb, FIRESTORE_COLLECTION, STORAGE_KEY, 'meta', 'mashovStatus'));
-      if (s.exists()){
-        if (s.data().date === today) mashovDoneDay = today;
-        mashovDoneMap = s.data().done || {};
-      }
-    } catch(e){ mashovStatusCheckedAt = 0; return; }
+    const st = await readMashovStatus();
+    if (st){
+      mashovStatusFails = 0;
+      mashovDoneMapKnown = true;
+      if (st.date === today) mashovDoneDay = today;
+      mashovDoneMap = st.done || {};
+    } else {
+      // No answer (a slow or broken connection): tried again in 10 seconds; after
+      // half a minute of no answers the question still comes - about today only.
+      mashovStatusCheckedAt = 0;
+      if (++mashovStatusFails < 3) return;
+    }
   }
   if (mashovDoneDay === today){
     // Updated from another device: the question closes (a result window stays until "אישור").
