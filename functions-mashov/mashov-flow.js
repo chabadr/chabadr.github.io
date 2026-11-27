@@ -98,8 +98,11 @@ async function reuseSession(page, step, pass){
 async function unlockIfLocked(page, pass){
   const title = page.getByText('נא להזדהות מחדש');
   if (!(await title.isVisible().catch(() => false))) return false;
-  await page.getByRole('textbox', { name: 'סיסמה (משו"ב)' }).fill(pass);
-  await page.getByRole('button', { name: 'כניסה', exact: true }).click();
+  // (The lock window's password box is a plain password field, without the
+  // name the login page's box has.)
+  const box = page.locator('input[type="password"]:visible').first();
+  await box.fill(pass, { timeout: 10000 });
+  await page.getByRole('button', { name: 'כניסה', exact: true }).locator('visible=true').first().click({ timeout: 10000 });
   await title.waitFor({ state: 'hidden', timeout: 30000 }).catch(() => {});
   return true;
 }
@@ -107,7 +110,7 @@ async function unlockIfLocked(page, pass){
 // The lock window may also come up in the middle of the work: opened whenever it gets in the way.
 async function handleLock(page, pass){
   const title = page.getByText('נא להזדהות מחדש');
-  try{ await page.addLocatorHandler(title, async () => { await unlockIfLocked(page, pass); }); } catch(e){}
+  try{ await page.addLocatorHandler(title, async () => { await unlockIfLocked(page, pass).catch(() => {}); }); } catch(e){}
 }
 
 // The sign-in to keep: cookies, localStorage (storageState) and sessionStorage.

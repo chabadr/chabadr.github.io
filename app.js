@@ -5156,6 +5156,9 @@ let mashovDoneDay = '';
 const MASHOV_REASK_MS = 30 * 1000;
 let mashovStatusCheckedAt = 0;
 let mashovWarmedAt = 0;
+// The warm-up call while it runs: the update waits for it (two sign-ins at the
+// same time make Mashov lock the other one).
+let mashovWarming = null;
 let mashovAskDay = ''; // the day the open question is about
 
 function studentHasNoMark(st){
@@ -5271,7 +5274,7 @@ function showMashovQuestion(){
   // is being answered - so the update after it is quick.
   if (Date.now() - mashovWarmedAt > 20 * 60000){
     mashovWarmedAt = Date.now();
-    callMashovFill({ warm: true }).catch(() => {});
+    mashovWarming = callMashovFill({ warm: true }).catch(() => {});
   }
   const unmarked = state.students.filter(studentHasNoMark);
   const missing = mashovMissingDays();
@@ -5319,6 +5322,10 @@ async function runMashovFill(data){
   const { overlay, box } = mashovOverlay();
   mashovMessage(box, 'מעדכן את משוב… (עד דקה)');
   let d = null, error = '';
+  if (mashovWarming){
+    await Promise.race([mashovWarming, new Promise(r => setTimeout(r, 90000))]);
+    mashovWarming = null;
+  }
   try{ d = await callMashovFill(data); }
   catch(e){ error = (e && e.message) || String(e); }
   mashovFillRunning = false;

@@ -215,14 +215,19 @@ exports.mashovFill = onCall({
   // update itself (after the answer) is quick. Nothing is marked.
   if (data.warm === true){
     let browser = null;
+    const warmRef = admin.firestore().collection('classroom_points').doc('classroom-points-v1').collection('meta').doc('mashovWarm');
     try{
+      await warmRef.set({ until: Date.now() + 90000 });
       browser = await launchBrowser();
       await signedInPage(browser, (x) => logger.info('mashov warm: ' + x), { allowLogin: true });
       return { ok: true, warm: true };
     } catch(e){
       logger.warn('mashov warm failed: ' + ((e && e.message) || e));
       return { ok: false, warm: true };
-    } finally{ if (browser) await browser.close().catch(() => {}); }
+    } finally{
+      if (browser) await browser.close().catch(() => {});
+      await warmRef.set({ until: 0 }).catch(() => {});
+    }
   }
   // "Mashov was already updated by hand today": only the status is kept.
   if (data.manualDone === true){
@@ -249,6 +254,14 @@ exports.mashovFill = onCall({
       const v = data.pastArrived[k];
       pastArrived[k] = Array.isArray(v) ? v.filter(n => Number.isInteger(n) && n > 0 && n < 100).slice(0, 60) : [];
     });
+  }
+  // A warm-up still signing in (from the question that just opened) is waited for:
+  // two sign-ins at the same time make Mashov lock one of them.
+  const warmRef = db.collection('classroom_points').doc('classroom-points-v1').collection('meta').doc('mashovWarm');
+  for (let i = 0; i < 25; i++){
+    const w = await warmRef.get();
+    if (!w.exists || !(w.data().until > Date.now())) break;
+    await new Promise(res => setTimeout(res, 3000));
   }
   const r = await runMashov(true, arrivedIds, pastArrived);
   return { ok: r.ok, saved: r.saved, date: r.date, message: r.message, report: r.report.filter(x => x.status !== 'בזמן'), days: r.days };
