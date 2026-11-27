@@ -29,9 +29,34 @@ async function launchBrowser(){
 
 // meta/mashovStatus (readable by the site): the day Mashov was last updated,
 // so the class computer knows not to ask again and the reminder e-mail is not sent.
-async function setMashovStatus(today, how){
+async function setMashovStatus(day, how, isToday){
+  const at = new Date().toISOString();
+  const data = { done: { [day.iso]: at } };
+  if (isToday) Object.assign(data, { date: day.iso, at, how });
   await admin.firestore().collection('classroom_points').doc('classroom-points-v1').collection('meta').doc('mashovStatus')
-    .set({ date: today.iso, at: new Date().toISOString(), how });
+    .set(data, { merge: true });
+}
+
+// School days (Sunday-Friday; no Saturday) of the last week, from the first day
+// of the automatic update on, on which the board was used but Mashov was not
+// updated (by this system). Keep in sync with mashovMissingDays in app.js.
+const MASHOV_FIRST_DAY = '2026-11-24';
+const MASHOV_MIN_MARKED = 5;
+function missingDays(dailyDays, done, todayIso){
+  const out = [];
+  const seen = new Set();
+  for (const e of (dailyDays || [])){
+    const iso = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Jerusalem', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(e.date));
+    if (seen.has(iso) || iso >= todayIso || iso < MASHOV_FIRST_DAY || (done || {})[iso]) continue;
+    const ageDays = (new Date(todayIso + 'T12:00:00Z') - new Date(iso + 'T12:00:00Z')) / 86400000;
+    if (ageDays > 7 || new Date(iso + 'T12:00:00Z').getUTCDay() === 6) continue;
+    // The board must really have been used that day (a few marks are not a school day's board).
+    const marked = (e.students || []).filter(st => Object.values(st.cats || {}).some(v => v) || (st.minusTotal || 0) !== 0 || (st.purchases || 0) > 0).length;
+    if (marked < MASHOV_MIN_MARKED) continue;
+    seen.add(iso);
+    out.push({ iso, students: e.students || [] });
+  }
+  return out.sort((a, b) => a.iso.localeCompare(b.iso));
 }
 
 // A page signed in to Mashov: with the sign-in kept from the last run when it
@@ -66,43 +91,77 @@ async function signedInPage(browser, step, { allowLogin, result }){
 // One run in Mashov. save=false: everything is filled and marked, but "שמירה"
 // is not pressed (a check). The result (what was marked for whom, pictures of
 // the screens) is written to meta/mashovRun.
-async function runMashov(save, arrivedIds){
+async function runMashov(save, arrivedIds, pastArrived){
   const db = admin.firestore();
   const mainRef = db.collection('classroom_points').doc('classroom-points-v1');
   const runRef = mainRef.collection('meta').doc('mashovRun');
   let current = 'התחלה', browser = null, page = null;
   const step = (x) => { current = x; logger.info('mashov: ' + x); };
   const today = flow.israelToday();
-  const result = { at: new Date().toISOString(), date: today.dmy, save, ok: false, saved: false, step: '', message: '', report: [], screens: [] };
+  const result = { at: new Date().toISOString(), date: today.dmy, save, ok: false, saved: false, step: '', message: '', report: [], days: [], screens: [] };
   const keep = async (name, full) => {
     if (!page) return;
     const scr = { name, url: page.url(), shot: '', aria: '' };
     try{ scr.shot = (await page.screenshot({ type: 'jpeg', quality: 45, fullPage: !!full })).toString('base64'); } catch(e){}
-    try{ scr.aria = (await page.locator('body').ariaSnapshot()).slice(0, 60000); } catch(e){}
-    result.screens.push(scr);
+    try{ scr.aria = (await page.locator('body').ariaSnapshot()).slice(0, 30000); } catch(e){}
+    if (result.screens.length < 6) result.screens.push(scr);
+  };
+  // One lesson: fill, mark and (save) save. Returns { saved, problems, report }.
+  const doLesson = async (statuses, label) => {
+    await flow.fillLesson(page, step);
+    const { report, problems } = await flow.markEvents(page, statuses, step);
+    if (!save || problems) await keep('אחרי הסימון ' + label, true);
+    if (save && !problems){
+      await flow.save(page, step);
+      await keep('אחרי השמירה ' + label, false);
+    }
+    return { saved: save && !problems, problems, report };
   };
   try{
     step('קריאת הלוח של הכיתה');
-    const mainSnap = await mainRef.get();
-    const statuses = flow.boardStatuses(mainSnap.data() || {}, today, arrivedIds);
+    const [mainSnap, dailySnap, statusSnap] = await Promise.all([
+      mainRef.get(), mainRef.collection('meta').doc('dailyArchive').get(), mainRef.collection('meta').doc('mashovStatus').get()
+    ]);
+    const main = mainSnap.data() || {};
+    const done = statusSnap.exists ? (statusSnap.data().done || {}) : {};
+    const missing = missingDays(dailySnap.exists ? dailySnap.data().days : [], done, today.iso);
+    // Today's board (a problem with it does not stop the earlier days).
+    let statuses = null;
+    try{ statuses = flow.boardStatuses(main, today, arrivedIds); }
+    catch(e){ if (!missing.length) throw e; result.message = String((e && e.message) || e); }
     browser = await launchBrowser();
     ({ page } = await signedInPage(browser, step, { allowLogin: true, result }));
-    await flow.openTodaysLesson(page, today, step);
-    await flow.fillLesson(page, step);
-    const { report, problems } = await flow.markEvents(page, statuses, step);
-    result.report = report;
-    // (A real update saves first - the picture is taken after, so it doesn't slow the saving.)
-    if (!save || problems) await keep('אחרי הסימון', true);
-    if (save && !problems){
-      await flow.save(page, step);
-      result.saved = true;
-      await setMashovStatus(today, 'auto');
-      await keep('אחרי השמירה', false);
+
+    // Today's lesson.
+    if (statuses){
+      await flow.openTodaysLesson(page, today, step);
+      const t = await doLesson(statuses, today.dmy);
+      result.report = t.report;
+      result.saved = t.saved;
+      if (t.saved) await setMashovStatus(today, 'auto', true);
+      result.ok = true;
+      result.message = save ? (t.problems ? 'לא נשמר: יש תלמידים שלא נמצאו במשוב.' : 'נשמר במשוב.') : 'בדיקה: הכל סומן, לא נלחץ "שמירה".';
     }
-    result.ok = true;
-    result.message = save
-      ? (problems ? 'לא נשמר: יש תלמידים שלא נמצאו במשוב.' : 'נשמר במשוב.')
-      : 'בדיקה: הכל סומן, לא נלחץ "שמירה".';
+
+    // Earlier days of the week that were not updated (each on its own: a problem
+    // in one does not stop the others).
+    for (const m of missing){
+      const day = flow.dayOf(m.iso);
+      const entry = { date: day.dmy, saved: false, message: '', report: [] };
+      result.days.push(entry);
+      try{
+        const st = flow.statusesOf(m.students, main.metivtaNames || {}, (pastArrived || {})[m.iso], 'ביום ' + day.dmy);
+        await flow.openLessonOnDate(page, day, step);
+        const r = await doLesson(st, day.dmy);
+        entry.report = r.report.filter(x => x.status !== 'בזמן');
+        entry.saved = r.saved;
+        entry.message = save ? (r.problems ? 'לא נשמר: יש תלמידים שלא נמצאו במשוב.' : 'נשמר במשוב.') : 'בדיקה: סומן, לא נשמר.';
+        if (r.saved) await setMashovStatus(day, 'auto-late', false);
+      } catch(e){
+        entry.message = String((e && e.message) || e).slice(0, 500);
+        await keep('בשגיאה ' + day.dmy, false);
+      }
+    }
   } catch(e){
     result.message = String((e && e.message) || e).slice(0, 1500);
     await keep('בשגיאה', false);
@@ -111,7 +170,7 @@ async function runMashov(save, arrivedIds){
   if (browser) await browser.close().catch(() => {});
   if (JSON.stringify(result).length > 900000) result.screens.forEach(x => { x.shot = ''; });
   await runRef.set(result);
-  logger.info('mashov result: ' + JSON.stringify({ ok: result.ok, saved: result.saved, step: result.step, message: result.message, report: result.report }));
+  logger.info('mashov result: ' + JSON.stringify({ ok: result.ok, saved: result.saved, step: result.step, message: result.message, report: result.report, days: result.days }));
   return result;
 }
 
@@ -127,7 +186,7 @@ exports.mashovFillTest = onSchedule({
   maxInstances: 3,
   concurrency: 1,
   secrets: [MASHOV_USER, MASHOV_PASS]
-}, async () => { await runMashov(false); });
+}, async () => { await runMashov(false, [], {}); });
 
 // The "מילוי נוכחות במשוב" button of the class board: fills and saves today's
 // prayer attendance. Not more than once in 3 minutes (a second press while a
@@ -158,7 +217,7 @@ exports.mashovFill = onCall({
   }
   // "Mashov was already updated by hand today": only the status is kept.
   if (data.manualDone === true){
-    await setMashovStatus(flow.israelToday(), 'manual');
+    await setMashovStatus(flow.israelToday(), 'manual', true);
     return { ok: true, saved: false, message: 'נרשם שמשוב עודכן ידנית היום.' , report: [] };
   }
   // From the question: the students with no mark today who came (arrivedIds -
@@ -174,6 +233,14 @@ exports.mashovFill = onCall({
     return true;
   });
   if (!free) throw new HttpsError('resource-exhausted', 'כבר רץ מילוי, או שהסתיים לפני פחות מ-3 דקות. אפשר לנסות שוב עוד מעט.');
-  const r = await runMashov(true, arrivedIds);
-  return { ok: r.ok, saved: r.saved, date: r.date, message: r.message, report: r.report.filter(x => x.status !== 'בזמן') };
+  // The answers about earlier days that were not updated: { 'yyyy-mm-dd': [ids that came] }.
+  const pastArrived = {};
+  if (data.pastArrived && typeof data.pastArrived === 'object'){
+    Object.keys(data.pastArrived).filter(k => /^\d{4}-\d{2}-\d{2}$/.test(k)).slice(0, 7).forEach(k => {
+      const v = data.pastArrived[k];
+      pastArrived[k] = Array.isArray(v) ? v.filter(n => Number.isInteger(n) && n > 0 && n < 100).slice(0, 60) : [];
+    });
+  }
+  const r = await runMashov(true, arrivedIds, pastArrived);
+  return { ok: r.ok, saved: r.saved, date: r.date, message: r.message, report: r.report.filter(x => x.status !== 'בזמן'), days: r.days };
 });

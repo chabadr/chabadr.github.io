@@ -31,12 +31,16 @@ function israelToday(d = new Date()){
 // arrivedIds: students with no mark on the board that the class computer's
 // question at 10:00 said did come (so: איחור בוקר and not חיסור).
 function boardStatuses(main, today, arrivedIds){
-  const arrived = new Set((arrivedIds || []).map(Number));
   if (main.lastActivityDate !== today.iso) throw new Error('הלוח של הכיתה עוד לא מולא היום (' + today.dmy + ') - לא סומן כלום.');
-  const names = main.metivtaNames || {};
+  return statusesOf(main.students || [], main.metivtaNames || {}, arrivedIds, 'היום');
+}
+
+// The statuses of one day's students (today's live board, or an archived day).
+function statusesOf(students, names, arrivedIds, dayLabel){
+  const arrived = new Set((arrivedIds || []).map(Number));
   const out = [];
   let present = 0;
-  for (const st of (main.students || [])){
+  for (const st of students){
     const c = st.cats || {};
     const onTime = (c.c1 || 0) > 0 || (c.c7 || 0) > 0;
     const otherMark = Object.keys(c).some(k => k !== 'c1' && k !== 'c7' && (c[k] || 0) !== 0)
@@ -47,8 +51,14 @@ function boardStatuses(main, today, arrivedIds){
     const n = names[st.id];
     out.push({ id: st.id, family: NAME_IN_MASHOV[st.id] || (n && typeof n === 'object' ? n.family : '') || '', status });
   }
-  if (!present) throw new Error('אף תלמיד לא מסומן בלוח היום - כנראה הלוח עוד לא מולא. לא סומן כלום.');
+  if (!present) throw new Error('אף תלמיד לא מסומן בלוח ' + dayLabel + ' - לא סומן כלום.');
   return out;
+}
+
+// dd/mm/yyyy and yyyy-mm-dd of an Israel day key (yyyy-mm-dd).
+function dayOf(iso){
+  const [y, m, d] = iso.split('-');
+  return { iso, dmy: d + '/' + m + '/' + y };
 }
 
 // The cookies window of a new browser ("only the needed cookies"): clicked
@@ -144,6 +154,50 @@ async function openTodaysLesson(page, today, step){
   if (!text.includes(today.dmy) || !text.includes(SETTINGS.lessonGroup)){
     throw new Error('השיעור שנפתח אינו שיעור התפילה של היום (' + today.dmy + ') - לא סומן כלום.');
   }
+}
+
+// The תפילה lesson of an earlier day: "הזנת נתוני שיעור" shows the week's
+// timetable (a column for each date); the lesson is the תפילה (2278) cell in
+// that date's column. An earlier week is reached with "שבוע קודם".
+async function openLessonOnDate(page, day, step){
+  step('פתיחת שיעור התפילה של ' + day.dmy);
+  await page.goto('https://web.mashov.info/teachers/main/dashboard', { waitUntil: 'domcontentloaded' });
+  await page.getByRole('button', { name: 'הזנת נתוני שיעור' }).click();
+  let header = null;
+  for (let week = 0; week < 3 && !header; week++){
+    const h = page.getByText(day.dmy, { exact: true }).first();
+    try{ await h.waitFor({ timeout: 12000 }); header = h; }
+    catch(e){
+      const prev = page.getByRole('button', { name: /שבוע קודם/ });
+      if (!(await prev.count())) break;
+      await prev.first().click();
+    }
+  }
+  if (!header) throw new Error('התאריך ' + day.dmy + ' לא נמצא במערכת השעות של משוב.');
+  const hb = await header.boundingBox();
+  const hx = hb.x + hb.width / 2;
+  for (let attempt = 0; attempt < 15; attempt++){
+    for (const [text, other] of [[SETTINGS.lessonGroup, 'תפילה'], ['תפילה', SETTINGS.lessonGroup]]){
+      const cands = page.getByText(text);
+      const n = await cands.count();
+      for (let i = 0; i < n; i++){
+        const c = cands.nth(i);
+        const b = await c.boundingBox();
+        if (!b || Math.abs(b.x + b.width / 2 - hx) > Math.max(hb.width, b.width) / 2 + 20) continue;
+        const cell = c.locator('xpath=ancestor-or-self::*[contains(normalize-space(.), "' + other + '")][1]');
+        if (!(await cell.count())) continue;
+        await c.click();
+        const panel = page.getByRole('tabpanel', { name: 'נתוני שיעור' });
+        try{ await panel.waitFor({ timeout: 45000 }); }
+        catch(e){ throw new Error('דף השיעור של ' + day.dmy + ' לא נפתח במשוב.'); }
+        const text2 = norm(await panel.innerText());
+        if (!text2.includes(day.dmy) || !text2.includes(SETTINGS.lessonGroup)) throw new Error('השיעור שנפתח אינו שיעור התפילה של ' + day.dmy + '.');
+        return;
+      }
+    }
+    await page.waitForTimeout(1000);
+  }
+  throw new Error('שיעור התפילה (' + SETTINGS.lessonGroup + ') לא נמצא במערכת השעות ביום ' + day.dmy + '.');
 }
 
 async function fillLesson(page, step){
@@ -263,4 +317,4 @@ async function save(page, step){
   await page.waitForTimeout(1000);
 }
 
-module.exports = { SETTINGS, handleCookies, israelToday, boardStatuses, reuseSession, captureSession, sessionInitScript, login, openTodaysLesson, fillLesson, markEvents, save };
+module.exports = { SETTINGS, handleCookies, israelToday, boardStatuses, statusesOf, dayOf, openLessonOnDate, reuseSession, captureSession, sessionInitScript, login, openTodaysLesson, fillLesson, markEvents, save };

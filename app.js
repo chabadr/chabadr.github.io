@@ -5197,6 +5197,64 @@ function mashovMessage(box, text){
   return msg;
 }
 
+// A table of the students with no mark on a day: name and "לא הגיעו" (a box
+// to tick for whoever did not come - absent; the others came - late).
+// Returns the boxes.
+function mashovAskTable(box, students){
+  const boxes = [];
+  const wrap = document.createElement('div');
+  wrap.className = 'mashov-ask-list';
+  const table = document.createElement('table');
+  table.className = 'mashov-ask-table';
+  const head = document.createElement('tr');
+  ['שם', 'לא הגיעו'].forEach(t => { const th = document.createElement('th'); th.textContent = t; head.appendChild(th); });
+  table.appendChild(head);
+  students.forEach(st => {
+    const tr = document.createElement('tr');
+    const nameTd = document.createElement('td');
+    nameTd.textContent = metivtaFullName(st.id, false);
+    const boxTd = document.createElement('td');
+    const cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.dataset.id = String(st.id);
+    boxes.push(cb);
+    boxTd.appendChild(cb);
+    tr.appendChild(nameTd);
+    tr.appendChild(boxTd);
+    // A press anywhere on the row ticks the box.
+    tr.addEventListener('click', (e) => { if (e.target !== cb) cb.checked = !cb.checked; });
+    table.appendChild(tr);
+  });
+  wrap.appendChild(table);
+  box.appendChild(wrap);
+  return boxes;
+}
+
+// School days (Sunday-Friday) of the last week, from the first day of the
+// automatic update on, on which the board was used but Mashov was not updated
+// (meta/mashovStatus.done). Keep in sync with missingDays in functions-mashov/index.js.
+const MASHOV_FIRST_DAY = '2026-11-24';
+const MASHOV_MIN_MARKED = 5;
+let mashovDoneMap = {};
+function mashovMissingDays(){
+  const today = activityDayStr();
+  const seen = new Set();
+  const out = [];
+  (state.archive || []).forEach(e => {
+    if (e.type === 'weekly' || !e.date || !Array.isArray(e.students)) return;
+    const iso = dayKeyOf(e.date);
+    if (seen.has(iso) || iso >= today || iso < MASHOV_FIRST_DAY || mashovDoneMap[iso]) return;
+    const d = new Date(iso + 'T12:00:00');
+    if ((new Date(today + 'T12:00:00') - d) / 86400000 > 7 || d.getDay() === 6) return;
+    // The board must really have been used that day (a few marks are not a school day's board).
+    const marked = e.students.filter(st => Object.values(st.cats || {}).some(v => v) || (st.minusTotal || 0) !== 0 || (st.purchases || 0) > 0).length;
+    if (marked < MASHOV_MIN_MARKED) return;
+    seen.add(iso);
+    out.push({ iso, date: d, students: e.students });
+  });
+  return out.sort((x, y) => x.iso.localeCompare(y.iso));
+}
+
 async function callMashovFill(data){
   const { getFunctions, httpsCallable } = await import("https://www.gstatic.com/firebasejs/10.13.0/firebase-functions.js");
   const res = await httpsCallable(getFunctions(firebaseApp, 'me-west1'), 'mashovFill', { timeout: 300000 })(data);
@@ -5215,50 +5273,40 @@ function showMashovQuestion(){
     callMashovFill({ warm: true }).catch(() => {});
   }
   const unmarked = state.students.filter(studentHasNoMark);
+  const missing = mashovMissingDays();
   const { overlay, box } = mashovOverlay();
   overlay.classList.add('mashov-question');
   const close = () => { overlay.remove(); mashovAskOpen = false; };
   mashovMessage(box, 'עדכון משוב - נוכחות יומית');
-  const boxes = [];
+  let boxes = [];
   if (unmarked.length){
-    // The students with no mark today: a table of name and "לא הגיעו" (a box to
-    // tick for whoever did not come - they are marked absent; the others came, late).
     mashovMessage(box, 'סמן האם התלמידים הבאים לא הגיעו?');
-    const wrap = document.createElement('div');
-    wrap.className = 'mashov-ask-list';
-    const table = document.createElement('table');
-    table.className = 'mashov-ask-table';
-    const head = document.createElement('tr');
-    ['שם', 'לא הגיעו'].forEach(t => { const th = document.createElement('th'); th.textContent = t; head.appendChild(th); });
-    table.appendChild(head);
-    unmarked.forEach(st => {
-      const tr = document.createElement('tr');
-      const nameTd = document.createElement('td');
-      nameTd.textContent = metivtaFullName(st.id, false);
-      const boxTd = document.createElement('td');
-      const cb = document.createElement('input');
-      cb.type = 'checkbox';
-      cb.dataset.id = String(st.id);
-      boxes.push(cb);
-      boxTd.appendChild(cb);
-      tr.appendChild(nameTd);
-      tr.appendChild(boxTd);
-      // A press anywhere on the row ticks the box.
-      tr.addEventListener('click', (e) => { if (e.target !== cb) cb.checked = !cb.checked; });
-      table.appendChild(tr);
-    });
-    wrap.appendChild(table);
-    box.appendChild(wrap);
+    boxes = mashovAskTable(box, unmarked);
   } else {
     mashovMessage(box, 'כל התלמידים מסומנים היום בלוח.');
   }
+  // Earlier days of the week on which Mashov was not updated: updated now too.
+  const pastBoxes = {};
+  missing.forEach(m => {
+    const label = 'יום ' + HEBREW_WEEKDAY_NAMES[m.date.getDay()] + ' ' + m.date.getDate() + '/' + (m.date.getMonth() + 1);
+    const noMark = m.students.filter(studentHasNoMark);
+    if (noMark.length){
+      mashovMessage(box, 'גם ' + label + ' לא עודכן במשוב. סמן האם התלמידים הבאים לא הגיעו באותו יום?');
+      pastBoxes[m.iso] = mashovAskTable(box, noMark);
+    } else {
+      mashovMessage(box, 'גם ' + label + ' לא עודכן במשוב (כל התלמידים מסומנים בלוח של אותו יום) - יעודכן עכשיו.');
+      pastBoxes[m.iso] = [];
+    }
+  });
   mashovButtons(box, [
     ['עדכון משוב', 'modal-btn-confirm', () => {
       // Ticked = did not come (absent); not ticked = came (late).
       const absentIds = boxes.filter(cb => cb.checked).map(cb => parseInt(cb.dataset.id, 10));
       const arrivedIds = boxes.filter(cb => !cb.checked).map(cb => parseInt(cb.dataset.id, 10));
+      const pastArrived = {};
+      Object.keys(pastBoxes).forEach(iso => { pastArrived[iso] = pastBoxes[iso].filter(cb => !cb.checked).map(cb => parseInt(cb.dataset.id, 10)); });
       close();
-      runMashovFill({ arrivedIds, absentIds });
+      runMashovFill({ arrivedIds, absentIds, pastArrived });
     }],
     ['אחר כך', 'modal-btn-cancel', () => { mashovSnoozeUntil = Date.now() + MASHOV_REASK_MS; close(); }]
   ]);
@@ -5274,9 +5322,11 @@ async function runMashovFill(data){
   catch(e){ error = (e && e.message) || String(e); }
   mashovFillRunning = false;
   box.innerHTML = '';
+  const pastLines = d && Array.isArray(d.days) ? d.days.map(x => x.date + ': ' + (x.saved ? 'עודכן' : 'לא עודכן - ' + x.message)) : [];
   if (d && d.saved){
     mashovDoneDay = activityDayStr();
-    mashovMessage(box, 'משוב עודכן');
+    (d.days || []).forEach(x => { if (x.saved){ const [dd, mm, yy] = x.date.split('/'); mashovDoneMap[yy + '-' + mm + '-' + dd] = true; } });
+    mashovMessage(box, 'משוב עודכן' + (pastLines.length ? '\n\nימים קודמים:\n' + pastLines.join('\n') : ''));
     mashovButtons(box, [['אישור', 'modal-btn-confirm', () => { overlay.remove(); mashovAskOpen = false; }]]);
   } else {
     const lines = d ? (d.report || []).filter(r => r.action && r.action !== 'סומן').map(r => r.name + ' - ' + r.action) : [];
@@ -5310,7 +5360,10 @@ async function checkMashovQuestion(){
     mashovStatusCheckedAt = Date.now();
     try{
       const s = await getDoc(doc(firestoreDb, FIRESTORE_COLLECTION, STORAGE_KEY, 'meta', 'mashovStatus'));
-      if (s.exists() && s.data().date === today) mashovDoneDay = today;
+      if (s.exists()){
+        if (s.data().date === today) mashovDoneDay = today;
+        mashovDoneMap = s.data().done || {};
+      }
     } catch(e){ return; }
   }
   if (mashovDoneDay === today){
