@@ -5156,8 +5156,7 @@ let mashovDoneDay = '';
 const MASHOV_REASK_MS = 30 * 1000;
 let mashovStatusCheckedAt = 0;
 let mashovWarmedAt = 0;
-// The warm-up call while it runs: the update waits for it (two sign-ins at the
-// same time make Mashov lock the other one).
+// The warm-up call while it runs (the update waits a little for it).
 let mashovWarming = null;
 let mashovAskDay = ''; // the day the open question is about
 
@@ -5322,8 +5321,9 @@ async function runMashovFill(data){
   const { overlay, box } = mashovOverlay();
   mashovMessage(box, 'מעדכן את משוב… (עד דקה)');
   let d = null, error = '';
+  // (A warm-up still going is waited for a little - so the update gets the warm server.)
   if (mashovWarming){
-    await Promise.race([mashovWarming, new Promise(r => setTimeout(r, 90000))]);
+    await Promise.race([mashovWarming, new Promise(r => setTimeout(r, 15000))]);
     mashovWarming = null;
   }
   try{ d = await callMashovFill(data); }
