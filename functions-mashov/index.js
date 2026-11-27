@@ -169,7 +169,13 @@ async function runMashov(save, arrivedIds, pastArrived){
   result.step = current;
   if (browser) await browser.close().catch(() => {});
   if (JSON.stringify(result).length > 900000) result.screens.forEach(x => { x.shot = ''; });
-  await runRef.set(result);
+  // Kept on the server: for a real update only whether it worked (and the
+  // reason when it did not) - not what was marked for whom. A check run (no
+  // saving) or a failed update keeps the details and pictures, to find a problem.
+  const failed = !result.ok || result.days.some(d => !d.saved);
+  await runRef.set(save && !failed
+    ? { at: result.at, date: result.date, save, ok: result.ok, saved: result.saved, message: result.message, days: result.days.map(d => ({ date: d.date, saved: d.saved, message: d.message })) }
+    : result);
   logger.info('mashov result: ' + JSON.stringify({ ok: result.ok, saved: result.saved, step: result.step, message: result.message, report: result.report, days: result.days }));
   return result;
 }
